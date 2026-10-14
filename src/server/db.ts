@@ -1,18 +1,12 @@
 import { Pool, type PoolClient } from "pg";
 import type { Env } from "./env.ts";
 
-let sharedPool: Pool | undefined;
-let sharedConnectionString = "";
-
 export function database(env: Env): Pool {
   const connectionString = env.HYPERDRIVE?.connectionString
     ?? (env.APP_ENV === "development" ? env.LOCAL_DATABASE_URL : undefined);
   if (!connectionString) throw new Error("DATABASE_BINDING_UNAVAILABLE");
-  if (!sharedPool || sharedConnectionString !== connectionString) {
-    sharedPool = new Pool({ connectionString, max: 1, idleTimeoutMillis: 5_000 });
-    sharedConnectionString = connectionString;
-  }
-  return sharedPool;
+  // Pools and their pending connections must not cross Worker request contexts.
+  return new Pool({ connectionString, max: 1, maxUses: 1, idleTimeoutMillis: 5_000 });
 }
 
 export async function transaction<T>(pool: Pool, fn: (client: PoolClient) => Promise<T>): Promise<T> {

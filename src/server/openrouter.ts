@@ -107,7 +107,6 @@ export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StageP
       provider: { only: ["openai"], order: ["openai"], allow_fallbacks: false, require_parameters: true },
       max_tokens: 16_384,
       reasoning: { effort: "none" },
-      temperature: 0,
       response_format: responseSchema(stage),
       tools: [],
       tool_choice: "none",
