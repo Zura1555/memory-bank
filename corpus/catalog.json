@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "corpusVersion": "fictional-onboarding-v1",
+  "cases": [
+    {
+      "caseId": "cedar-batch-import",
+      "title": "Cedar Supply sandbox import",
+      "fictional": true,
+      "artifacts": [
+        { "artifactId": "request", "title": "Request and acceptance", "fictional": true, "versions": [{ "versionId": "request-2025-02-03", "sourcePath": "corpus/originals/cedar-batch-import/request.md", "mimeType": "text/markdown", "statedDate": "2025-02-03" }] },
+        { "artifactId": "delivery-log", "title": "Import work log", "fictional": true, "versions": [{ "versionId": "notes-2025-02-13", "sourcePath": "corpus/originals/cedar-batch-import/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-02-13" }] },
+        { "artifactId": "mapping", "title": "Field map and reconciliation steps", "fictional": true, "versions": [{ "versionId": "map-2025-02-11", "sourcePath": "corpus/originals/cedar-batch-import/mapping.md", "mimeType": "text/markdown", "statedDate": "2025-02-11" }] }
+      ]
+    },
+    {
+      "caseId": "ash-volume-import",
+      "title": "Ash Goods high-volume import attempt",
+      "fictional": true,
+      "artifacts": [
+        { "artifactId": "request", "title": "Migration request", "fictional": true, "versions": [{ "versionId": "request-2025-03-04", "sourcePath": "corpus/originals/ash-volume-import/request.md", "mimeType": "text/markdown", "statedDate": "2025-03-04" }] },
+        { "artifactId": "delivery-log", "title": "Import attempts and status", "fictional": true, "versions": [{ "versionId": "notes-2025-03-18", "sourcePath": "corpus/originals/ash-volume-import/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-03-18" }] },
+        { "artifactId": "reconciliation-draft", "title": "Incomplete import control sheet", "fictional": true, "versions": [{ "versionId": "draft-2025-03-14", "sourcePath": "corpus/originals/ash-volume-import/reconciliation-draft.md", "mimeType": "text/markdown", "statedDate": "2025-03-14" }] }
+      ]
+    },
+    {
+      "caseId": "elm-bulk-integration",
+      "title": "Elm Rentals batch connector",
+      "fictional": true,
+      "artifacts": [
+        { "artifactId": "request", "title": "Billing integration request", "fictional": true, "versions": [{ "versionId": "request-2025-04-02", "sourcePath": "corpus/originals/elm-bulk-integration/request.md", "mimeType": "text/markdown", "statedDate": "2025-04-02" }] },
+        { "artifactId": "delivery-log", "title": "Connector notes and sandbox outcome", "fictional": true, "versions": [{ "versionId": "notes-2025-04-17", "sourcePath": "corpus/originals/elm-bulk-integration/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-04-17" }] },
+        { "artifactId": "batch-adapter-notes", "title": "Sandbox batch adapter notes", "fictional": true, "versions": [{ "versionId": "adapter-2025-04-11", "sourcePath": "corpus/originals/elm-bulk-integration/batch-adapter-notes.md", "mimeType": "text/markdown", "statedDate": "2025-04-11" }] }
+      ]
+    },
+    {
+      "caseId": "finch-legacy-api",
+      "title": "Finch Travel legacy connector and version limits",
+      "fictional": true,
+      "artifacts": [
+        { "artifactId": "request", "title": "Reservation sync request", "fictional": true, "versions": [{ "versionId": "request-2024-11-06", "sourcePath": "corpus/originals/finch-legacy-api/request.md", "mimeType": "text/markdown", "statedDate": "2024-11-06" }] },
+        { "artifactId": "delivery-log", "title": "Connector history and correction", "fictional": true, "versions": [{ "versionId": "notes-2025-05-06", "sourcePath": "corpus/originals/finch-legacy-api/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-05-06" }] },
+        { "artifactId": "capability-sheet", "title": "TripPine capability comparison", "fictional": true, "versions": [{ "versionId": "capabilities-2025-05-02", "sourcePath": "corpus/originals/finch-legacy-api/capability-sheet.md", "mimeType": "text/markdown", "statedDate": "2025-05-02" }] }
+      ]
+    },
+    {
+      "caseId": "grove-scoped-access",
+      "title": "Grove Clinic scoped test access",
+      "fictional": true,
+      "artifacts": [
+        { "artifactId": "request", "title": "Support access request", "fictional": true, "versions": [{ "versionId": "request-2025-01-14", "sourcePath": "corpus/originals/grove-scoped-access/request.md", "mimeType": "text/markdown", "statedDate": "2025-01-14" }] },
+        { "artifactId": "delivery-log", "title": "Access setup notes and correction", "fictional": true, "versions": [{ "versionId": "notes-2025-01-22", "sourcePath": "corpus/originals/grove-scoped-access/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-01-22" }] },
+        { "artifactId": "access-checklist", "title": "Test-workspace access checklist", "fictional": true, "versions": [{ "versionId": "checklist-2025-01-21", "sourcePath": "corpus/originals/grove-scoped-access/access-checklist.md", "mimeType": "text/markdown", "statedDate": "2025-01-21" }] }
+      ]
+    },
+    {
+      "caseId": "harbor-offline-access",
+      "title": "Harbor Research air-gapped access inquiry",
+      "fictional": true,
+      "artifacts": [
+        { "artifactId": "request", "title": "Air-gapped operator access request", "fictional": true, "versions": [{ "versionId": "request-2025-06-09", "sourcePath": "corpus/originals/harbor-offline-access/request.md", "mimeType": "text/markdown", "statedDate": "2025-06-09" }] },
+        { "artifactId": "delivery-log", "title": "Provisioning investigation", "fictional": true, "versions": [{ "versionId": "notes-2025-06-16", "sourcePath": "corpus/originals/harbor-offline-access/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-06-16" }] },
+        { "artifactId": "scope-inventory", "title": "Identity evidence inventory", "fictional": true, "versions": [{ "versionId": "inventory-2025-06-16", "sourcePath": "corpus/originals/harbor-offline-access/scope-inventory.md", "mimeType": "text/markdown", "statedDate": "2025-06-16" }] }
+      ]
+    },
+    {
+      "caseId": "ibis-verified-handover",
+      "title": "Ibis Foods tested handover",
+      "fictional": true,
+      "artifacts": [
+        { "artifactId": "request", "title": "Operations handover request", "fictional": true, "versions": [{ "versionId": "request-2025-05-05", "sourcePath": "corpus/originals/ibis-verified-handover/request.md", "mimeType": "text/markdown", "statedDate": "2025-05-05" }] },
+        { "artifactId": "delivery-log", "title": "Handover and exercise record", "fictional": true, "versions": [{ "versionId": "notes-2025-05-23", "sourcePath": "corpus/originals/ibis-verified-handover/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-05-23" }] },
+        { "artifactId": "operator-runbook", "title": "Test import recovery runbook", "fictional": true, "versions": [{ "versionId": "runbook-2025-05-21", "sourcePath": "corpus/originals/ibis-verified-handover/operator-runbook.md", "mimeType": "text/markdown", "statedDate": "2025-05-21" }] }
+      ]
+    },
+    {
+      "caseId": "kestrel-pending-handover",
+      "title": "Kestrel Parts unresolved handover",
+      "fictional": true,
+      "artifacts": [
+        { "artifactId": "request", "title": "Warehouse handover request", "fictional": true, "versions": [{ "versionId": "request-2025-06-02", "sourcePath": "corpus/originals/kestrel-pending-handover/request.md", "mimeType": "text/markdown", "statedDate": "2025-06-02" }] },
+        { "artifactId": "delivery-log", "title": "Handover status notes", "fictional": true, "versions": [{ "versionId": "notes-2025-06-11", "sourcePath": "corpus/originals/kestrel-pending-handover/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-06-11" }] },
+        { "artifactId": "operations-draft", "title": "Unverified operations draft", "fictional": true, "versions": [{ "versionId": "draft-2025-06-05", "sourcePath": "corpus/originals/kestrel-pending-handover/operations-draft.md", "mimeType": "text/markdown", "statedDate": "2025-06-05" }] }
+      ]
+    }
+  ]
+}

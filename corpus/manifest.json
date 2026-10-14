@@ -1,0 +1,2198 @@
+{
+  "schemaVersion": 1,
+  "corpusVersion": "fictional-onboarding-v1",
+  "cases": [
+    {
+      "caseId": "cedar-batch-import",
+      "title": "Cedar Supply sandbox import",
+      "fictional": true,
+      "artifacts": [
+        {
+          "artifactId": "request",
+          "title": "Request and acceptance",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "request-2025-02-03",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/cedar-batch-import/request.md",
+              "mimeType": "text/markdown",
+              "sha256": "583d72848dd4ddae1fd6439f478d68c5f67099d76e5fc07d0715fe0e3e7303c9",
+              "statedDate": "2025-02-03",
+              "importedAt": "2026-10-14T14:53:22.987042+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-37c30aed9f3795deb9b8de456e0ffc9d",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic client-onboarding record. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-de85683b6c3d32305c17e5e7a423d270",
+                  "excerpt": "# Cedar Supply: request and acceptance",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-4c7d46a547ed550052be990961a65b57",
+                  "excerpt": "Date stated: 2025-02-03",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-251c7620dcf44e5d791611a769792a3e",
+                  "excerpt": "Cedar Supply asked the fictional Juniper Delivery team to import 1,200 supplier records from a UTF-8 CSV export into a sandboxed LedgerLeaf workspace. The source export has 1,236 rows including a header and 36 rows marked inactive; the client wants active suppliers only. Each active row has a source key, legal name, contact email, and payment term code. The target has corresponding fields plus an internal target ID.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-6126bce922e619cb5dcf87ad78a8052b",
+                  "excerpt": "Acceptance note (2025-02-05): load active records, retain the source key for reconciliation, and provide counts for accepted, rejected, and duplicate rows. Client will review the rejection list. No production credentials or production writes are authorized.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-7e3d187d294500a576ab2e7b34ce0264",
+                  "excerpt": "The client says emails are unique “as far as we know”; no independent uniqueness audit was requested. Historical outcome for production is not applicable: this request was sandbox-only.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "delivery-log",
+          "title": "Import work log",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "notes-2025-02-13",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/cedar-batch-import/delivery-log.md",
+              "mimeType": "text/markdown",
+              "sha256": "da17d7715f7a28de67bbd88090466724b54fd207a11ad179a36e58d925f1925e",
+              "statedDate": "2025-02-13",
+              "importedAt": "2026-10-14T14:53:22.987421+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-ce003c679f62e812f677b5e9eb7268d6",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic delivery notes. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-558dbe1c089c39d42ba5db04980d5762",
+                  "excerpt": "# Cedar Supply import work log",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-0f480accdd89c5fc3d6e28662896f2de",
+                  "excerpt": "Date stated: 2025-02-10 to 2025-02-13",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-45e4688dff2512f1ba032b2c2282e23e",
+                  "excerpt": "2025-02-10 — Attempt 1 used the client’s initial CSV export without filtering. Preview showed 1,200 active and 36 inactive rows. We stopped before loading because the acceptance note excludes inactive suppliers.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-1d2e188add7bb589622e210be4cf695a",
+                  "excerpt": "2025-02-11 — Decision: import only rows with status `active`; preserve `source_key` unchanged in the target reconciliation field. Normalize surrounding whitespace in legal name and email; do not lowercase or otherwise rewrite email values. Two active rows shared the same email but had different source keys. We did not deduplicate automatically. Client reviewed and accepted both as separate suppliers for this sandbox run.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-ee52a21399338dc48243d85261e92275",
+                  "excerpt": "2025-02-12 — Attempt 2 loaded 1,198 rows. Two rows were rejected for missing legal name. A retry of those two after client correction was not performed before the sandbox window closed.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                },
+                {
+                  "passageId": "p-a2624f95c0197ecd0da8b74a5803bef6",
+                  "excerpt": "2025-02-13 — Recorded outcome: 1,198 accepted, 2 rejected; duplicate email values were retained as separate records by source key. Client acknowledged the counts. This is evidence for this 1,200-active-row sandbox batch only, not production, other target versions, or a guarantee. No production run or post-window retry is recorded.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 13,
+                    "endLine": 13
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "mapping",
+          "title": "Field map and reconciliation steps",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "map-2025-02-11",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/cedar-batch-import/mapping.md",
+              "mimeType": "text/markdown",
+              "sha256": "7dd4e8ae29cdd878b579364f03207430cfd0e904b7e75eeb01e4f9bfaf09644a",
+              "statedDate": "2025-02-11",
+              "importedAt": "2026-10-14T14:53:22.987697+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-d29265a234956bccd85dbcf1754fd3ec",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic work product. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-447f0263cb31ac4d52980e5347c05ab6",
+                  "excerpt": "# Cedar sandbox field map and reconciliation steps",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-9122fd740298a75d60559e9e7f8a4e0d",
+                  "excerpt": "Version stated: 2025-02-11",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-7a3c8160d42c25b500fef6a771d17e81",
+                  "excerpt": "| CSV field | Sandbox field | Rule / check |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-0d88a8200eac6f06d84a1bc345ecf31d",
+                  "excerpt": "| --- | --- | --- |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 8,
+                    "endLine": 8
+                  }
+                },
+                {
+                  "passageId": "p-3ea71e1ac22714630e66f900bd99ce17",
+                  "excerpt": "| source_key | external_reference | Preserve exact value; must be present; compare this value during reconciliation. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-5a59afd7d10f95de50ace5af37afb719",
+                  "excerpt": "| legal_name | supplier_name | Trim surrounding whitespace. Reject blank after trimming. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 10,
+                    "endLine": 10
+                  }
+                },
+                {
+                  "passageId": "p-1d2a9449d74ddc57918aa63a97c504f8",
+                  "excerpt": "| contact_email | email | Trim surrounding whitespace; do not infer uniqueness or change case. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                },
+                {
+                  "passageId": "p-94690e2727f13bd70bcc99db3180accd",
+                  "excerpt": "| payment_term_code | payment_terms | Map only codes confirmed by client: NET30 → 30 days, DUE → due on receipt. Reject other values for review. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 12,
+                    "endLine": 12
+                  }
+                },
+                {
+                  "passageId": "p-765c7687fedf827681d64e395c7f9a85",
+                  "excerpt": "| status | — | Include only exact `active` values; count excluded rows separately. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 13,
+                    "endLine": 13
+                  }
+                },
+                {
+                  "passageId": "p-7f1a25ed5a9ec4bf27bc83acaee2fa55",
+                  "excerpt": "Reconciliation performed for this batch: compare input active count with accepted plus rejected; retain a row-level result keyed by `source_key`; report duplicate email values without merging records. Sandbox tally: 1,200 active = 1,198 accepted + 2 rejected. The corrected rejected rows were not retried; no evidence establishes their eventual import. This mapping assumes neither more than 1,200 active records nor production behavior.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 15,
+                    "endLine": 15
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "ash-volume-import",
+      "title": "Ash Goods high-volume import attempt",
+      "fictional": true,
+      "artifacts": [
+        {
+          "artifactId": "request",
+          "title": "Migration request",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "request-2025-03-04",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/ash-volume-import/request.md",
+              "mimeType": "text/markdown",
+              "sha256": "aa248c70087b3d697bee8d91166dce518e0924d7d84d4b9e19859a85f560a5a1",
+              "statedDate": "2025-03-04",
+              "importedAt": "2026-10-14T14:53:22.988023+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-b1266dbeca5f363a1846dfa799979128",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic client-onboarding request. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-7d2733ffaab2fd68a5223b9d352e5cf4",
+                  "excerpt": "# Ash Goods: migration request",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-25c017b334c98691aa2e77e39d7c424c",
+                  "excerpt": "Date stated: 2025-03-04",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-5d244c7ce017f02acfc1891effa4db2e",
+                  "excerpt": "Ash Goods requested moving approximately 84,000 customer identities from an old hosted CRM into a new CRM tenant. Source exports come in monthly CSV files; one contact may have several email addresses and duplicate identity rules are not documented. Client requires preserving the primary identifier, tracking rejected rows, and restarting safely after a failed transfer without duplicating records.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-4669293c06fdfdbc3dc1f458897ae4da",
+                  "excerpt": "The request mentions a preferred weekend cutover but does not establish whether the source can remain writable, whether the target supports atomic upsert or idempotency keys, or whether a no-downtime guarantee is required. Those points were unanswered at kickoff. Target API version was not recorded in the request.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-25f2e54652daa1332eb73a7ca6a756f9",
+                  "excerpt": "Acceptance requested a count reconciliation and a restart that does not create duplicate identities. No acceptance result or complete migration is asserted here.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "delivery-log",
+          "title": "Import attempts and status",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "notes-2025-03-18",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/ash-volume-import/delivery-log.md",
+              "mimeType": "text/markdown",
+              "sha256": "5d73a1f91c5f92ffa62fecc4a429d973926c78247cf3dbe00e74fb65ab1a1845",
+              "statedDate": "2025-03-18",
+              "importedAt": "2026-10-14T14:53:22.988451+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-fdeae8d88c2fcaa6d053b5bd1976863a",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic delivery notes. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-98ee3be3e2ed709c34317fa392d09b7f",
+                  "excerpt": "# Ash Goods import attempts and status",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-36fe16e5f0de0bdd6c716355e53c6762",
+                  "excerpt": "Date stated: 2025-03-10 to 2025-03-18",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-43c706d3262dcb8319e56d8152af2aae",
+                  "excerpt": "2025-03-10 — Dry-run on 84,117 rows exceeded the planned weekend window. Initial script matched identities by normalized email. Preview revealed 6,402 repeated email values; several belonged to different people. We stopped before committing the batch.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-1ad566e44b7145a00f42ce746158fd97",
+                  "excerpt": "2025-03-12 — Attempt 2 used source primary ID as the match key, but the target rejected 713 rows with missing IDs. The transfer process had no durable checkpoint: after a network timeout, we could not establish which of 3,000 submitted rows were committed. We did not replay that segment because duplicate creation risk was unresolved.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-acce2480febb5a26aad94d2a29c755f4",
+                  "excerpt": "2025-03-14 — Corrective note: email is not a safe identity key for this dataset. Client must resolve missing IDs and provide a deterministic duplicate policy. A restartable procedure would need a target-supported idempotency key or a verified per-record reconciliation step; neither capability was confirmed.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                },
+                {
+                  "passageId": "p-94dbb70ba8e2cc115dd35f99e7c0ae94",
+                  "excerpt": "2025-03-18 — Status: partial test only, no completed migration, no accepted reconciliation, and no verified safe restart. Final disposition of the 713 missing-ID records is unknown. The source-side writability/cutover behavior and target upsert semantics remain unknown.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 13,
+                    "endLine": 13
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "reconciliation-draft",
+          "title": "Incomplete import control sheet",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "draft-2025-03-14",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/ash-volume-import/reconciliation-draft.md",
+              "mimeType": "text/markdown",
+              "sha256": "787e00cbed5332befdbb03a0fe32cd45d7530248e145f96565595a71178e7ac5",
+              "statedDate": "2025-03-14",
+              "importedAt": "2026-10-14T14:53:22.988761+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-00f41993919584ab36f003c9de9360d9",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic work product, incomplete draft. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-8138ba13877dc062edd993bafcce5ee0",
+                  "excerpt": "# Ash Goods import control sheet",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-b6f9880ffb96bed9957c3bb03c91361a",
+                  "excerpt": "Date stated: 2025-03-14",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-4745be7a0a194bcf6bb3f175c64f2fc6",
+                  "excerpt": "| Control | Proposed handling | Status in this case |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-b8a8182a4d240ad8ef62845ad12545c8",
+                  "excerpt": "| --- | --- | --- |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 8,
+                    "endLine": 8
+                  }
+                },
+                {
+                  "passageId": "p-44d72b502475a5b438e3dbc37e0718dd",
+                  "excerpt": "| Record identity | Use immutable source primary ID; never merge by email alone. | 713 rows lack source ID; unresolved. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-f456610b68e917382459994461e741e2",
+                  "excerpt": "| Duplicate contacts | Preserve separate identities unless client supplies an adjudicated merge rule. | 6,402 repeated-email rows flagged; identity distinctions not fully reviewed. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 10,
+                    "endLine": 10
+                  }
+                },
+                {
+                  "passageId": "p-fb1231a42719a47491c127895bfa8da8",
+                  "excerpt": "| Restart | Record submitted IDs and reconcile each with target before retry; use target idempotency only after capability is confirmed. | No durable checkpoint in attempted process; target semantics unknown. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                },
+                {
+                  "passageId": "p-f7b3aaa324ca1a95a72db5ce6036ffa4",
+                  "excerpt": "| Completion | Reconcile source, accepted, rejected, and pending counts with client approval. | No full-run counts or acceptance evidence. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 12,
+                    "endLine": 12
+                  }
+                },
+                {
+                  "passageId": "p-2723dcf5592bbf7e09cb37519c1fb0b9",
+                  "excerpt": "This is a control draft, not an executable or validated migration procedure. It has not been tested for 84,117-row completion, no-duplicate restart, downtime, or target API behavior. Do not treat it as evidence that migration succeeded.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 14,
+                    "endLine": 14
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "elm-bulk-integration",
+      "title": "Elm Rentals batch connector",
+      "fictional": true,
+      "artifacts": [
+        {
+          "artifactId": "request",
+          "title": "Billing integration request",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "request-2025-04-02",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/elm-bulk-integration/request.md",
+              "mimeType": "text/markdown",
+              "sha256": "6a59eaaea35a276689ce5baaaeddd77d9192dcc5ef97773ae3f6313d29074e2e",
+              "statedDate": "2025-04-02",
+              "importedAt": "2026-10-14T14:53:22.989032+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-2999fa858fe5fab19f316afe92a9c6f9",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic client-onboarding request. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-e2b807ee9fa289352695968877921f19",
+                  "excerpt": "# Elm Rentals: billing integration request",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-1e63e8b515b6ea1dead526d19cf37dc9",
+                  "excerpt": "Date stated: 2025-04-02",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-159fd229c019af0065125bf603dbf1b4",
+                  "excerpt": "Elm Rentals asked for a connector between its fictional StayLedger v4 account and fictional PaySpring Connect API v3. The workflow must submit billing adjustments in bulk asynchronously, receive a job identifier, and later retrieve per-item results. They expect around 2,400 adjustments per month; target throttling limits and retry semantics were not documented at intake.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-21970c221aed22f48b2b3356b38cf9d0",
+                  "excerpt": "Acceptance requires evidence that the source can submit a batch, the target can process it asynchronously, and each adjustment can be reconciled to a result. Production write authorization is conditional on a client-operated sandbox review. The request does not establish that the prior connector handles Elm’s credentials, rate limits, or error mix.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "delivery-log",
+          "title": "Connector notes and sandbox outcome",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "notes-2025-04-17",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/elm-bulk-integration/delivery-log.md",
+              "mimeType": "text/markdown",
+              "sha256": "99fb97424fea9111f745527eff5ccff485adf49e197026a860d6278907553483",
+              "statedDate": "2025-04-17",
+              "importedAt": "2026-10-14T14:53:22.989251+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-264bddde928f679ca0bfe801f590d4aa",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic delivery notes. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-0c8cb397933027ede162bfed178533b8",
+                  "excerpt": "# Elm Rentals connector notes",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-f32daa59a0804883e7edc1fe09a49e3d",
+                  "excerpt": "Date stated: 2025-04-08 to 2025-04-17",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-21debbf5cf36d783aed25c67591aa425",
+                  "excerpt": "2025-04-08 — Capability check on StayLedger v4 confirmed export of adjustment batches as JSON and a stable adjustment reference. PaySpring Connect v3 documentation and sandbox exposed `POST /jobs` with a batch body, a job ID, and per-item status retrieval. Sandbox limit observed in docs: 500 items per job. No production test was run.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-f0307a32de54738459c000dce90f00a3",
+                  "excerpt": "2025-04-10 — Attempt 1 submitted a 600-item test batch and received a validation rejection; no adjustments were applied. We split test data into two 300-item batches. Test included four intentionally malformed amounts; target returned item-level rejects.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-f8671693077604825e9d0089517cb7e1",
+                  "excerpt": "2025-04-12 — Attempt 2: first 300-item sandbox batch completed; second was accepted but polling stopped after a client network disconnect. Later retrieval showed all 300 second-batch items terminal, including 2 rejected. Client confirmed 598 of 600 accepted across tests. We did not repeat either batch. No production billing result is available.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                },
+                {
+                  "passageId": "p-d686a3f998ca265836120c01fdb30eb2",
+                  "excerpt": "2025-04-17 — Constraint: evidence applies only to v4 / Connect v3 sandbox, batches no larger than 500, and the tested fields. Rate-limit behavior under sustained load and production authorization are unknown. Delivery acceptance for production remains pending.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 13,
+                    "endLine": 13
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "batch-adapter-notes",
+          "title": "Sandbox batch adapter notes",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "adapter-2025-04-11",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/elm-bulk-integration/batch-adapter-notes.md",
+              "mimeType": "text/markdown",
+              "sha256": "c19a73c1d5f5625be5d7a728e5c6e2bb0f7512e68517f3a9ce6176d619facee2",
+              "statedDate": "2025-04-11",
+              "importedAt": "2026-10-14T14:53:22.989517+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-6ac98d9dda4434750df5b9889dbfc550",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic work product. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-3154a85e3d14d43061b9f01739fcdc5d",
+                  "excerpt": "# Elm sandbox batch adapter notes",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-07b083a4c3d2abe6a4742d5a2c21ef00",
+                  "excerpt": "Date stated: 2025-04-11",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-6a3d0b6ac0bd223824d47ad8791023b2",
+                  "excerpt": "1. Read StayLedger v4 adjustment export and retain each `adjustment_ref` unchanged.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-dba0cea7ae8baa8825c8c0269e28eafd",
+                  "excerpt": "2. Submit at most 500 records to PaySpring Connect v3 `POST /jobs`; retain returned job ID.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 8,
+                    "endLine": 8
+                  }
+                },
+                {
+                  "passageId": "p-c578cf380386ba8e4f5b21a3f79ccb36",
+                  "excerpt": "3. Retrieve job status later and associate every per-item result with `adjustment_ref`.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-256b0b044b2d6d8f6b57384718e04c60",
+                  "excerpt": "4. Record accepted and rejected item counts. Do not resubmit a job solely because polling was interrupted; retrieve its terminal status first.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 10,
+                    "endLine": 10
+                  }
+                },
+                {
+                  "passageId": "p-b565c798ceaa8fb37c554fd6038e3ba2",
+                  "excerpt": "5. Stop for client review on batch-level validation rejection.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                },
+                {
+                  "passageId": "p-03a4c5b29fe0071b33bc51422c10c0f2",
+                  "excerpt": "Observed sandbox boundaries: this sample used two 300-item batches. It does not demonstrate production writes, sustained throttling, or behavior for larger jobs. No generic retry policy was validated; confirm version, limits, and duplicate handling with the new tenant before adapting.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 13,
+                    "endLine": 13
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "finch-legacy-api",
+      "title": "Finch Travel legacy connector and version limits",
+      "fictional": true,
+      "artifacts": [
+        {
+          "artifactId": "request",
+          "title": "Reservation sync request",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "request-2024-11-06",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/finch-legacy-api/request.md",
+              "mimeType": "text/markdown",
+              "sha256": "abe32bb65d4da53491bb22bb777d787e88181c1982b21afc4583690ecef40164",
+              "statedDate": "2024-11-06",
+              "importedAt": "2026-10-14T14:53:22.989764+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-e4d8193bb10d7869f14b3ac845fa9fa1",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic client-onboarding request. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-9da524b6b23475f2c48c34ac31ed615c",
+                  "excerpt": "# Finch Travel: reservation sync request",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-521525c88c5fe46a64f4d403b08ceaef",
+                  "excerpt": "Date stated: 2024-11-06",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-7456b44904c66f6b058c1629c3557230",
+                  "excerpt": "Finch Travel requested a one-way reservation-status connector from fictional TripPine API v1 to fictional LedgerWing API v1. Expected volume was at most 40 updates per day. The request asked for status polling every 15 minutes and a daily exception report. No bulk asynchronous processing was requested or assessed at the time.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-b576ef1d269b397256befb38e49d7127",
+                  "excerpt": "The target's API generation and current support status were not included in the signed request. Credentials were limited to a test tenant. Acceptance required seeing status updates in the test ledger; no promise about newer API versions or bulk operations appears in the request.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "delivery-log",
+          "title": "Connector history and correction",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "notes-2025-05-06",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/finch-legacy-api/delivery-log.md",
+              "mimeType": "text/markdown",
+              "sha256": "1546fd6c37f9ed86a914d0be185af9ce99934b77ee0f2ba5a0a994cc144bef80",
+              "statedDate": "2025-05-06",
+              "importedAt": "2026-10-14T14:53:22.989983+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-b808ca9c6dec9772e4a1e1bfd665093f",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic delivery notes. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-28f7a1e28bbd9b101207d83076eadc54",
+                  "excerpt": "# Finch connector history",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-9798295ca13d86e9dd0def219fe96be1",
+                  "excerpt": "Date stated: 2024-11-12 to 2025-05-06",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-511325cff13368d53a056b915e205a52",
+                  "excerpt": "2024-11-12 — Test connector used TripPine API v1 polling every 15 minutes. In the test tenant, 38 of 40 sample status updates appeared in LedgerWing v1. Two remained pending; their cause was not investigated. The client accepted the test demonstration, not a production rollout.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-429ecc7dea560f6df297c3a939b3fa4f",
+                  "excerpt": "2025-05-02 — TripPine announced API v2 for Finch’s planned expansion. The new request requires bulk asynchronous reservation updates. A review of the v2 capability sheet found no bulk job submission or asynchronous result retrieval for this account tier. The v1 connector’s polling behavior is not evidence of v2 compatibility.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-7676c8fafd32c893fa74901b22600a76",
+                  "excerpt": "2025-05-04 — Limited v2 compatibility probe used one non-writing status lookup in Finch’s test tenant. TripPine v2 returned `410 endpoint retired` for the v1 polling route; no updates were submitted. The probe confirms that this polling endpoint cannot be carried forward, but does not test any bulk or asynchronous alternative.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 10,
+                    "endLine": 10
+                  }
+                },
+                {
+                  "passageId": "p-d42ccba2dfa01b87cdc751ad088ed767",
+                  "excerpt": "2025-05-06 — Correction to earlier planning note: a draft checklist said “carry forward the polling connector.” That advice is withdrawn for the v2 bulk workflow; it describes only the old v1 test. No bulk async integration attempt or outcome is recorded. The v1 test’s two pending records remain unexplained.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 12,
+                    "endLine": 12
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "capability-sheet",
+          "title": "TripPine capability comparison",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "capabilities-2025-05-02",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/finch-legacy-api/capability-sheet.md",
+              "mimeType": "text/markdown",
+              "sha256": "b036b02895c33a44d483d39da285d54226a04f6031a0d666cedf5d4dcc73d737",
+              "statedDate": "2025-05-02",
+              "importedAt": "2026-10-14T14:53:22.990211+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-06073d7b1699538b71d1211e6238929d",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic work product. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-2dd67c5fa257a1f8891323a57f420bf9",
+                  "excerpt": "# TripPine capability comparison excerpt",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-864cc99679d33474ccd4fc096f277c88",
+                  "excerpt": "Date stated: 2025-05-02",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-0310a490e54ed4c83717ed73f906c523",
+                  "excerpt": "| Product/version | Observed or documented capability | Evidence boundary |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-c9b167bf8377ccd8bf53b0f191d118c6",
+                  "excerpt": "| --- | --- | --- |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 8,
+                    "endLine": 8
+                  }
+                },
+                {
+                  "passageId": "p-f9638b25284b6954e6232db0c87e5a52",
+                  "excerpt": "| TripPine API v1 | Individual reservation lookup; individual status update; connector polled test tenant. | Finch test: 40 sample updates, 38 appeared, 2 pending without investigated cause. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-ac3ac076f715994ea276b2719a2e6253",
+                  "excerpt": "| TripPine API v2, Finch account tier | No bulk job submission and no asynchronous per-item result retrieval listed in capability sheet. | Documentation review only; no v2 job was attempted. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 10,
+                    "endLine": 10
+                  }
+                },
+                {
+                  "passageId": "p-155f818373d06427c4088fc225cd99ec",
+                  "excerpt": "A product name match does not establish endpoint or version compatibility. This sheet records no alternative bulk pathway and does not establish that the v1 poller is usable for the v2 request.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 12,
+                    "endLine": 12
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "grove-scoped-access",
+      "title": "Grove Clinic scoped test access",
+      "fictional": true,
+      "artifacts": [
+        {
+          "artifactId": "request",
+          "title": "Support access request",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "request-2025-01-14",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/grove-scoped-access/request.md",
+              "mimeType": "text/markdown",
+              "sha256": "d4fe94b9fddd89d451673adf8b7303f3115afa9d3db222833b1cbe68ac7348f1",
+              "statedDate": "2025-01-14",
+              "importedAt": "2026-10-14T14:53:22.990596+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-c1eb3a85a16ad1482c4e49f7435f07e9",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic client-onboarding request. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-e52762478cb43fc80034f0ae88ad11e3",
+                  "excerpt": "# Grove Clinic: support access request",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-2fc719277c6666453f70a9929a28f469",
+                  "excerpt": "Date stated: 2025-01-14",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-d6db9fc375bfeda6e3deab62187a69a7",
+                  "excerpt": "Grove Clinic requested setup for two external support engineers to view appointment-import errors in a test workspace for ten business days. They need read access to job status and rejected-row details, not patient charts or configuration changes. Client security contact requires named accounts, multifactor authentication, expiry on 2025-01-31, and an access log.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-e87c0d34d109d3447e75f35c2ae2742e",
+                  "excerpt": "The identity provider supports group membership and time-bound accounts according to the client; exact available audit fields were not confirmed. No production access is requested. Acceptance requires a screenshot or export showing the two named users, approved scope, and expiration.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "delivery-log",
+          "title": "Access setup notes and correction",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "notes-2025-01-22",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/grove-scoped-access/delivery-log.md",
+              "mimeType": "text/markdown",
+              "sha256": "b1c784ecf2e3dad6185f4c372b6e1e3ecaf11fc886a9efb62a24741ac7a769e8",
+              "statedDate": "2025-01-22",
+              "importedAt": "2026-10-14T14:53:22.990824+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-1b5e5e90f375ae0534594588e837cc77",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic delivery notes. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-2fbb141efa74c82b5d6945f40f7f910f",
+                  "excerpt": "# Grove access setup notes",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-ab8e0c323e8dd2799989dcb1a70d438e",
+                  "excerpt": "Date stated: 2025-01-20 to 2025-01-22",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-cb43aa551e1eaa58e53a4eead7002428",
+                  "excerpt": "2025-01-20 — Early draft from a support engineer proposed temporary tenant-wide administrator access “to avoid delays.” No account was provisioned using that draft. Security contact rejected it because the request covers only job diagnostics.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-b52fd830a5e2afabfafa304f32a9fb51",
+                  "excerpt": "2025-01-21 — Corrective decision: create two named accounts in `Import-Diagnostics-Readers`, grant read-only job status and rejected-row fields in the test workspace, require MFA, and set expiry for 2025-01-31. No chart access or configuration permission. Group membership is conditional on the identity provider retaining the expiry attribute.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-f75eee725dd6856e4a3e0cf41227358c",
+                  "excerpt": "2025-01-22 — Client provided screenshots showing both named accounts in the group, test-workspace scope, MFA enabled, and expiry date. Audit export lists sign-in time and account but omits viewed record identifiers. Client accepted this setup for the requested test period. Removal after expiry was not observed in our records; the account status on 2025-02-01 is unknown.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "access-checklist",
+          "title": "Test-workspace access checklist",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "checklist-2025-01-21",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/grove-scoped-access/access-checklist.md",
+              "mimeType": "text/markdown",
+              "sha256": "fe5d250a888d8cb5228924ef64122daa43355b81d7da0cc09d8917ea489464a5",
+              "statedDate": "2025-01-21",
+              "importedAt": "2026-10-14T14:53:22.991055+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-b0a0459d1622bef5e22dd9d67a92d3ac",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic work product. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-7549e81e4f09aaf14ac787e18e4fefc5",
+                  "excerpt": "# Grove test-workspace access checklist",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-440be3d59db2317a2dba93237af23fe1",
+                  "excerpt": "Date stated: 2025-01-21",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-bde0abdb515690f5bc10fed1db74607c",
+                  "excerpt": "- Create individual named accounts; do not share credentials.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-f2b7ed210b76050fb46a710caadc5fec",
+                  "excerpt": "- Add only to `Import-Diagnostics-Readers` in the test workspace.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 8,
+                    "endLine": 8
+                  }
+                },
+                {
+                  "passageId": "p-135c33441563f4c03c3c0c99f0350e25",
+                  "excerpt": "- Permit read-only job status and rejected-row details; exclude patient charts and configuration changes.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-2e8e1527fa2caa3bbe7ceb7b98f41c65",
+                  "excerpt": "- Require MFA and verify the configured expiry date is 2025-01-31.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 10,
+                    "endLine": 10
+                  }
+                },
+                {
+                  "passageId": "p-14dfd7197fdcd5c1571113c3632d678b",
+                  "excerpt": "- Capture the membership, scope, MFA, and expiry evidence for client review.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                },
+                {
+                  "passageId": "p-20478b0862439cc32d662330036dbe8e",
+                  "excerpt": "- Confirm account removal after expiry separately; the captured audit export does not show viewed record identifiers.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 12,
+                    "endLine": 12
+                  }
+                },
+                {
+                  "passageId": "p-b0069024d06f11b169efc97bb0c82fa1",
+                  "excerpt": "Recorded setup evidence covers creation and configured expiration. It does not prove removal occurred or establish equivalent controls in another identity provider or production tenant.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 14,
+                    "endLine": 14
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "harbor-offline-access",
+      "title": "Harbor Research air-gapped access inquiry",
+      "fictional": true,
+      "artifacts": [
+        {
+          "artifactId": "request",
+          "title": "Air-gapped operator access request",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "request-2025-06-09",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/harbor-offline-access/request.md",
+              "mimeType": "text/markdown",
+              "sha256": "1fc5c1baa49b026e15ec1c343cc89ce861e4bf4733de7876b4e64fb4f3f20c43",
+              "statedDate": "2025-06-09",
+              "importedAt": "2026-10-14T14:53:22.991301+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-41e5494dd0914154539f0b47317fe035",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic client-onboarding request. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-9e4bdeb051b4e4e76e6cc330bbfa42ac",
+                  "excerpt": "# Harbor Research: air-gapped operator access",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-ac373404bbd1c61c91d8ff91fd50cd93",
+                  "excerpt": "Date stated: 2025-06-09",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-20e563ff883e10fd85c2d71b505b16c7",
+                  "excerpt": "Harbor Research requires provisioning two operators in an air-gapped lab with hardware-backed smart cards. The environment has no network route to an identity provider or external service during normal operation. Smart-card enrollment must remain local; the client has not provided card middleware, certificate policy, or approved offline identity authority details.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-0da577d150c6b5774d783ff94d58d2cb",
+                  "excerpt": "The request asks for least-privilege access to a local data-review application. No network connection, cloud directory, or SSO enrollment is permitted. Acceptance depends on the client security officer validating the card trust chain and local account lifecycle. No existing implementation from this client is supplied.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "delivery-log",
+          "title": "Provisioning investigation",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "notes-2025-06-16",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/harbor-offline-access/delivery-log.md",
+              "mimeType": "text/markdown",
+              "sha256": "c600274d89bf8ad1edc7dfab24d272a3af1fb3f4b846022f1c225870b7f2cc00",
+              "statedDate": "2025-06-16",
+              "importedAt": "2026-10-14T14:53:22.991522+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-729d87edd895c26f2e29a357ce93a774",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic delivery notes. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-b56a5ed8d07931771f48cb935d937ba6",
+                  "excerpt": "# Harbor provisioning investigation",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-41e1abe0b3b2917760b66209f7e30c8c",
+                  "excerpt": "Date stated: 2025-06-12",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-0c10d8b26a8131ccf07191b219b240db",
+                  "excerpt": "2025-06-12 — Reviewed the available Grove Clinic checklist and Harbor request. Grove’s setup depended on named accounts in an identity-provider group with MFA and a time-bound group attribute. Harbor’s lab has no network path to that provider. That checklist is not an offline smart-card procedure.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-fb9937961c58fc0354d4a3f9dd625317",
+                  "excerpt": "2025-06-13 — Attempted to locate a local card-enrollment runbook in the provided handover folder; none was included. No smart card was enrolled and no access account was provisioned.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-aec13aa621d7152e1e37a152a6393703",
+                  "excerpt": "2025-06-16 — Security officer had not yet supplied card middleware, trust-chain policy, or local lifecycle requirements. Outcome of any offline provisioning approach is unknown. Work stopped pending those client inputs; no networked SSO was authorized or tested.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "scope-inventory",
+          "title": "Identity evidence inventory",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "inventory-2025-06-16",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/harbor-offline-access/scope-inventory.md",
+              "mimeType": "text/markdown",
+              "sha256": "03084916ce921724d700755343c887f26dc6a3a4550eb36caec8c0ee947c2864",
+              "statedDate": "2025-06-16",
+              "importedAt": "2026-10-14T14:53:22.991817+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-9b3ff7b61b8babd2b8132aba97be93fe",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic work product, evidence inventory. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-c7750e312a60889f43778d68c92d61ad",
+                  "excerpt": "# Harbor identity evidence inventory",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-2de04484db16c1f4161373114b5c52db",
+                  "excerpt": "Date stated: 2025-06-16",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-749ccc8e4d62061ac2ade0198814161b",
+                  "excerpt": "| Evidence item | Available record | Relevance / gap |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-4fdfc717e72d6026361a64d96a76167e",
+                  "excerpt": "| --- | --- | --- |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 8,
+                    "endLine": 8
+                  }
+                },
+                {
+                  "passageId": "p-d5c1a4b17c0bbb5e1fd5c2284892a9bf",
+                  "excerpt": "| Grove access checklist | Named accounts, networked identity-provider group, MFA, timed expiry. | Requires an identity provider; no smart-card enrollment or air-gap steps. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-20e298aa6e2648b572c0cf613ae429aa",
+                  "excerpt": "| Harbor card middleware | Not supplied. | Compatibility and local enrollment cannot be assessed. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 10,
+                    "endLine": 10
+                  }
+                },
+                {
+                  "passageId": "p-c917cca88f085523e495835f5da89108",
+                  "excerpt": "| Harbor certificate/trust policy | Not supplied. | Issuer, revocation handling, and trust validation remain unknown. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                },
+                {
+                  "passageId": "p-36e4a318917f9cde3d70d388cd20f8a2",
+                  "excerpt": "| Harbor local lifecycle procedure | Not found in provided folder. | Provisioning, recovery, and removal behavior remain unknown. |",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 12,
+                    "endLine": 12
+                  }
+                },
+                {
+                  "passageId": "p-7f8f8e6bf71e360107ae3bc5e2e5e3de",
+                  "excerpt": "This inventory is not a provisioning runbook. No offline implementation precedent or verified outcome is represented by the available records.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 14,
+                    "endLine": 14
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "ibis-verified-handover",
+      "title": "Ibis Foods tested handover",
+      "fictional": true,
+      "artifacts": [
+        {
+          "artifactId": "request",
+          "title": "Operations handover request",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "request-2025-05-05",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/ibis-verified-handover/request.md",
+              "mimeType": "text/markdown",
+              "sha256": "4a0df2a6fdf85d169e589ef5eb7467b4ec45be5f748f361ddf0cc70a48f914de",
+              "statedDate": "2025-05-05",
+              "importedAt": "2026-10-14T14:53:22.992057+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-71dae1c91a602be06002c40ef25c1fc6",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic client-onboarding request. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-ecb56424638e0283fb0974e86b6f920a",
+                  "excerpt": "# Ibis Foods: operations handover",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-e9105ecdc2f8a2846426065415ccd58f",
+                  "excerpt": "Date stated: 2025-05-05",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-5625af9206d298f3503e4034f9305c5f",
+                  "excerpt": "Ibis Foods requested handover of a nightly inventory import to two named client operators: Maya Chen (primary) and Luis Ortega (backup). Acceptance requires an operator runbook, an escalation contact, a documented recovery procedure, and a witnessed recovery exercise in the test environment. Client operations owns routine monitoring after handover; delivery team remains available for the first five business days.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-4a719fee5730f21d860f9b61b7b2ae05",
+                  "excerpt": "Production schedule and alert routing were not part of this request. Client supplied test credentials with read-only access to run logs; production access was not granted.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "delivery-log",
+          "title": "Handover and exercise record",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "notes-2025-05-23",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/ibis-verified-handover/delivery-log.md",
+              "mimeType": "text/markdown",
+              "sha256": "a2a3c7f9b68929938055ab8330b8a00212aa02d50cbe0d15fc6a3d1f2477bf81",
+              "statedDate": "2025-05-23",
+              "importedAt": "2026-10-14T14:53:22.992377+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-e504721d3dd0826d8e76c289524d5e81",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic delivery notes. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-e76871915263ef74b7d3b1147c81e5d4",
+                  "excerpt": "# Ibis handover record",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-dcdbb5aefcd06f812002669298906f22",
+                  "excerpt": "Date stated: 2025-05-19 to 2025-05-23",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-dfd36ef4bb4b2aff13569f7e84b7b0d5",
+                  "excerpt": "2025-05-19 — Runbook draft listed Maya Chen as primary and Luis Ortega as backup. Operations lead signed the responsibility line. Recovery exercise was scheduled; the first attempt failed because the test archive lacked the prior day's checkpoint.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-be10ef47b2b36387937fc281e1874201",
+                  "excerpt": "2025-05-21 — Corrected test archive supplied. Maya followed the runbook to restore the prior checkpoint and replay one test batch. The target showed the batch once; the two operators compared source and target counts and recorded a matching result. Exercise log includes start/end time, operator names, and observed count. This was a test-environment recovery only.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-18356d39c827604af801be2658c16ea3",
+                  "excerpt": "2025-05-23 — Handover checklist signed by both named operators and client operations lead. Escalation contact and first-five-business-day support window recorded. Production alert routing and a production recovery exercise were not in scope; no production readiness or recovery outcome is established.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "operator-runbook",
+          "title": "Test import recovery runbook",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "runbook-2025-05-21",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/ibis-verified-handover/operator-runbook.md",
+              "mimeType": "text/markdown",
+              "sha256": "44e00967166b5c8b387e3459308eb8e8916ddaac4996799ed36609848829fdbc",
+              "statedDate": "2025-05-21",
+              "importedAt": "2026-10-14T14:53:22.992614+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-d3c37a4af4e8bff3b3d306973f6f7ab5",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic work product. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-7039150a4c91a965c10d8f901804c9e0",
+                  "excerpt": "# Ibis test import recovery runbook",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-61555077aada6b0166f4ccdb4419de50",
+                  "excerpt": "Date stated: 2025-05-21",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-cd338717bf8f7b4a19c78c8645187b99",
+                  "excerpt": "**Routine owners:** Maya Chen (primary), Luis Ortega (backup). Client operations lead: Priya Nair. Escalate to delivery support during the first five business days after handover.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-f852b5d637a821ebfe09b2c078422211",
+                  "excerpt": "1. Check the import job status and preserve the source batch identifier.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-f1ee09d99d16cc6f2f3fd50ad47b58be",
+                  "excerpt": "2. If the job stopped, compare the last recorded checkpoint with source and target counts before replay. Do not replay if the checkpoint is missing or the applied state is unclear; contact the operations lead.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 10,
+                    "endLine": 10
+                  }
+                },
+                {
+                  "passageId": "p-464e11b2e87d4bdaab76103a36bf5324",
+                  "excerpt": "3. Restore the prior checkpoint in the test environment, replay the identified test batch once, and compare counts.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                },
+                {
+                  "passageId": "p-f0cef5d6a8d78122a6b2f23b6e02ae5e",
+                  "excerpt": "4. Record operator, time, batch identifier, source/target counts, and any discrepancy in the exercise log.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 12,
+                    "endLine": 12
+                  }
+                },
+                {
+                  "passageId": "p-6e6e4258f362813425bc3cdf99f6b378",
+                  "excerpt": "Exercise evidence: on 2025-05-21, named operator Maya restored a supplied checkpoint and replayed one test batch; target showed one batch and count comparison matched. This procedure was exercised in test only. Production alert routing and production recovery remain unverified.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 14,
+                    "endLine": 14
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "kestrel-pending-handover",
+      "title": "Kestrel Parts unresolved handover",
+      "fictional": true,
+      "artifacts": [
+        {
+          "artifactId": "request",
+          "title": "Warehouse handover request",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "request-2025-06-02",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/kestrel-pending-handover/request.md",
+              "mimeType": "text/markdown",
+              "sha256": "28736a2eef83f7e09d019194006d73e82302cb8446baeded86cb78c59a4664cd",
+              "statedDate": "2025-06-02",
+              "importedAt": "2026-10-14T14:53:22.992860+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-94e6eca6c082051274e558322f29ad62",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic client-onboarding request. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-06cd2c28547bb44b6279d353fef2e45c",
+                  "excerpt": "# Kestrel Parts: warehouse handover",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-2f82fd448c66d749817f67db39113668",
+                  "excerpt": "Date stated: 2025-06-02",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-fe03b4815f9a28fdfbed2e76276fc644",
+                  "excerpt": "Kestrel Parts requested handover of an inventory export connector to its warehouse team. Request says “operations will take it over” but names no primary or backup operator. Acceptance was expected to include an operating guide and a walkthrough; no recovery exercise or ownership signoff is specified.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-12883c1c9b6f8714ddd7d12bb9b70cdd",
+                  "excerpt": "The client’s escalation path, production access, alert recipient, and after-hours coverage were not established in the request. A draft export configuration was supplied for review. The request does not establish that the connector was deployed or that any operator has run it.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "delivery-log",
+          "title": "Handover status notes",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "notes-2025-06-11",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/kestrel-pending-handover/delivery-log.md",
+              "mimeType": "text/markdown",
+              "sha256": "37724384701fa699bf6209c6ecdad3f8a8e8192edef3b40d165cc7f4f99183b8",
+              "statedDate": "2025-06-11",
+              "importedAt": "2026-10-14T14:53:22.993078+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-1a6965f3c44e7ff51faf9d25ba859cef",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic delivery notes. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-95fb1e13b4266ca52a38d13db9a32125",
+                  "excerpt": "# Kestrel handover status notes",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-ab92246b525f080a17587f438910c0ad",
+                  "excerpt": "Date stated: 2025-06-11",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-d0f6fef0a5da29e1e7c62173c272b200",
+                  "excerpt": "2025-06-04 — Draft operations page copied to the shared folder. It lists a generic support inbox but no client operator, backup, alert recipient, or recovery contact. No walkthrough attendance record was attached.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-9956d30b6ec1c97de43d80c60c509f5b",
+                  "excerpt": "2025-06-06 — Delivery note states “handover complete.” A later comment from the warehouse coordinator says they have not accepted ownership and do not know who can authorize a replay. The comment is not resolved in the record.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-5b05201e685db136f39a553289b570db",
+                  "excerpt": "2025-06-11 — Asked client to name an operating owner and confirm who receives alerts. No response was recorded by close of notes. No recovery exercise, production status check, or operator acknowledgment is present. Actual operational ownership and whether the connector ran remain unknown.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "artifactId": "operations-draft",
+          "title": "Unverified operations draft",
+          "fictional": true,
+          "versions": [
+            {
+              "versionId": "draft-2025-06-05",
+              "sourcePath": "corpora/fictional-onboarding-v1/originals/kestrel-pending-handover/operations-draft.md",
+              "mimeType": "text/markdown",
+              "sha256": "772722ba39f9da52b3f9f789a45df65b82a1b1a84319441952a14bbf99cbef16",
+              "statedDate": "2025-06-05",
+              "importedAt": "2026-10-14T14:53:22.993298+00:00",
+              "extractionStatus": "complete",
+              "exclusionReasons": [],
+              "passages": [
+                {
+                  "passageId": "p-516cb9cd6a19784136219a0f3f67f322",
+                  "excerpt": "FICTIONAL SOURCE — Synthetic work product, unverified draft. No real client or system is represented.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                },
+                {
+                  "passageId": "p-f091bda0caf1a2ebb7f35f0e725e1e1d",
+                  "excerpt": "# Kestrel inventory export operations draft",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 3,
+                    "endLine": 3
+                  }
+                },
+                {
+                  "passageId": "p-adda20bcc561c57771874747ad75b724",
+                  "excerpt": "Date stated: 2025-06-05",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 5,
+                    "endLine": 5
+                  }
+                },
+                {
+                  "passageId": "p-70e82dcc70699cdf60e150caae6d51ee",
+                  "excerpt": "1. Check the export job status each business morning.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 7,
+                    "endLine": 7
+                  }
+                },
+                {
+                  "passageId": "p-cd5a8d74040490a6e5c8c7f502ea66ac",
+                  "excerpt": "2. If a job fails, save the error message and contact the support inbox before replay.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 8,
+                    "endLine": 8
+                  }
+                },
+                {
+                  "passageId": "p-2fdf5572178f750ab15d1c4ef04f1a5f",
+                  "excerpt": "3. Record the job date and result in the operations log.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 9,
+                    "endLine": 9
+                  }
+                },
+                {
+                  "passageId": "p-93c72c50acfce0f148751a9b4382390a",
+                  "excerpt": "Unresolved: no client operating owner or backup is named; alert recipient and escalation authority are unspecified. No recovery checkpoint procedure or exercise is documented. This draft was placed in the shared folder, but operator review, acceptance, and use are unknown. Document existence does not establish handover readiness.",
+                  "sourceKind": "native",
+                  "location": {
+                    "type": "text",
+                    "startLine": 11,
+                    "endLine": 11
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

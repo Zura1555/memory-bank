@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.dev.vars.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+postgres-data/
+ingestion/audit.json
+.wrangler/

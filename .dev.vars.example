@@ -1,0 +1,4 @@
+APP_ENV=development
+LOCAL_DATABASE_URL=postgres://memory_bank:local_only@127.0.0.1:5432/memory_bank
+OPENROUTER_API_KEY=
+OPERATOR_TOKEN=

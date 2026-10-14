@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://memory-bank.invalid/contracts/corpus-manifest.schema.json",
+  "title": "Memory Bank curated corpus manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "corpusVersion", "cases"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "corpusVersion": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "cases": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caseId", "title", "fictional", "artifacts"],
+      "properties": {
+        "caseId": { "$ref": "#/$defs/id" },
+        "title": { "type": "string", "minLength": 1 },
+        "fictional": { "const": true },
+        "artifacts": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/artifact" }
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "title", "fictional", "versions"],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/id" },
+        "title": { "type": "string", "minLength": 1 },
+        "fictional": { "const": true },
+        "versions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/version" }
+        }
+      }
+    },
+    "version": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["versionId", "sourcePath", "mimeType", "sha256", "statedDate", "importedAt", "extractionStatus", "exclusionReasons", "passages"],
+      "properties": {
+        "versionId": { "$ref": "#/$defs/id" },
+        "sourcePath": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+" },
+        "mimeType": { "type": "string", "pattern": "^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "statedDate": { "type": ["string", "null"] },
+        "importedAt": { "type": "string", "format": "date-time" },
+        "extractionStatus": { "enum": ["complete", "incomplete"] },
+        "exclusionReasons": { "type": "array", "items": { "type": "string" } },
+        "passages": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/passage" }
+        }
+      }
+    },
+    "passage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passageId", "excerpt", "sourceKind", "location"],
+      "properties": {
+        "passageId": { "$ref": "#/$defs/id" },
+        "excerpt": { "type": "string", "minLength": 1 },
+        "sourceKind": { "enum": ["native", "ocr_transcription", "visual_observation", "visual_interpretation"] },
+        "location": { "$ref": "#/$defs/location" }
+      }
+    },
+    "location": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["type", "startLine", "endLine"], "properties": { "type": { "const": "text" }, "startLine": { "type": "integer", "minimum": 1 }, "endLine": { "type": "integer", "minimum": 1 } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "page", "regionId"], "properties": { "type": { "const": "pdf" }, "page": { "type": "integer", "minimum": 1 }, "regionId": { "type": ["string", "null"] } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "section", "paragraph", "table", "row", "column"], "properties": { "type": { "const": "docx" }, "section": { "type": ["string", "null"] }, "paragraph": { "type": ["integer", "null"], "minimum": 1 }, "table": { "type": ["integer", "null"], "minimum": 1 }, "row": { "type": ["integer", "null"], "minimum": 1 }, "column": { "type": ["integer", "null"], "minimum": 1 } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "slide", "element", "notes"], "properties": { "type": { "const": "pptx" }, "slide": { "type": "integer", "minimum": 1 }, "element": { "type": ["string", "null"] }, "notes": { "type": "boolean" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "worksheet", "cellRange", "headers"], "properties": { "type": { "const": "xlsx" }, "worksheet": { "type": "string", "minLength": 1 }, "cellRange": { "type": "string", "minLength": 1 }, "headers": { "type": "array", "items": { "type": "string" } } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "regionId"], "properties": { "type": { "const": "image" }, "regionId": { "type": "string", "minLength": 1 } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "row", "columns", "headers"], "properties": { "type": { "const": "csv" }, "row": { "type": "integer", "minimum": 1 }, "columns": { "type": "array", "items": { "type": "string" } }, "headers": { "type": "array", "items": { "type": "string" } } } }
+      ]
+    }
+  }
+}

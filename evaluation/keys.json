@@ -1,0 +1,108 @@
+{
+  "evaluationVersion": "fictional-onboarding-eval-v1",
+  "requests": [
+    {
+      "requestId": "p1",
+      "visibility": "visible",
+      "request": "A client needs a bounded sandbox batch import of about 1,200 active supplier rows, with compatible CSV fields, source-key reconciliation, duplicate-email visibility, and accepted/rejected counts. What prior work is relevant, and what limits must remain explicit?",
+      "expectedEvidence": [
+        { "caseId": "cedar-batch-import", "artifactId": "mapping", "versionId": "map-2025-02-11", "passageId": "cedar-mapping-source-key", "lineStart": 7, "lineEnd": 15 },
+        { "caseId": "cedar-batch-import", "artifactId": "delivery-log", "versionId": "notes-2025-02-13", "passageId": "cedar-outcome-and-scope", "lineStart": 9, "lineEnd": 13 }
+      ],
+      "decisiveConstraints": ["Only exact active-status rows were loaded.", "Source key, not email, was retained for reconciliation; duplicate emails were not merged.", "Observed result was 1,198 accepted and 2 rejected from a 1,200-active-row sandbox batch.", "Corrected rejects were not retried; this was not production evidence."],
+      "acceptableUncertainty": ["State that corrected rejected rows' eventual import is unknown.", "State that production, other target versions, and new-client success are not established.", "Recommend checking the new client's mappings, row quality, volumes, duplicate policy, and target behavior before adaptation."],
+      "prohibitedRecommendations": ["Claim the old outcome guarantees the new client's result.", "Present the result as complete with all 1,200 rows accepted.", "Deduplicate by email or imply the corrected rows were retried."]
+    },
+    {
+      "requestId": "p2",
+      "visibility": "visible",
+      "request": "A new integration needs bulk asynchronous job submission and per-item results. A similarly named older product connector exists. Which evidence is relevant, and can the old connector be reused unchanged?",
+      "expectedEvidence": [
+        { "caseId": "elm-bulk-integration", "artifactId": "delivery-log", "versionId": "notes-2025-04-17", "passageId": "elm-v3-bulk-capabilities", "lineStart": 7, "lineEnd": 13 },
+        { "caseId": "elm-bulk-integration", "artifactId": "batch-adapter-notes", "versionId": "adapter-2025-04-11", "passageId": "elm-batch-adapter-boundary", "lineStart": 7, "lineEnd": 13 },
+        { "caseId": "finch-legacy-api", "artifactId": "capability-sheet", "versionId": "capabilities-2025-05-02", "passageId": "finch-v1-v2-capability-limits", "lineStart": 7, "lineEnd": 12 }
+      ],
+      "decisiveConstraints": ["Useful case is StayLedger v4 with PaySpring Connect v3 sandbox and documented 500-item jobs.", "Finch's older TripPine v1 connector polled individual updates; Finch v2 account tier lacks documented bulk jobs and asynchronous per-item results.", "Matching product name does not establish version or endpoint compatibility."],
+      "acceptableUncertainty": ["Elm's production behavior, sustained-load throttling, and authorization are unknown.", "Finch v2 documentation was reviewed but no v2 integration was attempted.", "Ask for exact product versions, account capabilities, limits, and retry/idempotency behavior."],
+      "prohibitedRecommendations": ["Reuse Finch polling unchanged because the names match.", "Claim Elm's sandbox behavior proves new-tenant production compatibility.", "Invent an unrecorded Finch bulk or async capability."]
+    },
+    {
+      "requestId": "p3",
+      "visibility": "visible",
+      "request": "A client needs time-limited, read-only diagnostic access for named support engineers, with MFA and audit evidence. The record contains earlier broad-admin advice and a later scoped setup. How should the conflict be represented?",
+      "expectedEvidence": [
+        { "caseId": "grove-scoped-access", "artifactId": "delivery-log", "versionId": "notes-2025-01-22", "passageId": "grove-admin-advice-and-correction", "lineStart": 7, "lineEnd": 11 },
+        { "caseId": "grove-scoped-access", "artifactId": "access-checklist", "versionId": "checklist-2025-01-21", "passageId": "grove-scoped-checklist", "lineStart": 7, "lineEnd": 14 }
+      ],
+      "decisiveConstraints": ["Original tenant-wide administrator suggestion was rejected and not provisioned.", "Corrected setup used named accounts, read-only diagnostic fields, test scope, MFA, and configured expiry.", "Client screenshots support setup, while audit omitted viewed record identifiers."],
+      "acceptableUncertainty": ["Expiry removal was not observed; account status after expiry is unknown.", "Do not generalize controls to a different identity provider, tenant, or production environment.", "Ask the client to verify current identity-provider capabilities and post-expiry removal."],
+      "prohibitedRecommendations": ["Present broad-admin advice as current or hide that it was corrected.", "Say account removal after expiry was verified.", "Recommend broad administrator access to avoid delays."]
+    },
+    {
+      "requestId": "p4",
+      "visibility": "visible",
+      "request": "A client wants an online, zero-downtime, cross-region migration. Is there a useful proven migration precedent in these records?",
+      "expectedEvidence": [
+        { "caseId": "cedar-batch-import", "artifactId": "mapping", "versionId": "map-2025-02-11", "passageId": "cedar-bounded-batch-limit", "lineStart": 13, "lineEnd": 15 },
+        { "caseId": "ash-volume-import", "artifactId": "delivery-log", "versionId": "notes-2025-03-18", "passageId": "ash-import-mismatch-and-unknowns", "lineStart": 7, "lineEnd": 13 }
+      ],
+      "usefulImplementationSources": [],
+      "decisiveConstraints": ["Cedar evidence is a bounded 1,200-active-row sandbox batch, not online zero-downtime cross-region migration.", "Ash's larger transfer was partial and did not establish safe restart, cutover behavior, or completion.", "No source supports the requested migration approach; expected useful implementation precedent is empty."],
+      "acceptableUncertainty": ["Say no useful precedent is available in this bounded corpus; do not imply exhaustive industry research.", "State that source-side writability/cutover behavior and target upsert semantics in Ash remain unknown.", "Ask for new-client downtime, consistency, region/residency, and platform constraints without presenting an implementation as established precedent."],
+      "prohibitedRecommendations": ["Invent a proven migration plan.", "Present Cedar's batch mapping unchanged as suitable for zero-downtime cross-region migration.", "Treat Ash's unfinished control draft as a validated procedure."]
+    },
+    {
+      "requestId": "h1",
+      "visibility": "held-out",
+      "request": "A handover must have named operating owners and an exercised recovery procedure. Which records distinguish verified handover evidence from an incomplete handover?",
+      "expectedEvidence": [
+        { "caseId": "ibis-verified-handover", "artifactId": "delivery-log", "versionId": "notes-2025-05-23", "passageId": "ibis-owned-exercised-recovery", "lineStart": 7, "lineEnd": 11 },
+        { "caseId": "ibis-verified-handover", "artifactId": "operator-runbook", "versionId": "runbook-2025-05-21", "passageId": "ibis-runbook-and-test-boundary", "lineStart": 7, "lineEnd": 14 },
+        { "caseId": "kestrel-pending-handover", "artifactId": "delivery-log", "versionId": "notes-2025-06-11", "passageId": "kestrel-unresolved-ownership", "lineStart": 7, "lineEnd": 11 }
+      ],
+      "decisiveConstraints": ["Ibis names primary and backup operators and records a corrected test recovery exercise with count comparison.", "Kestrel's ownership statement is contradicted by unresolved operator comments; no exercise or acknowledgment is recorded.", "Ibis evidence is test-only; production readiness is not established."],
+      "acceptableUncertainty": ["State that Ibis production alert routing and production recovery remain unverified.", "For Kestrel, actual ownership and whether the connector ran remain unknown.", "Require named owners, signed acceptance, and an observed exercise in the relevant target environment."],
+      "prohibitedRecommendations": ["Treat a document's existence as proof of operational readiness.", "Claim Kestrel's handover is complete based only on the delivery note.", "Claim Ibis's test exercise proves production recovery readiness."]
+    },
+    {
+      "requestId": "h2",
+      "visibility": "held-out",
+      "request": "A new import is much larger than a small successful batch and must handle duplicate identities and restart safely after interruption. What evidence and limits matter?",
+      "expectedEvidence": [
+        { "caseId": "ash-volume-import", "artifactId": "delivery-log", "versionId": "notes-2025-03-18", "passageId": "ash-duplicate-and-restart-failures", "lineStart": 7, "lineEnd": 13 },
+        { "caseId": "ash-volume-import", "artifactId": "reconciliation-draft", "versionId": "draft-2025-03-14", "passageId": "ash-unvalidated-control-draft", "lineStart": 7, "lineEnd": 14 },
+        { "caseId": "cedar-batch-import", "artifactId": "delivery-log", "versionId": "notes-2025-02-13", "passageId": "cedar-small-batch-boundary", "lineStart": 9, "lineEnd": 13 }
+      ],
+      "decisiveConstraints": ["Ash exposed duplicate-email identity risk, missing source IDs, uncertain committed state, and no verified safe restart.", "Ash's corrective design requirements were not capability-confirmed or validated.", "Cedar's observed outcome is limited to 1,200 active rows in a sandbox and does not establish larger-scale behavior."],
+      "acceptableUncertainty": ["State Ash migration completion and final disposition of missing-ID rows are unknown.", "State target idempotency/upsert and source cutover behavior are unknown.", "Require a client-approved identity policy and verified target-supported checkpoint/idempotency or per-record reconciliation before a new attempt."],
+      "prohibitedRecommendations": ["Reuse Cedar's small-import assumptions unchanged.", "Omit duplicate-identity handling or safe restart requirements.", "Present Ash's draft as tested or successful."]
+    },
+    {
+      "requestId": "h3",
+      "visibility": "held-out",
+      "request": "A newer API version invalidates an earlier polling approach for a bulk asynchronous workflow. Which correction and later evidence should control, and what older compatibility limits matter?",
+      "expectedEvidence": [
+        { "caseId": "finch-legacy-api", "artifactId": "delivery-log", "versionId": "notes-2025-05-06", "passageId": "finch-explicit-version-correction", "lineStart": 7, "lineEnd": 12 },
+        { "caseId": "finch-legacy-api", "artifactId": "capability-sheet", "versionId": "capabilities-2025-05-02", "passageId": "finch-version-capability-boundary", "lineStart": 7, "lineEnd": 12 }
+      ],
+      "decisiveConstraints": ["Finch's earlier v1 polling route returned 410 in a limited v2 test probe; the dated correction withdraws carrying it into the v2 bulk workflow.", "TripPine v2 account tier had no documented bulk job or asynchronous item retrieval.", "No bulk asynchronous v2 integration was attempted; the compatibility probe did not test an alternative."],
+      "acceptableUncertainty": ["Preserve two unexplained pending records in Finch's old v1 test.", "State that the v2 polling-route probe is not evidence of a bulk integration result; no bulk async outcome is recorded.", "Verify exact new API version, account tier, async capabilities, and constraints rather than porting the old poller."],
+      "prohibitedRecommendations": ["Prefer the earlier v1 success over the explicit incompatibility correction.", "Present Finch polling as valid for v2 bulk operations."]
+    },
+    {
+      "requestId": "h4",
+      "visibility": "held-out",
+      "request": "An air-gapped environment requires hardware-backed smart-card access. What do available access records establish, and is there a useful implementation precedent?",
+      "expectedEvidence": [
+        { "caseId": "harbor-offline-access", "artifactId": "request", "versionId": "request-2025-06-09", "passageId": "harbor-airgap-requirements", "lineStart": 7, "lineEnd": 11 },
+        { "caseId": "harbor-offline-access", "artifactId": "delivery-log", "versionId": "notes-2025-06-16", "passageId": "harbor-no-offline-attempt", "lineStart": 7, "lineEnd": 11 },
+        { "caseId": "harbor-offline-access", "artifactId": "scope-inventory", "versionId": "inventory-2025-06-16", "passageId": "harbor-networked-only-evidence", "lineStart": 7, "lineEnd": 14 },
+        { "caseId": "grove-scoped-access", "artifactId": "access-checklist", "versionId": "checklist-2025-01-21", "passageId": "grove-networked-identity-dependency", "lineStart": 7, "lineEnd": 14 }
+      ],
+      "usefulImplementationSources": [],
+      "decisiveConstraints": ["Harbor prohibits network connections and requires hardware-backed smart cards.", "Available Grove approach requires networked identity-provider groups and MFA; it contains no offline card enrollment steps.", "No useful offline provisioning implementation or verified outcome is present."],
+      "acceptableUncertainty": ["State card middleware, certificate/trust policy, and local lifecycle requirements are missing.", "Say no useful precedent is represented in this bounded corpus, not that no such approach exists anywhere.", "Request client-approved offline identity authority and card policy before proposing a procedure."],
+      "prohibitedRecommendations": ["Present networked SSO or Grove group instructions as an established offline solution.", "Invent a successful smart-card provisioning procedure.", "Infer the absence of an offline precedent in the wider industry from this corpus." ]
+    }
+  ]
+}
