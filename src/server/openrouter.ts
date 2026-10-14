@@ -17,9 +17,17 @@ export interface ModelUsage {
 }
 
 export class ModelCallError extends Error {
-  constructor(readonly code: string, readonly status: number | null, readonly uncertain: boolean) {
+  readonly code: string;
+  readonly status: number | null;
+  readonly uncertain: boolean;
+  generationId: string | null = null;
+
+  constructor(code: string, status: number | null, uncertain: boolean) {
     super(code);
     this.name = "ModelCallError";
+    this.code = code;
+    this.status = status;
+    this.uncertain = uncertain;
   }
 }
 
@@ -44,7 +52,7 @@ async function readProviderJson(response: Response): Promise<unknown> {
   } catch (error) {
     await reader.cancel().catch(() => undefined);
     if (error instanceof ModelCallError) throw error;
-    throw new ModelCallError("MODEL_RESPONSE_INVALID", response.status, true);
+    throw new ModelCallError("MODEL_DISPATCH_UNCERTAIN", response.status, true);
   } finally {
     reader.releaseLock();
   }
@@ -98,11 +106,12 @@ export type StageOutput = AssessmentDraft | BriefDraft | SupportReview;
 
 export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StagePrompt): Promise<{ output: StageOutput; usage: ModelUsage }> {
   if (!env.OPENROUTER_API_KEY) throw new ModelCallError("MODEL_CREDENTIAL_UNAVAILABLE", null, false);
-  const timeoutMs = stage.startsWith("brief_") ? 12_000 : 38_000;
+  const timeoutMs = 120_000;
   let response: Response;
   try {
     const requestBody = JSON.stringify({
       model: MODEL,
+      stream: false,
       service_tier: "default",
       provider: { only: ["openai"], order: ["openai"], allow_fallbacks: false, require_parameters: true },
       max_tokens: 16_384,
@@ -137,30 +146,35 @@ export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StageP
     await response.body?.cancel().catch(() => undefined);
     throw new ModelCallError("MODEL_PROVIDER_REJECTED", response.status, response.status >= 500);
   }
-  const body = await readProviderJson(response);
-  const parsedEnvelope = providerResponseSchema.safeParse(body);
-  if (!parsedEnvelope.success) throw new ModelCallError("MODEL_RESPONSE_INVALID", response.status, true);
-  const data = parsedEnvelope.data;
-  const choice = data.choices?.[0];
-  const usage: ModelUsage = {
-    promptTokens: data.usage?.prompt_tokens ?? null,
-    completionTokens: data.usage?.completion_tokens ?? null,
-    reportedCostUsd: data.usage?.cost ?? null,
-    responseId: data.id ?? null,
-    requestedModel: MODEL,
-    returnedModel: data.model ?? null,
-    provider: data.provider ?? null,
-  };
-  if (!choice || choice.finish_reason !== "stop" || typeof choice.message?.content !== "string" || choice.message.refusal) {
-    throw new ModelCallError("MODEL_OUTPUT_INCOMPLETE_OR_REFUSED", response.status, true);
-  }
-  let decoded: unknown;
   try {
-    decoded = JSON.parse(choice.message.content);
-  } catch {
-    throw new ModelCallError("MODEL_OUTPUT_INVALID_JSON", response.status, true);
+    const body = await readProviderJson(response);
+    const parsedEnvelope = providerResponseSchema.safeParse(body);
+    if (!parsedEnvelope.success) throw new ModelCallError("MODEL_RESPONSE_INVALID", response.status, true);
+    const data = parsedEnvelope.data;
+    const choice = data.choices?.[0];
+    const usage: ModelUsage = {
+      promptTokens: data.usage?.prompt_tokens ?? null,
+      completionTokens: data.usage?.completion_tokens ?? null,
+      reportedCostUsd: data.usage?.cost ?? null,
+      responseId: data.id ?? response.headers.get("x-generation-id"),
+      requestedModel: MODEL,
+      returnedModel: data.model ?? null,
+      provider: data.provider ?? null,
+    };
+    if (!choice || choice.finish_reason !== "stop" || typeof choice.message?.content !== "string" || choice.message.refusal) {
+      throw new ModelCallError("MODEL_OUTPUT_INCOMPLETE_OR_REFUSED", response.status, true);
+    }
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(choice.message.content);
+    } catch {
+      throw new ModelCallError("MODEL_OUTPUT_INVALID_JSON", response.status, true);
+    }
+    const parsed = resultSchema(stage).safeParse(decoded);
+    if (!parsed.success) throw new ModelCallError("MODEL_OUTPUT_SCHEMA_INVALID", response.status, true);
+    return { output: parsed.data, usage };
+  } catch (error) {
+    if (error instanceof ModelCallError) error.generationId = response.headers.get("x-generation-id");
+    throw error;
   }
-  const parsed = resultSchema(stage).safeParse(decoded);
-  if (!parsed.success) throw new ModelCallError("MODEL_OUTPUT_SCHEMA_INVALID", response.status, true);
-  return { output: parsed.data, usage };
 }

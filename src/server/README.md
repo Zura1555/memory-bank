@@ -1,3 +1,9 @@
 The Worker is the sole online API and serves Vite's `dist/` assets. Hono routes implement the shared contract in `../shared/protocol.ts`; model outputs are not returned until exact reference checks and a separate support review complete. Production database access uses Hyperdrive; local development uses a real PostgreSQL connection only when `APP_ENV=development`. No credentials or fixture response path is compiled into the Worker.
 
 OpenRouter requests pin the OpenAI route with strict parameter support and no fallback. Omit `temperature`: the configured `openai/gpt-6-luna` OpenAI endpoint does not advertise it as supported. Keep admission disabled after a provider rejection until the request is corrected and a new paid attempt is explicitly approved; metadata compatibility is not proof of successful inference.
+
+Requests explicitly set `stream: false`; the response reader expects one JSON envelope, not SSE events. A completed provider generation does not prove that the app accepted its response. Unexpected transport or envelope failures remain uncertain and require reconciliation against provider records before another admission.
+
+Each model request has a 120-second deadline covering headers and the complete response body; its Workflow step has a 135-second deadline. The UI's 90-second assessment and 30-second brief values are processing targets, not cancellation deadlines. A timeout after dispatch remains uncertain, has no automatic retry, and retains `X-Generation-Id` in operator status when supplied by the provider.
+
+Draft prompts require the same artifact coverage and claim membership enforced by structural checks: every available assessment artifact and every selected brief item is classified, and blockers/verification claims belong to the item's claim set with exact artifact evidence. Invalid drafts are rejected, not patched into plausible output.

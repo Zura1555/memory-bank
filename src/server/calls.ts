@@ -71,8 +71,8 @@ export async function runPaidStage(
     const state = error instanceof ModelCallError && !error.uncertain ? "failed" : "uncertain";
     try {
       const updated = await pool.query(
-        "UPDATE model_attempts SET state = $2, error_code = $3, completed_at = now() WHERE id = $1 AND state = 'dispatching'",
-        [attempt.attemptId, state, code],
+        "UPDATE model_attempts SET state = $2, error_code = $3, generation_id = $4, completed_at = now() WHERE id = $1 AND state = 'dispatching'",
+        [attempt.attemptId, state, code, error instanceof ModelCallError ? error.generationId : null],
       );
       if (!updated.rowCount) throw new Error("MODEL_ATTEMPT_STATE_CHANGED");
     } catch {

@@ -148,7 +148,7 @@ export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> 
         await setStage(this.env, params, "drafting");
         const draftAttemptId = await step.do("assessment-draft", {
           retries: { limit: 0, delay: "1 second" },
-          timeout: "45 seconds",
+          timeout: "135 seconds",
           sensitive: "output",
         }, () => runPaidStage(this.env, params, 1, "assessment_draft", draftPrompt));
         const draft = assessmentDraftSchema.parse(await loadStageOutput(this.env, draftAttemptId));
@@ -158,7 +158,7 @@ export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> 
         await setStage(this.env, params, "support_review");
         const reviewAttemptId = await step.do("assessment-support-review", {
           retries: { limit: 0, delay: "1 second" },
-          timeout: "45 seconds",
+          timeout: "135 seconds",
           sensitive: "output",
         }, () => runPaidStage(this.env, params, 2, "assessment_review", reviewPrompt));
         const review = supportReviewSchema.parse(await loadStageOutput(this.env, reviewAttemptId));
@@ -173,7 +173,7 @@ export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> 
         await setStage(this.env, params, "drafting");
         const draftAttemptId = await step.do("brief-draft", {
           retries: { limit: 0, delay: "1 second" },
-          timeout: "18 seconds",
+          timeout: "135 seconds",
           sensitive: "output",
         }, () => runPaidStage(this.env, params, 1, "brief_draft", draftPrompt));
         const draft = briefDraftSchema.parse(await loadStageOutput(this.env, draftAttemptId));
@@ -183,7 +183,7 @@ export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> 
         await setStage(this.env, params, "support_review");
         const reviewAttemptId = await step.do("brief-support-review", {
           retries: { limit: 0, delay: "1 second" },
-          timeout: "18 seconds",
+          timeout: "135 seconds",
           sensitive: "output",
         }, () => runPaidStage(this.env, params, 2, "brief_review", reviewPrompt));
         const review = supportReviewSchema.parse(await loadStageOutput(this.env, reviewAttemptId));
