@@ -8,6 +8,7 @@ import { loadCorpus, loadManifest } from "./corpus.ts";
 import { HttpFailure } from "./errors.ts";
 import { ownedJob } from "./jobs.ts";
 import { validateSelections } from "./selections.ts";
+import { revalidateAssessment } from "./gates.ts";
 
 const RESERVATION_MICRO_USD = 600_000;
 const JOB_LIFETIME_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -98,7 +99,8 @@ export async function startBrief(env: Env, jobId: string, capability: Buffer, se
   }
   const corpus = await loadCorpus(env);
   if (preflightJob.corpus_version !== corpus.manifest.corpusVersion || preflightJob.corpus_sha256 !== corpus.manifestSha256) throw new HttpFailure(409, "CORPUS_CHANGED");
-  const checkedSelections = normalizedSelections(validateSelections(normalizedInput, preflightJob.assessment_result, corpus));
+  const assessment = revalidateAssessment(preflightJob.assessment_result, preflightJob.request_text, corpus);
+  const checkedSelections = normalizedSelections(validateSelections(normalizedInput, assessment, corpus));
 
   const result = await transaction(pool, async (client) => {
     await lockWorkflow(client);

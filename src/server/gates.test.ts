@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AssessmentResult, Claim, Selection, SupportVerdict } from "../shared/protocol.ts";
-import type { AssessmentDraft, BriefDraft } from "./schemas.ts";
-import { buildCheckedBrief, GateFailure, validateAssessmentDraft, validateBriefDraft, validateSupportReview } from "./gates.ts";
+import { parseAssessmentDraft, type AssessmentDraft, type AssessmentOutput, type BriefDraft } from "./schemas.ts";
+import { buildCheckedAssessment, buildCheckedBrief, GateFailure, revalidateAssessment, revalidateBrief, validateAssessmentDraft, validateBriefDraft, validateLeadReview, validateSupportReview } from "./gates.ts";
 import { validateSelections } from "./selections.ts";
 import type { Artifact, CorpusSnapshot, PastCase, SourceVersion } from "./corpus.ts";
 
@@ -64,44 +64,29 @@ function fixture(): CorpusSnapshot {
 }
 
 function assessmentDraft(corpus: CorpusSnapshot): AssessmentDraft {
-  const claims: Claim[] = corpus.manifest.cases.flatMap((pastCase, index) => {
-    const artifact = pastCase.artifacts[0];
+  const claims: Claim[] = corpus.manifest.cases.flatMap((pastCase, caseIndex) => pastCase.artifacts.flatMap((artifact, artifactIndex) => {
     const version = artifact.versions[0];
-    const passage = version.passages[0];
-    const sourceRefs = [{ caseId: pastCase.caseId, artifactId: artifact.artifactId, versionId: version.versionId, passageId: passage.passageId }];
+    const sourceRefs = [{ caseId: pastCase.caseId, artifactId: artifact.artifactId, versionId: version.versionId, passageId: version.passages[0].passageId }];
+    const suffix = `${caseIndex}-${artifactIndex}`;
     return [
-      {
-        claimId: `claim-${index + 1}`,
-        text: `Evidence from ${pastCase.caseId}`,
-        kind: "source_fact",
-        sourceRefs,
-        requestQuotes: ["current request"],
-        dependsOnClaimIds: [],
-      },
-      {
-        claimId: `decision-${index + 1}`,
-        text: `Adapt the checked ${artifact.artifactId} work for this request.`,
-        kind: "recommendation",
-        sourceRefs,
-        requestQuotes: ["current request"],
-        dependsOnClaimIds: [],
-      },
+      { claimId: `fact-${suffix}`, text: "Recorded work", kind: "source_fact", sourceRefs, requestQuotes: [], dependsOnClaimIds: [] },
+      { claimId: `decision-${suffix}`, text: "Adapt the recorded work after checking the client's capabilities.", kind: "recommendation", sourceRefs, requestQuotes: ["current request"], dependsOnClaimIds: [`fact-${suffix}`] },
     ];
-  });
+  }));
   return {
-    cases: corpus.manifest.cases.map((pastCase, index) => ({
+    cases: corpus.manifest.cases.map((pastCase, caseIndex) => ({
       caseId: pastCase.caseId,
-      outcome: "unknown",
-      outcomeClaimIds: [],
-      claimIds: [claims[index * 2].claimId],
-      artifactWork: [{
-        artifactId: pastCase.artifacts[0].artifactId,
+      outcome: "observed_success",
+      outcomeClaimIds: [`fact-${caseIndex}-0`],
+      claimIds: pastCase.artifacts.map((_, artifactIndex) => `fact-${caseIndex}-${artifactIndex}`),
+      artifactWork: pastCase.artifacts.map((artifact, artifactIndex) => ({
+        artifactId: artifact.artifactId,
         disposition: "adapt",
-        dispositionClaimId: claims[index * 2 + 1].claimId,
-        claimIds: [claims[index * 2].claimId, claims[index * 2 + 1].claimId],
+        dispositionClaimId: `decision-${caseIndex}-${artifactIndex}`,
+        claimIds: [`fact-${caseIndex}-${artifactIndex}`, `decision-${caseIndex}-${artifactIndex}`],
         blockerClaimIds: [],
         verificationClaimIds: [],
-      }],
+      })),
     })),
     leads: [],
     contrasts: [],
@@ -112,8 +97,10 @@ function assessmentDraft(corpus: CorpusSnapshot): AssessmentDraft {
 
 test("assessment rejects omitted artifacts even when all eight cases are present", () => {
   const corpus = fixture();
+  const draft = assessmentDraft(corpus);
+  draft.cases[0].artifactWork.pop();
   assert.throws(
-    () => validateAssessmentDraft(assessmentDraft(corpus), "current request", corpus),
+    () => validateAssessmentDraft(draft, "current request", corpus),
     (error: unknown) => error instanceof GateFailure && error.code === "INCOMPLETE_ARTIFACT_WORK",
   );
 });
@@ -194,4 +181,98 @@ test("support review must cover each claim exactly once", () => {
     () => validateSupportReview([claim], { claimReviews: [] }),
     (error: unknown) => error instanceof GateFailure && error.code === "INCOMPLETE_SUPPORT_REVIEW",
   );
+});
+
+test("artifact recommendations and role claims remain independently reviewable", () => {
+  const corpus = fixture();
+  const draft = assessmentDraft(corpus);
+  const byId = new Map(draft.claims.map((claim) => [claim.claimId, claim]));
+  const output: AssessmentOutput = {
+    ...draft,
+    claims: draft.claims.filter((claim) => claim.kind !== "recommendation"),
+    cases: draft.cases.map((item) => ({
+      ...item,
+      artifactWork: item.artifactWork.map((work) => {
+        const { claimId: _, kind: __, ...recommendation } = byId.get(work.dispositionClaimId)!;
+        return {
+          artifactId: work.artifactId, disposition: "adapt", recommendation,
+          supportingClaimIds: work.claimIds.filter((id) => id !== work.dispositionClaimId),
+          blockerClaimIds: [], verificationClaimIds: [],
+        };
+      }),
+    })),
+  };
+  const blocker: Claim = {
+    ...draft.claims[0], claimId: "blocker", kind: "recommendation", text: "Verify the new target before adaptation.",
+  };
+  output.claims.push(blocker);
+  output.cases[0].artifactWork[0].blockerClaimIds.push(blocker.claimId);
+  const parsed = parseAssessmentDraft(output);
+  const invalid = validateAssessmentDraft(parsed, "current request", corpus);
+  const rejected = parsed.cases[0].artifactWork[0].dispositionClaimId;
+  const kept = parsed.cases[0].artifactWork[1].dispositionClaimId;
+  parsed.leads = [{ caseId: "case-1", state: "conditional", usefulArtifactIds: ["handover"], reasonClaimIds: ["fact-0-1"] }];
+  const verdicts = new Map<string, SupportVerdict>(parsed.claims.map((claim) => [claim.claimId, claim.claimId === rejected ? "unsupported" : "supported"]));
+  const checked = buildCheckedAssessment(parsed, verdicts, invalid, corpus, new Map([["case-1/handover", "supported"]]), "precedent_found");
+  assert.equal(checked.cases[0].artifactWork[0].disposition, null);
+  assert.equal(checked.cases[0].artifactWork[1].disposition, "adapt");
+  assert.ok(checked.claims.some((claim) => claim.claimId === kept));
+  assert.ok(checked.claims.some((claim) => claim.claimId === blocker.claimId));
+});
+
+test("true historical facts cannot promote an incompatible artifact into a useful precedent", () => {
+  const corpus = fixture();
+  const draft = assessmentDraft(corpus);
+  draft.leads = [{ caseId: "case-1", state: "partial", usefulArtifactIds: ["request"], reasonClaimIds: ["fact-0-0"] }];
+  const review = {
+    conclusion: "no_useful_precedent" as const,
+    claimReviews: draft.claims.map((claim) => ({ claimId: claim.claimId, verdict: "supported" as const })),
+    leadReviews: [{ caseId: "case-1", artifactId: "request", verdict: "unsupported" as const }],
+  };
+  const checked = buildCheckedAssessment(draft, validateSupportReview(draft.claims, review), new Set(), corpus, validateLeadReview(draft, review), review.conclusion);
+  assert.equal(checked.conclusion, "no_useful_precedent");
+  assert.deepEqual(checked.leads, []);
+  assert.equal(checked.cases[0].artifactWork[0].disposition, null);
+  assert.ok(checked.claims.some((claim) => claim.claimId === "fact-0-0"));
+  const uncertain = { ...review, conclusion: "cannot_be_established" as const, leadReviews: [{ caseId: "case-1", artifactId: "request", verdict: "uncertain" as const }] };
+  assert.equal(buildCheckedAssessment(draft, validateSupportReview(draft.claims, uncertain), new Set(), corpus, validateLeadReview(draft, uncertain), uncertain.conclusion).conclusion, "cannot_be_established");
+});
+
+test("persisted assessments and briefs lose claims transitively when original evidence becomes unavailable", () => {
+  const corpus = fixture();
+  const draft = assessmentDraft(corpus);
+  draft.claims.find((claim) => claim.claimId === "decision-0-1")!.dependsOnClaimIds.push("fact-0-0");
+  draft.leads = [{ caseId: "case-1", state: "conditional", usefulArtifactIds: ["handover"], reasonClaimIds: ["fact-0-1"] }];
+  const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
+  const persisted = buildCheckedAssessment(draft, verdicts, new Set(), corpus, new Map([["case-1/handover", "supported"]]), "precedent_found");
+  const base = { ...draft.claims[0], sourceRefs: [...draft.claims[0].sourceRefs, ...draft.claims[2].sourceRefs] };
+  const dependent = { ...draft.claims[3], dependsOnClaimIds: [base.claimId] };
+  const brief = {
+    reuse: [], verify: [],
+    adapt: [{ caseId: "case-1", artifactId: "handover", versionId: dependent.sourceRefs[0].versionId, disposition: "adapt" as const, dispositionClaimId: dependent.claimId, claimIds: [base.claimId, dependent.claimId] }],
+    claims: [base, dependent], withheldClaimCount: 0,
+  };
+  validateBriefDraft(brief, "current request", [{ caseId: "case-1", artifactId: "handover", versionId: dependent.sourceRefs[0].versionId }], corpus);
+  assert.equal(revalidateBrief(brief, "current request", corpus).adapt[0].disposition, "adapt");
+  corpus.availableVersions.delete("request-v1");
+  corpus.passages.delete("p-request-v1");
+  corpus.caseAvailability.set("case-1", "partial");
+  const current = revalidateAssessment(persisted, "current request", corpus);
+  assert.equal(current.conclusion, "cannot_be_established");
+  assert.deepEqual(current.leads, []);
+  assert.equal(current.cases[0].outcome, "unknown");
+  assert.equal(current.cases[0].artifactWork[1].disposition, null);
+  assert.ok(!current.claims.some((claim) => ["fact-0-0", "decision-0-1"].includes(claim.claimId)));
+  assert.ok(current.claims.some((claim) => claim.claimId === "fact-1-0"));
+  const currentBrief = revalidateBrief(brief, "current request", corpus);
+  assert.deepEqual(currentBrief.adapt, []);
+  assert.deepEqual(currentBrief.claims, []);
+  assert.equal(currentBrief.withheldClaimCount, 2);
+  corpus.availableVersions.add("request-v1");
+  corpus.passages.set("p-request-v1", {
+    ...base.sourceRefs[0], title: "request", fictional: true, statedDate: null,
+    excerpt: "Restored verified evidence", sourceKind: "native", location: { type: "text", startLine: 1, endLine: 1 },
+  });
+  corpus.caseAvailability.set("case-1", "available");
+  assert.equal(revalidateAssessment(persisted, "current request", corpus).conclusion, "precedent_found");
 });

@@ -1,7 +1,7 @@
 import * as z from "zod";
 import type { Env } from "./env.ts";
-import { assessmentDraftSchema, briefDraftSchema, openRouterSchema, supportReviewSchema } from "./schemas.ts";
-import type { AssessmentDraft, BriefDraft, SupportReview } from "./schemas.ts";
+import { assessmentDraftSchema, briefDraftSchema, openRouterSchema, reviewSchema } from "./schemas.ts";
+import type { AssessmentOutput, AssessmentReview, BriefDraft, SupportReview } from "./schemas.ts";
 import type { StagePrompt } from "./prompts.ts";
 
 export type ModelStage = "assessment_draft" | "assessment_review" | "brief_draft" | "brief_review";
@@ -84,28 +84,25 @@ const providerResponseSchema = z.object({
   }).optional(),
 });
 
-function responseSchema(stage: ModelStage) {
-  switch (stage) {
-    case "assessment_draft": return openRouterSchema("assessment_draft", assessmentDraftSchema);
-    case "assessment_review": return openRouterSchema("assessment_review", supportReviewSchema);
-    case "brief_draft": return openRouterSchema("brief_draft", briefDraftSchema);
-    case "brief_review": return openRouterSchema("brief_review", supportReviewSchema);
-  }
-}
 
-function resultSchema(stage: ModelStage) {
+function resultSchema(stage: ModelStage, prompt: StagePrompt) {
   switch (stage) {
     case "assessment_draft": return assessmentDraftSchema;
-    case "assessment_review": return supportReviewSchema;
     case "brief_draft": return briefDraftSchema;
-    case "brief_review": return supportReviewSchema;
+    case "assessment_review":
+    case "brief_review":
+      if (!prompt.reviewTargets || (stage === "assessment_review") !== (prompt.reviewTargets.leadArtifacts !== undefined)) {
+        throw new ModelCallError("MODEL_REVIEW_TARGETS_UNAVAILABLE", null, false);
+      }
+      return reviewSchema(prompt.reviewTargets);
   }
 }
 
-export type StageOutput = AssessmentDraft | BriefDraft | SupportReview;
+export type StageOutput = AssessmentOutput | AssessmentReview | BriefDraft | SupportReview;
 
 export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StagePrompt): Promise<{ output: StageOutput; usage: ModelUsage }> {
   if (!env.OPENROUTER_API_KEY) throw new ModelCallError("MODEL_CREDENTIAL_UNAVAILABLE", null, false);
+  const schema = resultSchema(stage, prompt);
   const timeoutMs = 120_000;
   let response: Response;
   try {
@@ -116,7 +113,7 @@ export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StageP
       provider: { only: ["openai"], order: ["openai"], allow_fallbacks: false, require_parameters: true },
       max_tokens: 16_384,
       reasoning: { effort: "none" },
-      response_format: responseSchema(stage),
+      response_format: openRouterSchema(stage, schema),
       tools: [],
       tool_choice: "none",
       plugins: [],
@@ -170,7 +167,7 @@ export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StageP
     } catch {
       throw new ModelCallError("MODEL_OUTPUT_INVALID_JSON", response.status, true);
     }
-    const parsed = resultSchema(stage).safeParse(decoded);
+    const parsed = schema.safeParse(decoded);
     if (!parsed.success) throw new ModelCallError("MODEL_OUTPUT_SCHEMA_INVALID", response.status, true);
     return { output: parsed.data, usage };
   } catch (error) {

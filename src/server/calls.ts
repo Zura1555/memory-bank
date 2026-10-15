@@ -11,7 +11,7 @@ interface BegunAttempt {
 }
 
 export class ReconciliationRequired extends Error {
-  constructor(readonly attemptId: string) {
+  constructor(readonly attemptId: string, readonly code = "MODEL_DISPATCH_UNCERTAIN") {
     super("A prior paid dispatch has an uncertain outcome and cannot be repeated.");
     this.name = "ReconciliationRequired";
   }
@@ -78,7 +78,7 @@ export async function runPaidStage(
     } catch {
       throw new ReconciliationRequired(attempt.attemptId);
     }
-    if (state === "uncertain") throw new ReconciliationRequired(attempt.attemptId);
+    if (state === "uncertain") throw new ReconciliationRequired(attempt.attemptId, code);
     throw error;
   }
 

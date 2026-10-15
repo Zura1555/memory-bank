@@ -7,3 +7,11 @@ Requests explicitly set `stream: false`; the response reader expects one JSON en
 Each model request has a 120-second deadline covering headers and the complete response body; its Workflow step has a 135-second deadline. The UI's 90-second assessment and 30-second brief values are processing targets, not cancellation deadlines. A timeout after dispatch remains uncertain, has no automatic retry, and retains `X-Generation-Id` in operator status when supplied by the provider.
 
 Draft prompts require the same artifact coverage and claim membership enforced by structural checks: every available assessment artifact and every selected brief item is classified, and blockers/verification claims belong to the item's claim set with exact artifact evidence. Invalid drafts are rejected, not patched into plausible output.
+
+Assessment outputs contain an inline recommendation per artifact. The server assigns its unique claim ID and constructs membership from supporting, blocker, and verification roles; it does not repair prose or fabricate evidence. The schema forbids unchanged reuse with blockers/checks and requires a concrete verification claim for verify items.
+
+Review schemas enumerate only the current draft's claim IDs. A brief's checked assessment is background, not an additional review inventory. Assessment review separately checks proposed lead artifacts against the requested capabilities and records a whole-corpus conclusion; true historical facts alone cannot establish an implementation precedent.
+
+Ready job responses revalidate the pinned manifest and original hashes before serving claims. Lost or corrupted evidence withholds its claims, transitive dependants, and affected work items. Brief admission and execution use the revalidated assessment. Restoring exact evidence can restore the original checked result without another model call.
+
+Paid Workflow steps checkpoint either an attempt ID or a serializable failure code/uncertainty outcome. Typed exceptions are classified inside the step, before the platform can serialize them into generic errors. Unresolved dispatches still require reconciliation and cannot be replayed into another paid call.
