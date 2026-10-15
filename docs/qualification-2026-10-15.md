@@ -268,3 +268,16 @@ Remaining assessment defects are not hidden by readiness:
 - Harbor is labeled Failed while its claims preserve unknown client-dependent provisioning outcome. Stopped work and unknown outcome should not be conflated.
 
 **Bounded P1 flow gate passed with recorded quality defects.** No held-out evaluation, all-request qualification, broad reliability/latency claim, production deployment, or public release is authorized by this result. The historical ledger-loss limitation remains explicit; this run reconciles the fresh campaign, not missing historical rows.
+
+## Independently checked case-outcome classifications
+
+The recorded Harbor defect above is preserved as historical evidence. Outcome normalization now creates a distinct `outcome-N` interpretation for each non-unknown label with nominated evidence. Its dependencies are the outcome facts, and its text states the exact label. The existing independent reviewer receives that classification as its own required verdict target, with explicit instructions to distinguish stopped work and unknown provisioning from an observed failed result. The gate requires both the classification and its evidence; unsupported, uncertain, missing, or evidence-free labels become Unknown rather than another classification. Stored results lacking the new classification claim also become Unknown on revalidation; accepted factual context remains visible.
+
+Verification:
+
+- Before the fix, `node --experimental-strip-types --test --test-name-pattern='case outcome labels need their own review' src/server/gates.test.ts` failed: the Harbor-style case, uncertain classification, and missing classification all retained `failed` when their facts passed.
+- The regression now covers withholding those labels, retaining supported failure/partial/success, missing evidence, rejected/uncertain dependencies, invalid references, older stored outcomes, and subsequent evidence loss.
+- `node --experimental-strip-types /tmp/memory-bank-outcome-smoke.mts` loaded the real local originals through the corpus hash checks and exercised normalization, review-target construction, review validation, the gate, and stored-result revalidation. Using manual verdicts against Harbor's 2025-06-16 delivery-log excerpt, the generated `failed` became `unknown`, the original unknown-provisioning fact remained visible, and the classification appeared in the review inventory. The temporary script was removed after the run.
+- `npm run typecheck`, `npm test` (18 TypeScript tests and one Python test), `npm run build`, and `npm run ingest` passed. Ingestion's timestamp-only manifest changes were discarded.
+
+This is a deterministic gate/regression check, not a paid model qualification. No live reviewer or P1–P4 rerun, held-out evaluation, failure-recovery/retention campaign, latency/cost qualification, deployment, or change to repository visibility was performed. The separate disposition-versus-recommendation defect remains open. A reviewer can still make a semantic error; requiring an explicit classification verdict closes the unreviewed-label path, not broad reliability.
