@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { Dialog } from "@base-ui/react/dialog";
+import { Select } from "@base-ui/react/select";
 import type {
   ArtifactAssessment,
   AssessmentResult,
@@ -449,12 +450,31 @@ function WorkCard({
       {draft.selected && canSelect && (
         <div className="passage-picker">
           {versions.length > 1 && (
-            <label className="field-label">
-              Retained version
-              <select value={selectedVersion} onChange={(event) => onChange({ ...draft, versionId: event.currentTarget.value, passageIds: [] })}>
-                {versions.map((versionId) => <option key={versionId} value={versionId}>{versionId}</option>)}
-              </select>
-            </label>
+            <div>
+              <Select.Root value={selectedVersion} onValueChange={(versionId) => {
+                if (versionId !== null) onChange({ ...draft, versionId, passageIds: [] });
+              }}>
+                <Select.Label className="field-label">Retained version</Select.Label>
+                <Select.Trigger className="version-select-trigger">
+                  <Select.Value />
+                  <Select.Icon aria-hidden="true">▾</Select.Icon>
+                </Select.Trigger>
+                <Select.Portal>
+                  <Select.Positioner className="version-select-positioner" sideOffset={4} alignItemWithTrigger={false}>
+                    <Select.Popup className="version-select-popup">
+                      <Select.List className="version-select-list">
+                        {versions.map((versionId) => (
+                          <Select.Item className="version-select-item" key={versionId} value={versionId}>
+                            <Select.ItemIndicator className="version-select-indicator" aria-hidden="true">✓</Select.ItemIndicator>
+                            <Select.ItemText>{versionId}</Select.ItemText>
+                          </Select.Item>
+                        ))}
+                      </Select.List>
+                    </Select.Popup>
+                  </Select.Positioner>
+                </Select.Portal>
+              </Select.Root>
+            </div>
           )}
           {versions.length === 1 && <p className="muted small">Retained version: <span className="record-id">{selectedVersion}</span></p>}
           <fieldset>
