@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import Ajv from "ajv";
 import test from "node:test";
 import type { AssessmentResult, Claim, Selection, SupportVerdict } from "../shared/protocol.ts";
-import { parseAssessmentDraft, type AssessmentDraft, type AssessmentOutput, type BriefDraft } from "./schemas.ts";
+import { assessmentDraftSchema, openRouterSchema, parseAssessmentDraft, type AssessmentDraft, type AssessmentOutput, type BriefDraft } from "./schemas.ts";
 import { buildCheckedAssessment, buildCheckedBrief, GateFailure, revalidateAssessment, revalidateBrief, validateAssessmentDraft, validateBriefDraft, validateLeadReview, validateSupportReview } from "./gates.ts";
 import { validateSelections } from "./selections.ts";
 import type { Artifact, CorpusSnapshot, PastCase, SourceVersion } from "./corpus.ts";
@@ -195,7 +196,7 @@ test("artifact recommendations and role claims remain independently reviewable",
       artifactWork: item.artifactWork.map((work) => {
         const { claimId: _, kind: __, ...recommendation } = byId.get(work.dispositionClaimId)!;
         return {
-          artifactId: work.artifactId, disposition: "adapt", recommendation,
+          artifactId: work.artifactId, disposition: "adapt", usefulForLead: false, recommendation,
           supportingClaims: work.claimIds.filter((id) => id !== work.dispositionClaimId).map((id) => {
             const { claimId: _, ...claim } = byId.get(id)!;
             return claim;
@@ -227,6 +228,54 @@ test("artifact recommendations and role claims remain independently reviewable",
   assert.throws(
     () => validateAssessmentDraft(parseAssessmentDraft(wrongOwner), "current request", corpus),
     (error: unknown) => error instanceof GateFailure && error.code === "CLAIM_ARTIFACT_SCOPE",
+  );
+});
+
+test("generation contract excludes verify work from explicit useful lead choices", () => {
+  const corpus = fixture();
+  const draft = assessmentDraft(corpus);
+  const output: AssessmentOutput = {
+    ...draft,
+    claims: draft.claims.filter((claim) => claim.kind !== "recommendation"),
+    leads: [{ caseId: "case-1", state: "conditional", reasonClaimIds: ["fact-0-1"] }],
+    cases: draft.cases.map((item) => ({
+      ...item,
+      artifactWork: item.artifactWork.map((work) => {
+        const { claimId: _, kind: __, ...recommendation } = draft.claims.find((claim) => claim.claimId === work.dispositionClaimId)!;
+        return {
+          artifactId: work.artifactId, disposition: "adapt", usefulForLead: false,
+          recommendation, supportingClaims: [], blockerClaims: [], verificationClaims: [],
+        };
+      }),
+    })),
+  };
+  const validate = new Ajv({ strict: false }).compile(openRouterSchema("assessment", assessmentDraftSchema).json_schema.schema);
+  for (const disposition of ["reuse", "adapt"] as const) {
+    const work = output.cases[0].artifactWork[1];
+    work.disposition = disposition;
+    work.usefulForLead = true;
+    assert.equal(validate(output), true, JSON.stringify(validate.errors));
+    const parsed = parseAssessmentDraft(output);
+    assert.deepEqual(parsed.leads[0].usefulArtifactIds, ["handover"]);
+    validateAssessmentDraft(parsed, "current request", corpus);
+  }
+  const work = output.cases[0].artifactWork[1];
+  output.cases[0].artifactWork[1] = {
+    ...work, disposition: "verify", usefulForLead: false,
+    verificationClaims: [{ ...work.recommendation, kind: "recommendation" }],
+  };
+  assert.equal(validate(output), true, JSON.stringify(validate.errors));
+  const parsed = parseAssessmentDraft(output);
+  assert.deepEqual(parsed.leads[0].usefulArtifactIds, []);
+  assert.equal(parsed.cases[0].artifactWork[1].disposition, "verify");
+  const inconsistent = structuredClone(output);
+  Object.assign(inconsistent.cases[0].artifactWork[1], { usefulForLead: true });
+  assert.equal(validate(inconsistent), false);
+  assert.throws(() => parseAssessmentDraft(inconsistent));
+  parsed.leads[0].usefulArtifactIds = ["handover"];
+  assert.throws(
+    () => validateAssessmentDraft(parsed, "current request", corpus),
+    (error: unknown) => error instanceof GateFailure && error.code === "LEAD_ARTIFACT_NOT_USABLE",
   );
 });
 

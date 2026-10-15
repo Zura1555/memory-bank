@@ -18,6 +18,7 @@ const claim = z.strictObject({
 const artifactClaim = claim.omit({ claimId: true });
 const artifactWorkFields = {
   artifactId: id,
+  usefulForLead: z.boolean(),
   recommendation: claim.omit({ claimId: true, kind: true }),
   supportingClaims: z.array(artifactClaim).max(32),
   blockerClaims: z.array(artifactClaim).max(16),
@@ -27,7 +28,7 @@ const artifactWorkFields = {
 const artifactWork = z.union([
   z.strictObject({ ...artifactWorkFields, disposition: z.literal("reuse"), blockerClaims: z.array(artifactClaim).max(0), verificationClaims: z.array(artifactClaim).max(0) }),
   z.strictObject({ ...artifactWorkFields, disposition: z.literal("adapt") }),
-  z.strictObject({ ...artifactWorkFields, disposition: z.literal("verify"), verificationClaims: z.array(artifactClaim.extend({ kind: z.literal("recommendation") })).min(1).max(16) }),
+  z.strictObject({ ...artifactWorkFields, disposition: z.literal("verify"), usefulForLead: z.literal(false), verificationClaims: z.array(artifactClaim.extend({ kind: z.literal("recommendation") })).min(1).max(16) }),
 ]);
 const caseDraft = z.strictObject({
   caseId: id,
@@ -66,7 +67,7 @@ export const startBriefSchema = z.strictObject({
 
 export const assessmentDraftSchema = z.strictObject({
   cases: z.array(caseDraft).length(8),
-  leads: z.array(lead).max(3),
+  leads: z.array(lead.omit({ usefulArtifactIds: true })).max(3),
   contrasts: z.array(lead).max(8),
   clarifyingClaimIds: z.array(id).max(8),
   claims: z.array(claim).max(400),
@@ -118,8 +119,9 @@ type ArtifactWork = {
   blockerClaimIds: string[];
   verificationClaimIds: string[];
 };
-export type AssessmentDraft = Omit<AssessmentOutput, "cases"> & {
+export type AssessmentDraft = Omit<AssessmentOutput, "cases" | "leads"> & {
   cases: (Omit<AssessmentOutput["cases"][number], "artifactWork"> & { artifactWork: ArtifactWork[] })[];
+  leads: z.infer<typeof lead>[];
 };
 export type BriefDraft = z.infer<typeof briefDraftSchema>;
 export type SupportReview = z.infer<typeof supportReviewSchema>;
@@ -153,7 +155,12 @@ export function parseAssessmentDraft(value: unknown): AssessmentDraft {
       };
     }),
   }));
-  return { ...output, cases, claims };
+  const leads = output.leads.map((lead) => ({
+    ...lead,
+    usefulArtifactIds: output.cases.find((item) => item.caseId === lead.caseId)?.artifactWork
+      .filter((work) => work.usefulForLead).map((work) => work.artifactId) ?? [],
+  }));
+  return { ...output, cases, leads, claims };
 }
 
 export function openRouterSchema(name: string, schema: z.ZodType): {
