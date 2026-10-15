@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from build_manifest import validate_catalog, validate_records
+
 ROOT = Path(__file__).resolve().parents[1]
 BUCKET = "memory-bank-originals"
 
@@ -19,6 +21,12 @@ def publish() -> None:
         raise ValueError("build corpus/manifest.json and install the pinned Wrangler dependency first")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    validate_catalog(catalog, ROOT)
+    validate_records(manifest)
+    if manifest["schemaVersion"] != catalog["schemaVersion"]:
+        raise ValueError("manifest and catalog schemaVersion values differ")
+    if {case["caseId"]: case["records"] for case in catalog["cases"]} != {case["caseId"]: case["records"] for case in manifest["cases"]}:
+        raise ValueError("reviewed records changed; rebuild the manifest before publishing")
     if catalog["corpusVersion"] != manifest["corpusVersion"]:
         raise ValueError("manifest and source catalog corpusVersion values differ")
     originals_root = (ROOT / "corpus/originals").resolve()

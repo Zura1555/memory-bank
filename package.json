@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "wrangler dev --ip 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/**/*.test.ts",
+    "test": "node --experimental-strip-types --test src/**/*.test.ts && python3 -m unittest discover -s ingestion -p '*_test.py'",
     "ingest": "python3 ingestion/build_manifest.py",
     "publish:corpus": "python3 ingestion/publish_corpus.py"
   },

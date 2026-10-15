@@ -14,7 +14,7 @@ function fixture(): CorpusSnapshot {
   const versions = new Map<string, { version: SourceVersion; artifact: Artifact; pastCase: PastCase }>();
   for (let index = 1; index <= 8; index++) {
     const caseId = `case-${index}`;
-    const pastCase: PastCase = { caseId, title: `Fictional case ${index}`, fictional: true, artifacts: [] };
+    const pastCase: PastCase = { caseId, title: `Fictional case ${index}`, fictional: true, artifacts: [], records: [] };
     const artifactIds = index === 1 ? ["request", "handover"] : ["request"];
     for (const artifactId of artifactIds) {
       const sourceVersions = index === 1 && artifactId === "request" ? ["request-v1", "request-v2"] : [`${artifactId}-v1-${caseId}`];
@@ -54,7 +54,7 @@ function fixture(): CorpusSnapshot {
     caseAvailability.set(caseId, "available");
   }
   return {
-    manifest: { schemaVersion: 1, corpusVersion: "test-v1", cases },
+    manifest: { schemaVersion: 2, corpusVersion: "test-v1", cases },
     manifestSha256: "b".repeat(64),
     availableVersions,
     caseAvailability,

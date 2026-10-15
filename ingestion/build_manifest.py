@@ -252,14 +252,14 @@ def extract(path: Path, data: bytes):
 
 def validate_catalog(catalog, root):
     id_pattern = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-    if not isinstance(catalog, dict) or set(catalog) != {"schemaVersion", "corpusVersion", "cases"} or catalog.get("schemaVersion") != 1 or not isinstance(catalog.get("corpusVersion"), str) or not re.fullmatch(r"^[a-z0-9][a-z0-9-]{0,63}$", catalog["corpusVersion"]):
+    if not isinstance(catalog, dict) or set(catalog) != {"schemaVersion", "corpusVersion", "cases"} or catalog.get("schemaVersion") != 2 or not isinstance(catalog.get("corpusVersion"), str) or not re.fullmatch(r"^[a-z0-9][a-z0-9-]{0,63}$", catalog["corpusVersion"]):
         raise ValueError("invalid catalog identity or schemaVersion")
     cases = catalog.get("cases")
     if not isinstance(cases, list) or len(cases) != 8:
         raise ValueError("catalog must contain exactly 8 cases")
     ids = set()
     for case in cases:
-        if not isinstance(case, dict) or set(case) != {"caseId", "title", "fictional", "artifacts"} or not (isinstance(case.get("fictional"), bool) and case["fictional"]) or not isinstance(case.get("caseId"), str) or not id_pattern.fullmatch(case["caseId"]) or case["caseId"] in ids or not isinstance(case.get("title"), str) or not case["title"]:
+        if not isinstance(case, dict) or set(case) != {"caseId", "title", "fictional", "artifacts", "records"} or not (isinstance(case.get("fictional"), bool) and case["fictional"]) or not isinstance(case.get("caseId"), str) or not id_pattern.fullmatch(case["caseId"]) or case["caseId"] in ids or not isinstance(case.get("title"), str) or not case["title"]:
             raise ValueError("invalid or duplicate case identity; all cases must be fictional")
         ids.add(case["caseId"])
         artifacts = case.get("artifacts")
@@ -288,18 +288,88 @@ def validate_catalog(catalog, root):
                 version_ids.add(version["versionId"])
 
 
+def validate_records(manifest):
+    """Validate hand-authored records against extracted, exact source identities."""
+    common = {"kind", "recordId", "caseId", "basis", "applicability", "evidence", "reviewStatus", "reviewer", "reviewedAt"}
+    fields = {
+        "decision": {"context", "choice"},
+        "lesson": {"observation", "recommendedFutureAction", "outcomeLimitations"},
+    }
+    id_pattern = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+    records = {}
+    evidence = {
+        (case["caseId"], artifact["artifactId"], version["versionId"], passage["passageId"])
+        for case in manifest["cases"] for artifact in case["artifacts"]
+        for version in artifact["versions"] if version["extractionStatus"] == "complete"
+        for passage in version["passages"]
+    }
+    for case in manifest["cases"]:
+        if not isinstance(case["records"], list) or len(case["records"]) > 32:
+            raise ValueError("invalid knowledge record list")
+        for record in case["records"]:
+            if not isinstance(record, dict) or record.get("kind") not in fields:
+                raise ValueError("invalid knowledge record kind")
+            required = common | fields[record["kind"]]
+            optional = {"supersedesId"} | ({"recordedRationale", "recordedRejectedAlternatives"} if record["kind"] == "decision" else set())
+            if not required <= set(record) or set(record) - required - optional:
+                raise ValueError("invalid knowledge record fields")
+            text_fields = {"recordId", "caseId", "basis", "applicability", "reviewStatus", "reviewer", "reviewedAt"} | fields[record["kind"]] | (set(record) & {"recordedRationale", "supersedesId"})
+            if any(not isinstance(record[key], str) or not record[key].strip() or len(record[key]) > 4000 for key in text_fields):
+                raise ValueError("invalid knowledge record text")
+            if not id_pattern.fullmatch(record["recordId"]) or record["caseId"] != case["caseId"]:
+                raise ValueError("invalid knowledge record identity")
+            if record["recordId"] in records:
+                raise ValueError("duplicate knowledge record ID")
+            if record["reviewStatus"] != "reviewed" or record["basis"] not in {"source_fact", "curator_interpretation"}:
+                raise ValueError("knowledge records require human review and an explicit assertion basis")
+            try:
+                if datetime.strptime(record["reviewedAt"], "%Y-%m-%d").date().isoformat() != record["reviewedAt"]:
+                    raise ValueError()
+            except ValueError as exc:
+                raise ValueError("invalid knowledge review date") from exc
+            alternatives = record.get("recordedRejectedAlternatives")
+            if alternatives is not None and (not isinstance(alternatives, list) or not 1 <= len(alternatives) <= 16 or any(not isinstance(value, str) or not value.strip() or len(value) > 4000 for value in alternatives)):
+                raise ValueError("invalid recorded rejected alternatives")
+            refs = record["evidence"]
+            if not isinstance(refs, list) or not 1 <= len(refs) <= 16:
+                raise ValueError("knowledge records require exact evidence")
+            for ref in refs:
+                if (not isinstance(ref, dict) or set(ref) != {"caseId", "artifactId", "versionId", "passageId"}
+                    or any(not isinstance(value, str) or not id_pattern.fullmatch(value) for value in ref.values())
+                    or ref["caseId"] != case["caseId"]
+                    or (ref["caseId"], ref["artifactId"], ref["versionId"], ref["passageId"]) not in evidence):
+                    raise ValueError("invalid knowledge evidence identity or incomplete source")
+            records[record["recordId"]] = record
+    superseded = set()
+    for record in records.values():
+        target_id = record.get("supersedesId")
+        if target_id is None:
+            continue
+        target = records.get(target_id)
+        if not target or target["caseId"] != record["caseId"] or target["kind"] != record["kind"] or target_id in superseded:
+            raise ValueError("invalid or ambiguous knowledge supersession link")
+        superseded.add(target_id)
+        seen = {record["recordId"]}
+        while target:
+            if target["recordId"] in seen:
+                raise ValueError("knowledge supersession cycle")
+            seen.add(target["recordId"])
+            target = records.get(target.get("supersedesId"))
+
+
 def build(catalog_path: Path, root: Path):
     try:
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"cannot read valid UTF-8 catalog JSON: {exc}") from exc
     validate_catalog(catalog, root)
-    manifest = {"schemaVersion": 1, "corpusVersion": catalog["corpusVersion"], "cases": []}
+    manifest = {"schemaVersion": 2, "corpusVersion": catalog["corpusVersion"], "cases": []}
     audit = {"corpusVersion":catalog["corpusVersion"],"generatedAt":datetime.now(timezone.utc).isoformat(),"sources":[]}
     seen_versions = set()
     for case in catalog["cases"]:
         out_case = {k:case[k] for k in ("caseId","title")}
         out_case["fictional"] = True
+        out_case["records"] = case["records"]
         out_case["artifacts"] = []
         for artifact in case["artifacts"]:
             out_artifact = {k:artifact[k] for k in ("artifactId","title")}
@@ -394,6 +464,7 @@ def build(catalog_path: Path, root: Path):
                 out_artifact["versions"].append(out_version)
             out_case["artifacts"].append(out_artifact)
         manifest["cases"].append(out_case)
+    validate_records(manifest)
     return manifest, audit
 
 

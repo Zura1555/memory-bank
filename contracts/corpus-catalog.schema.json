@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "corpusVersion", "cases"],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "corpusVersion": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
     "cases": {
       "type": "array",
@@ -20,11 +20,12 @@
     "case": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["caseId", "title", "fictional", "artifacts"],
+      "required": ["caseId", "title", "fictional", "artifacts", "records"],
       "properties": {
         "caseId": { "$ref": "#/$defs/id" },
         "title": { "type": "string", "minLength": 1 },
         "fictional": { "const": true },
+        "records": { "type": "array", "maxItems": 32, "items": { "$ref": "knowledge-record.schema.json" } },
         "artifacts": {
           "type": "array",
           "minItems": 3,

@@ -1,11 +1,12 @@
 {
-  "schemaVersion": 1,
-  "corpusVersion": "fictional-onboarding-v1",
+  "schemaVersion": 2,
+  "corpusVersion": "fictional-onboarding-v2",
   "cases": [
     {
       "caseId": "cedar-batch-import",
       "title": "Cedar Supply sandbox import",
       "fictional": true,
+      "records": [],
       "artifacts": [
         {
           "artifactId": "request",
@@ -14,11 +15,11 @@
           "versions": [
             {
               "versionId": "request-2025-02-03",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/cedar-batch-import/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/cedar-batch-import/request.md",
               "mimeType": "text/markdown",
               "sha256": "583d72848dd4ddae1fd6439f478d68c5f67099d76e5fc07d0715fe0e3e7303c9",
               "statedDate": "2025-02-03",
-              "importedAt": "2026-10-14T14:53:22.987042+00:00",
+              "importedAt": "2026-10-15T03:41:06.555888+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -93,11 +94,11 @@
           "versions": [
             {
               "versionId": "notes-2025-02-13",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/cedar-batch-import/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/cedar-batch-import/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "da17d7715f7a28de67bbd88090466724b54fd207a11ad179a36e58d925f1925e",
               "statedDate": "2025-02-13",
-              "importedAt": "2026-10-14T14:53:22.987421+00:00",
+              "importedAt": "2026-10-15T03:41:06.557898+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -182,11 +183,11 @@
           "versions": [
             {
               "versionId": "map-2025-02-11",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/cedar-batch-import/mapping.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/cedar-batch-import/mapping.md",
               "mimeType": "text/markdown",
               "sha256": "7dd4e8ae29cdd878b579364f03207430cfd0e904b7e75eeb01e4f9bfaf09644a",
               "statedDate": "2025-02-11",
-              "importedAt": "2026-10-14T14:53:22.987697+00:00",
+              "importedAt": "2026-10-15T03:41:06.561933+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -310,6 +311,7 @@
       "caseId": "ash-volume-import",
       "title": "Ash Goods high-volume import attempt",
       "fictional": true,
+      "records": [],
       "artifacts": [
         {
           "artifactId": "request",
@@ -318,11 +320,11 @@
           "versions": [
             {
               "versionId": "request-2025-03-04",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/ash-volume-import/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/ash-volume-import/request.md",
               "mimeType": "text/markdown",
               "sha256": "aa248c70087b3d697bee8d91166dce518e0924d7d84d4b9e19859a85f560a5a1",
               "statedDate": "2025-03-04",
-              "importedAt": "2026-10-14T14:53:22.988023+00:00",
+              "importedAt": "2026-10-15T03:41:06.564112+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -397,11 +399,11 @@
           "versions": [
             {
               "versionId": "notes-2025-03-18",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/ash-volume-import/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/ash-volume-import/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "5d73a1f91c5f92ffa62fecc4a429d973926c78247cf3dbe00e74fb65ab1a1845",
               "statedDate": "2025-03-18",
-              "importedAt": "2026-10-14T14:53:22.988451+00:00",
+              "importedAt": "2026-10-15T03:41:06.565677+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -486,11 +488,11 @@
           "versions": [
             {
               "versionId": "draft-2025-03-14",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/ash-volume-import/reconciliation-draft.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/ash-volume-import/reconciliation-draft.md",
               "mimeType": "text/markdown",
               "sha256": "787e00cbed5332befdbb03a0fe32cd45d7530248e145f96565595a71178e7ac5",
               "statedDate": "2025-03-14",
-              "importedAt": "2026-10-14T14:53:22.988761+00:00",
+              "importedAt": "2026-10-15T03:41:06.567782+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -604,6 +606,7 @@
       "caseId": "elm-bulk-integration",
       "title": "Elm Rentals batch connector",
       "fictional": true,
+      "records": [],
       "artifacts": [
         {
           "artifactId": "request",
@@ -612,11 +615,11 @@
           "versions": [
             {
               "versionId": "request-2025-04-02",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/elm-bulk-integration/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/elm-bulk-integration/request.md",
               "mimeType": "text/markdown",
               "sha256": "6a59eaaea35a276689ce5baaaeddd77d9192dcc5ef97773ae3f6313d29074e2e",
               "statedDate": "2025-04-02",
-              "importedAt": "2026-10-14T14:53:22.989032+00:00",
+              "importedAt": "2026-10-15T03:41:06.570761+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -681,11 +684,11 @@
           "versions": [
             {
               "versionId": "notes-2025-04-17",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/elm-bulk-integration/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/elm-bulk-integration/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "99fb97424fea9111f745527eff5ccff485adf49e197026a860d6278907553483",
               "statedDate": "2025-04-17",
-              "importedAt": "2026-10-14T14:53:22.989251+00:00",
+              "importedAt": "2026-10-15T03:41:06.572572+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -770,11 +773,11 @@
           "versions": [
             {
               "versionId": "adapter-2025-04-11",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/elm-bulk-integration/batch-adapter-notes.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/elm-bulk-integration/batch-adapter-notes.md",
               "mimeType": "text/markdown",
               "sha256": "c19a73c1d5f5625be5d7a728e5c6e2bb0f7512e68517f3a9ce6176d619facee2",
               "statedDate": "2025-04-11",
-              "importedAt": "2026-10-14T14:53:22.989517+00:00",
+              "importedAt": "2026-10-15T03:41:06.578360+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -878,6 +881,7 @@
       "caseId": "finch-legacy-api",
       "title": "Finch Travel legacy connector and version limits",
       "fictional": true,
+      "records": [],
       "artifacts": [
         {
           "artifactId": "request",
@@ -886,11 +890,11 @@
           "versions": [
             {
               "versionId": "request-2024-11-06",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/finch-legacy-api/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/finch-legacy-api/request.md",
               "mimeType": "text/markdown",
               "sha256": "abe32bb65d4da53491bb22bb777d787e88181c1982b21afc4583690ecef40164",
               "statedDate": "2024-11-06",
-              "importedAt": "2026-10-14T14:53:22.989764+00:00",
+              "importedAt": "2026-10-15T03:41:06.582564+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -955,11 +959,11 @@
           "versions": [
             {
               "versionId": "notes-2025-05-06",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/finch-legacy-api/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/finch-legacy-api/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "1546fd6c37f9ed86a914d0be185af9ce99934b77ee0f2ba5a0a994cc144bef80",
               "statedDate": "2025-05-06",
-              "importedAt": "2026-10-14T14:53:22.989983+00:00",
+              "importedAt": "2026-10-15T03:41:06.584594+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -1044,11 +1048,11 @@
           "versions": [
             {
               "versionId": "capabilities-2025-05-02",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/finch-legacy-api/capability-sheet.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/finch-legacy-api/capability-sheet.md",
               "mimeType": "text/markdown",
               "sha256": "b036b02895c33a44d483d39da285d54226a04f6031a0d666cedf5d4dcc73d737",
               "statedDate": "2025-05-02",
-              "importedAt": "2026-10-14T14:53:22.990211+00:00",
+              "importedAt": "2026-10-15T03:41:06.586468+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -1142,6 +1146,95 @@
       "caseId": "grove-scoped-access",
       "title": "Grove Clinic scoped test access",
       "fictional": true,
+      "records": [
+        {
+          "kind": "decision",
+          "recordId": "grove-broad-admin",
+          "caseId": "grove-scoped-access",
+          "basis": "source_fact",
+          "context": "An early draft proposed temporary tenant-wide administrator access. Security rejected it because only job diagnostics were requested; no account was provisioned from the draft.",
+          "choice": "Propose temporary tenant-wide administrator access (rejected, never provisioned).",
+          "recordedRationale": "To avoid delays.",
+          "applicability": "Historical rejected proposal for Grove's diagnostic-access request only; not current access advice.",
+          "evidence": [
+            {
+              "caseId": "grove-scoped-access",
+              "artifactId": "delivery-log",
+              "versionId": "notes-2025-01-22",
+              "passageId": "p-cb43aa551e1eaa58e53a4eead7002428"
+            }
+          ],
+          "reviewStatus": "reviewed",
+          "reviewer": "Zura1555",
+          "reviewedAt": "2026-10-15"
+        },
+        {
+          "kind": "decision",
+          "recordId": "grove-scoped-setup",
+          "caseId": "grove-scoped-access",
+          "basis": "source_fact",
+          "context": "The corrective test-workspace setup was accepted from client screenshots. Audit omitted viewed record identifiers; account removal after expiry was not observed.",
+          "choice": "Create two named accounts in Import-Diagnostics-Readers with read-only job-status and rejected-row access in the test workspace, MFA, and configured expiry on 2025-01-31. Exclude chart and configuration access; membership depends on the identity provider retaining expiry.",
+          "applicability": "Grove's named diagnostic-access accounts in the test workspace and requested test period only; no verified post-expiry removal or equivalent controls elsewhere.",
+          "evidence": [
+            {
+              "caseId": "grove-scoped-access",
+              "artifactId": "delivery-log",
+              "versionId": "notes-2025-01-22",
+              "passageId": "p-b52fd830a5e2afabfafa304f32a9fb51"
+            },
+            {
+              "caseId": "grove-scoped-access",
+              "artifactId": "delivery-log",
+              "versionId": "notes-2025-01-22",
+              "passageId": "p-f75eee725dd6856e4a3e0cf41227358c"
+            }
+          ],
+          "reviewStatus": "reviewed",
+          "reviewer": "Zura1555",
+          "reviewedAt": "2026-10-15",
+          "supersedesId": "grove-broad-admin"
+        },
+        {
+          "kind": "lesson",
+          "recordId": "grove-verify-access-lifecycle",
+          "caseId": "grove-scoped-access",
+          "basis": "curator_interpretation",
+          "observation": "Configured expiry and accepted setup screenshots did not establish actual account removal; the audit lacked viewed record identifiers.",
+          "recommendedFutureAction": "For analogous diagnostic-access requests, verify identity-provider expiry retention, actual account removal, and the audit detail required by the new client; do not infer those guarantees from configured expiry.",
+          "applicability": "Named, networked test-workspace diagnostic access only. Check the new request's constraints before applying; portability to another tenant/provider or production is not established.",
+          "outcomeLimitations": "The client accepted the setup for the test period, but removal after expiry was not observed and account status on 2025-02-01 is unknown.",
+          "evidence": [
+            {
+              "caseId": "grove-scoped-access",
+              "artifactId": "delivery-log",
+              "versionId": "notes-2025-01-22",
+              "passageId": "p-b52fd830a5e2afabfafa304f32a9fb51"
+            },
+            {
+              "caseId": "grove-scoped-access",
+              "artifactId": "delivery-log",
+              "versionId": "notes-2025-01-22",
+              "passageId": "p-f75eee725dd6856e4a3e0cf41227358c"
+            },
+            {
+              "caseId": "grove-scoped-access",
+              "artifactId": "access-checklist",
+              "versionId": "checklist-2025-01-21",
+              "passageId": "p-20478b0862439cc32d662330036dbe8e"
+            },
+            {
+              "caseId": "grove-scoped-access",
+              "artifactId": "access-checklist",
+              "versionId": "checklist-2025-01-21",
+              "passageId": "p-b0069024d06f11b169efc97bb0c82fa1"
+            }
+          ],
+          "reviewStatus": "reviewed",
+          "reviewer": "Zura1555",
+          "reviewedAt": "2026-10-15"
+        }
+      ],
       "artifacts": [
         {
           "artifactId": "request",
@@ -1150,11 +1243,11 @@
           "versions": [
             {
               "versionId": "request-2025-01-14",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/grove-scoped-access/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/grove-scoped-access/request.md",
               "mimeType": "text/markdown",
               "sha256": "d4fe94b9fddd89d451673adf8b7303f3115afa9d3db222833b1cbe68ac7348f1",
               "statedDate": "2025-01-14",
-              "importedAt": "2026-10-14T14:53:22.990596+00:00",
+              "importedAt": "2026-10-15T03:41:06.588405+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -1219,11 +1312,11 @@
           "versions": [
             {
               "versionId": "notes-2025-01-22",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/grove-scoped-access/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/grove-scoped-access/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "b1c784ecf2e3dad6185f4c372b6e1e3ecaf11fc886a9efb62a24741ac7a769e8",
               "statedDate": "2025-01-22",
-              "importedAt": "2026-10-14T14:53:22.990824+00:00",
+              "importedAt": "2026-10-15T03:41:06.590856+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -1298,11 +1391,11 @@
           "versions": [
             {
               "versionId": "checklist-2025-01-21",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/grove-scoped-access/access-checklist.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/grove-scoped-access/access-checklist.md",
               "mimeType": "text/markdown",
               "sha256": "fe5d250a888d8cb5228924ef64122daa43355b81d7da0cc09d8917ea489464a5",
               "statedDate": "2025-01-21",
-              "importedAt": "2026-10-14T14:53:22.991055+00:00",
+              "importedAt": "2026-10-15T03:41:06.592750+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -1416,6 +1509,7 @@
       "caseId": "harbor-offline-access",
       "title": "Harbor Research air-gapped access inquiry",
       "fictional": true,
+      "records": [],
       "artifacts": [
         {
           "artifactId": "request",
@@ -1424,11 +1518,11 @@
           "versions": [
             {
               "versionId": "request-2025-06-09",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/harbor-offline-access/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/harbor-offline-access/request.md",
               "mimeType": "text/markdown",
               "sha256": "1fc5c1baa49b026e15ec1c343cc89ce861e4bf4733de7876b4e64fb4f3f20c43",
               "statedDate": "2025-06-09",
-              "importedAt": "2026-10-14T14:53:22.991301+00:00",
+              "importedAt": "2026-10-15T03:41:06.598922+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -1493,11 +1587,11 @@
           "versions": [
             {
               "versionId": "notes-2025-06-16",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/harbor-offline-access/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/harbor-offline-access/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "c600274d89bf8ad1edc7dfab24d272a3af1fb3f4b846022f1c225870b7f2cc00",
               "statedDate": "2025-06-16",
-              "importedAt": "2026-10-14T14:53:22.991522+00:00",
+              "importedAt": "2026-10-15T03:41:06.601115+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -1572,11 +1666,11 @@
           "versions": [
             {
               "versionId": "inventory-2025-06-16",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/harbor-offline-access/scope-inventory.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/harbor-offline-access/scope-inventory.md",
               "mimeType": "text/markdown",
               "sha256": "03084916ce921724d700755343c887f26dc6a3a4550eb36caec8c0ee947c2864",
               "statedDate": "2025-06-16",
-              "importedAt": "2026-10-14T14:53:22.991817+00:00",
+              "importedAt": "2026-10-15T03:41:06.603105+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -1690,6 +1784,7 @@
       "caseId": "ibis-verified-handover",
       "title": "Ibis Foods tested handover",
       "fictional": true,
+      "records": [],
       "artifacts": [
         {
           "artifactId": "request",
@@ -1698,11 +1793,11 @@
           "versions": [
             {
               "versionId": "request-2025-05-05",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/ibis-verified-handover/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/ibis-verified-handover/request.md",
               "mimeType": "text/markdown",
               "sha256": "4a0df2a6fdf85d169e589ef5eb7467b4ec45be5f748f361ddf0cc70a48f914de",
               "statedDate": "2025-05-05",
-              "importedAt": "2026-10-14T14:53:22.992057+00:00",
+              "importedAt": "2026-10-15T03:41:06.605387+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -1767,11 +1862,11 @@
           "versions": [
             {
               "versionId": "notes-2025-05-23",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/ibis-verified-handover/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/ibis-verified-handover/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "a2a3c7f9b68929938055ab8330b8a00212aa02d50cbe0d15fc6a3d1f2477bf81",
               "statedDate": "2025-05-23",
-              "importedAt": "2026-10-14T14:53:22.992377+00:00",
+              "importedAt": "2026-10-15T03:41:06.607109+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -1846,11 +1941,11 @@
           "versions": [
             {
               "versionId": "runbook-2025-05-21",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/ibis-verified-handover/operator-runbook.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/ibis-verified-handover/operator-runbook.md",
               "mimeType": "text/markdown",
               "sha256": "44e00967166b5c8b387e3459308eb8e8916ddaac4996799ed36609848829fdbc",
               "statedDate": "2025-05-21",
-              "importedAt": "2026-10-14T14:53:22.992614+00:00",
+              "importedAt": "2026-10-15T03:41:06.608755+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -1954,6 +2049,7 @@
       "caseId": "kestrel-pending-handover",
       "title": "Kestrel Parts unresolved handover",
       "fictional": true,
+      "records": [],
       "artifacts": [
         {
           "artifactId": "request",
@@ -1962,11 +2058,11 @@
           "versions": [
             {
               "versionId": "request-2025-06-02",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/kestrel-pending-handover/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/kestrel-pending-handover/request.md",
               "mimeType": "text/markdown",
               "sha256": "28736a2eef83f7e09d019194006d73e82302cb8446baeded86cb78c59a4664cd",
               "statedDate": "2025-06-02",
-              "importedAt": "2026-10-14T14:53:22.992860+00:00",
+              "importedAt": "2026-10-15T03:41:06.611424+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -2031,11 +2127,11 @@
           "versions": [
             {
               "versionId": "notes-2025-06-11",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/kestrel-pending-handover/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/kestrel-pending-handover/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "37724384701fa699bf6209c6ecdad3f8a8e8192edef3b40d165cc7f4f99183b8",
               "statedDate": "2025-06-11",
-              "importedAt": "2026-10-14T14:53:22.993078+00:00",
+              "importedAt": "2026-10-15T03:41:06.613613+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [
@@ -2110,11 +2206,11 @@
           "versions": [
             {
               "versionId": "draft-2025-06-05",
-              "sourcePath": "corpora/fictional-onboarding-v1/originals/kestrel-pending-handover/operations-draft.md",
+              "sourcePath": "corpora/fictional-onboarding-v2/originals/kestrel-pending-handover/operations-draft.md",
               "mimeType": "text/markdown",
               "sha256": "772722ba39f9da52b3f9f789a45df65b82a1b1a84319441952a14bbf99cbef16",
               "statedDate": "2025-06-05",
-              "importedAt": "2026-10-14T14:53:22.993298+00:00",
+              "importedAt": "2026-10-15T03:41:06.617582+00:00",
               "extractionStatus": "complete",
               "exclusionReasons": [],
               "passages": [

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "./env.ts";
 import { createAssessmentJob, startBrief } from "./admission.ts";
 import { capabilityHash } from "./auth.ts";
-import { exactOriginal, exactPassage, EvidenceUnavailable } from "./corpus.ts";
+import { exactOriginal, exactPassage, EvidenceUnavailable, knowledgeCards, loadCorpus } from "./corpus.ts";
 import { HttpFailure } from "./errors.ts";
 import { getOwnedJob } from "./jobs.ts";
 import { requestSchema, startBriefSchema } from "./schemas.ts";
@@ -99,6 +99,24 @@ app.onError((error) => {
 });
 
 app.get("/api/health", (c) => c.json({ status: "ok" as const }));
+
+app.get("/api/knowledge", async (c) => {
+  const caseId = c.req.query("caseId");
+  if (caseId !== undefined) checkedRouteId(caseId, "CASE_NOT_FOUND");
+  const corpus = await loadCorpus(c.env);
+  if (caseId !== undefined && !corpus.manifest.cases.some((item) => item.caseId === caseId)) throw new HttpFailure(404, "CASE_NOT_FOUND");
+  return c.json({ records: knowledgeCards(corpus, caseId) });
+});
+
+app.get("/api/knowledge/:recordId", async (c) => {
+  const recordId = checkedRouteId(c.req.param("recordId"), "KNOWLEDGE_NOT_FOUND");
+  const corpus = await loadCorpus(c.env);
+  const published = corpus.manifest.cases.flatMap((item) => item.records).find((record) => record.recordId === recordId);
+  if (!published) throw new HttpFailure(404, "KNOWLEDGE_NOT_FOUND");
+  const card = knowledgeCards(corpus, published.caseId).find((record) => record.recordId === recordId);
+  if (!card) throw new EvidenceUnavailable("Knowledge evidence is unavailable.");
+  return c.json(card);
+});
 
 app.post("/api/jobs", async (c) => {
   const body = requestSchema.safeParse(await readJsonBody(c.req.raw));

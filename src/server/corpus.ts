@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import manifestSchema from "../../contracts/corpus-manifest.schema.json";
+import manifestSchema from "../../contracts/corpus-manifest.schema.json" with { type: "json" };
+import knowledgeSchema from "../../contracts/knowledge-record.schema.json" with { type: "json" };
 import type { Env } from "./env.ts";
-import type { PassageView } from "../shared/protocol.ts";
+import type { KnowledgeCard, KnowledgeRecord, PassageView } from "../shared/protocol.ts";
 
 const ajv = new Ajv2020({ allErrors: true, strict: true });
 addFormats(ajv);
+ajv.addSchema(knowledgeSchema);
 const validManifest = ajv.compile<CorpusManifest>(manifestSchema);
 
 export interface Passage {
@@ -40,10 +42,11 @@ export interface PastCase {
   title: string;
   fictional: true;
   artifacts: Artifact[];
+  records: KnowledgeRecord[];
 }
 
 export interface CorpusManifest {
-  schemaVersion: 1;
+  schemaVersion: 2;
   corpusVersion: string;
   cases: PastCase[];
 }
@@ -112,6 +115,35 @@ function asManifest(value: unknown): CorpusManifest {
           passageIds.add(passage.passageId);
         }
       }
+    }
+  }
+  const records = new Map<string, KnowledgeRecord>();
+  for (const pastCase of manifest.cases) {
+    for (const record of pastCase.records) {
+      if (record.caseId !== pastCase.caseId || records.has(record.recordId)) {
+        throw new EvidenceUnavailable("Invalid or duplicate knowledge record identity.");
+      }
+      for (const ref of record.evidence) {
+        const version = pastCase.artifacts.find((artifact) => artifact.artifactId === ref.artifactId)?.versions.find((item) => item.versionId === ref.versionId);
+        if (ref.caseId !== pastCase.caseId || version?.extractionStatus !== "complete" || !version.passages.some((passage) => passage.passageId === ref.passageId)) {
+          throw new EvidenceUnavailable("Knowledge evidence does not resolve to a complete exact source.");
+        }
+      }
+      records.set(record.recordId, record);
+    }
+  }
+  const superseded = new Set<string>();
+  for (const record of records.values()) {
+    if (record.supersedesId === undefined) continue;
+    const target = records.get(record.supersedesId);
+    if (!target || target.caseId !== record.caseId || target.kind !== record.kind || superseded.has(target.recordId)) {
+      throw new EvidenceUnavailable("Invalid or ambiguous knowledge supersession link.");
+    }
+    superseded.add(target.recordId);
+    const seen = new Set([record.recordId]);
+    for (let current: KnowledgeRecord | undefined = target; current; current = current.supersedesId === undefined ? undefined : records.get(current.supersedesId)) {
+      if (seen.has(current.recordId)) throw new EvidenceUnavailable("Knowledge supersession cycle.");
+      seen.add(current.recordId);
     }
   }
   return manifest;
@@ -252,10 +284,21 @@ export async function exactPassage(env: Env, passageId: string): Promise<Indexed
   throw new EvidenceUnavailable("The requested passage is unknown.");
 }
 
+export function knowledgeCards(snapshot: CorpusSnapshot, caseId?: string): KnowledgeCard[] {
+  return snapshot.manifest.cases.flatMap((pastCase) => {
+    if (caseId !== undefined && pastCase.caseId !== caseId) return [];
+    return pastCase.records.filter((record) => record.evidence.every((ref) => snapshot.availableVersions.has(ref.versionId))).map((record) => {
+      const successor = pastCase.records.find((candidate) => candidate.supersedesId === record.recordId);
+      return { ...record, ...(successor ? { supersededById: successor.recordId } : {}) };
+    });
+  });
+}
+
 export interface ModelCaseContext {
   caseId: string;
   title: string;
   availability: "available" | "partial" | "unavailable" | undefined;
+  records: KnowledgeCard[];
   artifacts: {
     artifactId: string;
     title: string;
@@ -274,6 +317,7 @@ export function modelCorpus(snapshot: CorpusSnapshot): ModelCaseContext[] {
     caseId: pastCase.caseId,
     title: pastCase.title,
     availability: snapshot.caseAvailability.get(pastCase.caseId),
+    records: knowledgeCards(snapshot, pastCase.caseId),
     artifacts: pastCase.artifacts.map((artifact) => ({
       artifactId: artifact.artifactId,
       title: artifact.title,
