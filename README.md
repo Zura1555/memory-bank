@@ -39,6 +39,16 @@ Verify operator authentication and concurrent database access with `node --env-f
 - Queue/Workflow duplicates use stable IDs. Paid model calls have no automatic retries or fallback; uncertain dispatch requires operator reconciliation.
 - Human-reviewed decision and lesson cards live in the versioned curator corpus, not expiring jobs. Browse `/?knowledge`, address a record with `/?knowledge=<recordId>`, or inspect it in case details. Cards link exact supporting passages/originals and mark superseded advice as history. Applying a lesson still requires the existing checked, request-specific recommendation pipeline; no new paid stage is added. See [curator authoring and review](ingestion/README.md#decision-and-lesson-records).
 
+### Explainable reuse workbench
+
+Checked leads and contrasts now show compact requirement / past-evidence / applicability / reuse-implication tables. Only relevant product/version, environment, scale, identity/access, and recovery/operating dimensions appear. Each cell resolves to an accepted checked claim; missing constraints remain **Unknown**, not a numeric similarity score or an inferred match. Exact-passage inspection remains available directly from the table. Up to three checked next actions explain what to verify and why it affects reuse, without a background service or another paid model stage.
+
+Submitting clarification starts a new checked assessment and immediately invalidates artifact/version/passage selections, including when admission fails. The tab retains only the immediately previous checked assessment, read-only, until its original seven-day expiry; a new request or page reload discards it. A supported disposition-change summary shows both prior and current recommendation evidence. A missing/withheld recommendation is not reported as an established change, and the UI does not infer that clarification alone caused a model-output difference. No capability, result history, or selection is written to browser storage.
+
+Existing databases require `migrations/0002_assessment_workbench.sql` before Worker startup; drain active workflows before changing the strict draft schema. Older checked results receive empty new inventories, not invented comparisons.
+
+The [workbench verification record](docs/workbench-2026-10-15.md) records approved real UI runs, exact charges, source checks, latency limits, and conservative clarification outcomes. A withdrawn prior lead is labeled “not established,” never silently replaced with a withheld recommendation.
+
 ### Evidence inspector
 
 The evidence inspector uses Base UI Dialog with the existing CSS tokens, including dark mode. Escape, the close button, or an outside press dismiss it; focus returns to the invoking inspection control. Each selected source reference mounts fresh passage state, aborting retrieval on close or replacement so a late response cannot overwrite another passage. Validation and exact-original downloads still use the existing evidence endpoints.

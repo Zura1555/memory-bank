@@ -83,9 +83,27 @@ export interface Lead {
   reasonClaimIds: string[];
 }
 
+export interface ComparisonRow {
+  caseId: string;
+  dimension: "product_version" | "environment" | "scale" | "identity_access" | "recovery_operations";
+  requirementClaimId: string | null;
+  evidenceClaimId: string;
+  relation: "match" | "mismatch" | "unknown";
+  assessmentClaimId: string;
+  implicationClaimId: string;
+}
+
+export interface NextAction {
+  caseId: string;
+  artifactId: string;
+  claimId: string;
+}
+
 export interface AssessmentResult {
   conclusion: AssessmentConclusion;
   clarifyingClaimIds: string[];
+  comparisons: ComparisonRow[];
+  nextActions: NextAction[];
   cases: CaseAssessment[];
   leads: Lead[];
   contrasts: Lead[];

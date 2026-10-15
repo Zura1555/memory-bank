@@ -1,4 +1,6 @@
 import * as z from "zod";
+import type { ComparisonRow } from "../shared/protocol.ts";
+import { assessmentPassageIds, type CorpusSnapshot } from "./corpus.ts";
 
 const id = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
 const sourceRef = z.strictObject({
@@ -15,11 +17,12 @@ const claim = z.strictObject({
   requestQuotes: z.array(z.string().min(1).max(500)).max(8),
   dependsOnClaimIds: z.array(id).max(32),
 });
-const artifactClaim = claim.omit({ claimId: true });
+const assessmentClaim = claim.extend({ sourceRefs: z.array(id).min(1).max(16) });
+const artifactClaim = assessmentClaim.omit({ claimId: true });
 const artifactWorkFields = {
   artifactId: id,
   usefulForLead: z.boolean(),
-  recommendation: claim.omit({ claimId: true, kind: true }),
+  recommendation: assessmentClaim.omit({ claimId: true, kind: true }),
   supportingClaims: z.array(artifactClaim).max(32),
   blockerClaims: z.array(artifactClaim).max(16),
   verificationClaims: z.array(artifactClaim.extend({ kind: z.literal("recommendation") })).max(16),
@@ -33,8 +36,6 @@ const artifactWork = z.union([
 const caseDraft = z.strictObject({
   caseId: id,
   outcome: z.enum(["observed_success", "partial", "failed", "unknown"]),
-  outcomeClaimIds: z.array(id).max(16),
-  claimIds: z.array(id).max(64),
   artifactWork: z.array(artifactWork).max(32),
 });
 const lead = z.strictObject({
@@ -65,12 +66,28 @@ export const startBriefSchema = z.strictObject({
   selections: z.array(selectionSchema).min(1).max(32),
 });
 
+const comparisonFields = {
+  caseId: id,
+  dimension: z.enum(["product_version", "environment", "scale", "identity_access", "recovery_operations"]),
+  evidence: assessmentClaim.omit({ claimId: true, kind: true, dependsOnClaimIds: true }),
+  assessment: assessmentClaim.omit({ claimId: true, kind: true, dependsOnClaimIds: true }),
+  implication: assessmentClaim.omit({ claimId: true, kind: true, dependsOnClaimIds: true }),
+};
+const comparison = z.union([
+  z.strictObject({ ...comparisonFields, requirementQuote: z.string().min(1).max(500), relation: z.enum(["match", "mismatch", "unknown"]) }),
+  z.strictObject({ ...comparisonFields, requirementQuote: z.null(), relation: z.literal("unknown") }),
+]);
+
 export const assessmentDraftSchema = z.strictObject({
   cases: z.array(caseDraft).length(8),
   leads: z.array(lead.omit({ usefulArtifactIds: true })).max(3),
   contrasts: z.array(lead).max(8),
   clarifyingClaimIds: z.array(id).max(8),
-  claims: z.array(claim).max(400),
+  comparisons: z.array(comparison).max(24),
+  claims: z.array(z.union([
+    assessmentClaim.extend({ caseId: id, outcomeEvidence: z.literal(false) }),
+    assessmentClaim.extend({ caseId: id, outcomeEvidence: z.literal(true), kind: z.literal("source_fact") }),
+  ])).max(400),
 });
 export const briefDraftSchema = z.strictObject({
   reuse: z.array(briefItem).max(32),
@@ -106,6 +123,9 @@ export function reviewSchema(targets: ReviewTargets) {
   if (!targets.leadArtifacts) return supportReviewSchema.extend({ claimReviews });
   return assessmentReviewSchema.extend({
     claimReviews,
+    conclusion: targets.leadArtifacts.length === 0
+      ? z.enum(["no_useful_precedent", "cannot_be_established"])
+      : assessmentReviewSchema.shape.conclusion,
     leadReviews: assessmentReviewSchema.shape.leadReviews.length(targets.leadArtifacts.length),
   });
 }
@@ -119,9 +139,11 @@ type ArtifactWork = {
   blockerClaimIds: string[];
   verificationClaimIds: string[];
 };
-export type AssessmentDraft = Omit<AssessmentOutput, "cases" | "leads"> & {
-  cases: (Omit<AssessmentOutput["cases"][number], "artifactWork"> & { artifactWork: ArtifactWork[] })[];
+export type AssessmentDraft = Omit<AssessmentOutput, "cases" | "leads" | "comparisons" | "claims"> & {
+  cases: (Omit<AssessmentOutput["cases"][number], "artifactWork"> & { claimIds: string[]; outcomeClaimIds: string[]; artifactWork: ArtifactWork[] })[];
+  claims: z.infer<typeof claim>[];
   leads: z.infer<typeof lead>[];
+  comparisons: ComparisonRow[];
 };
 export type BriefDraft = z.infer<typeof briefDraftSchema>;
 export type SupportReview = z.infer<typeof supportReviewSchema>;
@@ -129,17 +151,43 @@ export type AssessmentReview = z.infer<typeof assessmentReviewSchema>;
 export type Reference = z.infer<typeof sourceRef>;
 export type ModelClaim = z.infer<typeof claim>;
 
-export function parseAssessmentDraft(value: unknown): AssessmentDraft {
+export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): AssessmentDraft {
   const output = assessmentDraftSchema.parse(value);
-  const claims = [...output.claims];
+  const canonicalIds = new Map([...assessmentPassageIds(corpus)].map(([canonical, wire]) => [wire, canonical]));
+  const resolveRefs = (ids: string[]): Reference[] => ids.map((wireId) => {
+    const canonicalId = canonicalIds.get(wireId);
+    const passage = canonicalId === undefined ? undefined : corpus.passages.get(canonicalId);
+    if (!passage) throw new z.ZodError([{ code: "custom", path: ["sourceRefs"], message: "Unknown or unavailable supplied passage identity." }]);
+    return { caseId: passage.caseId, artifactId: passage.artifactId, versionId: passage.versionId, passageId: passage.passageId };
+  });
+  const claims: z.infer<typeof claim>[] = output.claims.map(({ caseId: _, outcomeEvidence: __, ...item }) => ({ ...item, sourceRefs: resolveRefs(item.sourceRefs) }));
+  const comparisons: ComparisonRow[] = output.comparisons.map(({ requirementQuote, evidence, assessment, implication, ...row }, index) => {
+    const evidenceClaimId = `comparison-${index}-evidence`;
+    claims.push({ ...evidence, sourceRefs: resolveRefs(evidence.sourceRefs), claimId: evidenceClaimId, kind: "source_fact", dependsOnClaimIds: [] });
+    const assessmentRefs = resolveRefs(assessment.sourceRefs);
+    const requirementClaimId = requirementQuote === null ? null : `comparison-${index}-requirement`;
+    if (requirementClaimId !== null && requirementQuote !== null) claims.push({
+      claimId: requirementClaimId, text: `The current request states: ${JSON.stringify(requirementQuote)}.`, kind: "interpretation",
+      sourceRefs: assessmentRefs, requestQuotes: [requirementQuote], dependsOnClaimIds: [],
+    });
+    const assessmentClaimId = `comparison-${index}-assessment`;
+    const implicationClaimId = `comparison-${index}-implication`;
+    claims.push(
+      { ...assessment, sourceRefs: assessmentRefs, claimId: assessmentClaimId, kind: "interpretation", dependsOnClaimIds: [evidenceClaimId, ...(requirementClaimId === null ? [] : [requirementClaimId])] },
+      { ...implication, sourceRefs: resolveRefs(implication.sourceRefs), claimId: implicationClaimId, kind: "recommendation", dependsOnClaimIds: [assessmentClaimId] },
+    );
+    return { ...row, evidenceClaimId, requirementClaimId, assessmentClaimId, implicationClaimId };
+  });
   const cases = output.cases.map((item, caseIndex) => ({
     ...item,
+    claimIds: output.claims.filter((claim) => claim.caseId === item.caseId).map((claim) => claim.claimId),
+    outcomeClaimIds: output.claims.filter((claim) => claim.caseId === item.caseId && claim.outcomeEvidence).map((claim) => claim.claimId),
     artifactWork: item.artifactWork.map((work, workIndex) => {
       const dispositionClaimId = `disposition-${caseIndex}-${workIndex}`;
-      claims.push({ ...work.recommendation, claimId: dispositionClaimId, kind: "recommendation" });
+      claims.push({ ...work.recommendation, sourceRefs: resolveRefs(work.recommendation.sourceRefs), claimId: dispositionClaimId, kind: "recommendation" });
       const addClaims = (role: string, items: z.infer<typeof artifactClaim>[]): string[] => items.map((claim, index) => {
         const claimId = `artifact-${caseIndex}-${workIndex}-${role}-${index}`;
-        claims.push({ ...claim, claimId });
+        claims.push({ ...claim, sourceRefs: resolveRefs(claim.sourceRefs), claimId });
         return claimId;
       });
       const supportingClaimIds = addClaims("support", work.supportingClaims);
@@ -160,7 +208,7 @@ export function parseAssessmentDraft(value: unknown): AssessmentDraft {
     usefulArtifactIds: output.cases.find((item) => item.caseId === lead.caseId)?.artifactWork
       .filter((work) => work.usefulForLead).map((work) => work.artifactId) ?? [],
   }));
-  return { ...output, cases, leads, claims };
+  return { ...output, cases, leads, comparisons, claims };
 }
 
 export function openRouterSchema(name: string, schema: z.ZodType): {

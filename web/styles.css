@@ -52,6 +52,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   outline-offset: 3px;
 }
 
+.comparison-scroll { max-width: 100%; overflow-x: auto; margin-block: 1rem 2rem; }
+.comparison-scroll:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.comparison-table { width: 100%; min-width: 46rem; border-collapse: collapse; font-size: .875rem; }
+.comparison-table caption { text-align: left; color: var(--muted); padding-block: .75rem; }
+.comparison-table th, .comparison-table td { text-align: left; vertical-align: top; padding: .8rem; border: 1px solid var(--line); overflow-wrap: anywhere; }
+.comparison-table th { background: var(--quiet); }
+.comparison-table td { background: var(--surface); min-width: 8rem; }
+.comparison-table th:first-child { min-width: 7rem; overflow-wrap: normal; }
+.comparison-table p { margin-block: .5rem; }
+.lineage-section { padding: 1rem; border: 1px solid var(--control-border); border-radius: .75rem; }
+.lineage-section summary { cursor: pointer; color: var(--accent-strong); }
+
 .app-shell {
   min-height: 100svh;
   padding: env(safe-area-inset-top, 0px) max(1.25rem, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(1.25rem, env(safe-area-inset-left, 0px));
@@ -395,7 +407,7 @@ input[type="checkbox"] { width: 1.15rem; height: 1.15rem; flex: 0 0 auto; accent
 
 @media (max-width: 650px) {
   .app-shell { padding-inline: max(.9rem, env(safe-area-inset-left, 0px)) max(.9rem, env(safe-area-inset-right, 0px)); }
-  .app-header { min-height: 4rem; }
+  .app-header { min-height: 4rem; flex-wrap: wrap; padding-block: .75rem; gap: .6rem; }
   .workflow { padding: 2rem 0 2.5rem; }
   .step-nav { margin-bottom: 1.35rem; }
   .step-nav ol { gap: .15rem; }

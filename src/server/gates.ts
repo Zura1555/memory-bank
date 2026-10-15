@@ -141,12 +141,31 @@ function validClaimReferences(claims: Claim[], request: string, corpus: CorpusSn
 export function validateAssessmentDraft(draft: AssessmentDraft, request: string, corpus: CorpusSnapshot): Set<string> {
   assertCaseReferences(draft, corpus);
   const claimById = new Map(draft.claims.map((claim) => [claim.claimId, claim]));
+  for (const row of draft.comparisons) {
+    const requirement = row.requirementClaimId === null ? null : claimById.get(row.requirementClaimId);
+    const evidence = claimById.get(row.evidenceClaimId);
+    const assessment = claimById.get(row.assessmentClaimId);
+    const implication = claimById.get(row.implicationClaimId);
+    if (![...draft.leads, ...draft.contrasts].some((item) => item.caseId === row.caseId)) {
+      throw new GateFailure("INVALID_COMPARISON_SCOPE", "Comparisons must describe a lead or contrast.");
+    }
+    if ((row.requirementClaimId !== null && (requirement?.kind !== "interpretation" || requirement.requestQuotes.length !== 1))
+      || (row.requirementClaimId === null && row.relation !== "unknown")
+      || evidence?.kind !== "source_fact" || assessment?.kind !== "interpretation" || implication?.kind !== "recommendation"
+      || ![evidence, assessment, implication].every((item) => item?.sourceRefs.some((ref) => ref.caseId === row.caseId))
+      || !assessment.dependsOnClaimIds.includes(row.evidenceClaimId)
+      || (row.requirementClaimId !== null && !assessment.dependsOnClaimIds.includes(row.requirementClaimId))
+      || !implication.dependsOnClaimIds.includes(row.assessmentClaimId)) {
+      throw new GateFailure("INVALID_COMPARISON_CLAIMS", "Comparison facts, relation, and reuse implication require scoped, dependent reviewed claims; absent requirements are unknown.");
+    }
+  }
   const claimLinks = [
     ...draft.cases.flatMap((item) => [...item.claimIds, ...item.outcomeClaimIds]),
     ...draft.cases.flatMap((item) => item.artifactWork.flatMap((work) => [...work.claimIds, ...work.blockerClaimIds, ...work.verificationClaimIds])),
     ...draft.leads.flatMap((item) => item.reasonClaimIds),
     ...draft.contrasts.flatMap((item) => item.reasonClaimIds),
     ...draft.clarifyingClaimIds,
+    ...draft.comparisons.flatMap((row) => [row.evidenceClaimId, row.assessmentClaimId, row.implicationClaimId, ...(row.requirementClaimId === null ? [] : [row.requirementClaimId])]),
   ];
   if (!allIdsExist(claimLinks, claimById)) throw new GateFailure("UNKNOWN_CLAIM_REFERENCE", "The assessment references a missing claim.");
   const assigned = new Set(claimLinks);
@@ -303,9 +322,23 @@ export function buildCheckedAssessment(
   const noUsefulPrecedent = reviewedConclusion === "no_useful_precedent" && complete && invalidRefs.size === 0
     && ![...verdicts.values(), ...leadVerdicts.values()].includes("uncertain");
   const conclusion = leads.length > 0 ? "precedent_found" : noUsefulPrecedent ? "no_useful_precedent" : "cannot_be_established";
+  const visibleCases = new Set([...leads, ...contrasts].map((item) => item.caseId));
+  const comparisons = draft.comparisons.filter((row) => (visibleCases.has(row.caseId) || row.relation !== "match")
+    && keepAll([row.evidenceClaimId, row.assessmentClaimId, row.implicationClaimId, ...(row.requirementClaimId === null ? [] : [row.requirementClaimId])], checked.accepted));
+  const claimById = new Map(checked.visible.map((claim) => [claim.claimId, claim]));
+  // Prefer checks on current leads; never manufacture an action to fill a slot.
+  const orderedCases = [...leads.map((lead) => cases.find((item) => item.caseId === lead.caseId)!), ...cases.filter((item) => !leads.some((lead) => lead.caseId === item.caseId))];
+  const nextActions = orderedCases.flatMap((item) => item.artifactWork.flatMap((work) =>
+    work.disposition === null ? [] : [...new Set([...work.verificationClaimIds, ...work.blockerClaimIds])].flatMap((claimId) => {
+      const claim = claimById.get(claimId);
+      return claim?.kind === "recommendation" && claim.requestQuotes.length > 0
+        ? [{ caseId: item.caseId, artifactId: work.artifactId, claimId }] : [];
+    }))).slice(0, 3);
   return {
     conclusion,
     clarifyingClaimIds: draft.clarifyingClaimIds.filter((id) => checked.accepted.has(id)),
+    comparisons,
+    nextActions,
     cases,
     leads: deterministicOrder(leads, cases),
     contrasts,
