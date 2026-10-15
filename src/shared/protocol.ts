@@ -182,6 +182,7 @@ export interface PassageView extends SourceRef {
 // POST /api/jobs {request} -> 202 CreateJobResponse
 // GET /api/jobs/:jobId (Authorization: Bearer <capability>) -> 200 JobView
 // POST /api/jobs/:jobId/brief (capability + StartBriefRequest) -> 202 StartBriefResponse
+// GET /api/jobs/:jobId/pack/:format (capability, ready checked brief) -> attachment; format = markdown | json
 // GET /api/evidence/passages/:passageId -> 200 PassageView
 // GET /api/evidence/originals/:versionId -> exact retained original bytes
 // GET /api/health -> 200 {status:"ok"}

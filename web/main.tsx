@@ -688,6 +688,59 @@ function BriefCard({ item, claims, inspect }: { item: BriefItem; claims: ClaimMa
   );
 }
 
+function PackExport({ session, expiresAt }: { session: Session; expiresAt: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expired, setExpired] = useState(Date.parse(expiresAt) <= Date.now());
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setExpired(true), Math.max(0, Date.parse(expiresAt) - Date.now()));
+    return () => { window.clearTimeout(timer); controller.current?.abort(); };
+  }, [expiresAt]);
+  async function download(format: "markdown" | "json") {
+    if (busy || expired) return;
+    const request = new AbortController();
+    controller.current = request;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/jobs/${encodeURIComponent(session.jobId)}/pack/${format}`, {
+        headers: { Authorization: `Bearer ${session.capability}` }, signal: request.signal,
+      });
+      if (!response.ok) {
+        if (response.status === 410) setExpired(true);
+        throw new Error(response.status === 503 ? "Export blocked: exact source evidence is unavailable or corrupt. No replacement version was used." : `Export unavailable (HTTP ${response.status}). A ready owned unexpired checked brief is required.`);
+      }
+      const blob = await response.blob();
+      if (request.signal.aborted) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `starter-pack-${session.jobId}.${format === "json" ? "json" : "md"}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (cause) {
+      if (!request.signal.aborted) setError(cause instanceof Error ? cause.message : "Export could not be downloaded.");
+    } finally {
+      if (!request.signal.aborted) setBusy(false);
+    }
+  }
+  return <section className="content-section" aria-labelledby="pack-title">
+    <h3 id="pack-title">Export evidence-linked starter pack</h3>
+    <p>Review reusable material, required adaptations, and blocked verification below. Export preserves the checked brief, selected version inventory, hashes, reviewed context, and cited excerpts without another model call.</p>
+    <p>Fictional data only; not production approval. Excerpts remain readable offline. Originals are linked, not bundled or changed; live links are not guaranteed indefinitely. New exports stop at job expiry: <time dateTime={expiresAt}>{new Date(expiresAt).toLocaleString()}</time>.</p>
+    <div className="action-row">
+      <button className="secondary-button" type="button" disabled={busy || expired} onClick={() => void download("markdown")}>Download Markdown pack</button>
+      <button className="secondary-button" type="button" disabled={busy || expired} onClick={() => void download("json")}>Download JSON manifest</button>
+    </div>
+    {busy && <p role="status">Validating selected sources and preparing export…</p>}
+    {expired && <p role="alert">Job expired. No new export is available; already downloaded packs remain readable offline.</p>}
+    {error && <p className="notice notice-error" role="alert">{error}</p>}
+  </section>;
+}
+
 interface WorkDraft {
   selected: boolean;
   versionId: string;
@@ -1194,10 +1247,14 @@ function App() {
             {briefState === "ready" && job?.brief && (
               <>
                 <WithheldNote count={job.brief.withheldClaimCount} />
+                {session && job.stage === "ready" && <PackExport key={session.jobId} session={session} expiresAt={job.expiresAt} />}
                 {(["reuse", "adapt", "verify"] as const).map((kind) => {
                   const items = (job.brief?.[kind] ?? []).filter((item) => claimsFor(item.claimIds, briefClaims).length > 0);
                   return <section className="content-section" aria-labelledby={`brief-${kind}`} key={kind}>
                     <div className="section-heading"><div><p className="eyebrow">Fictional work artifacts</p><h3 id={`brief-${kind}`}>{label(kind)}</h3></div></div>
+                    {kind === "verify" && <p className="notice notice-warning">BLOCKED: unresolved checks. Not approved for unchanged reuse or production.</p>}
+                    {kind === "adapt" && <p>Required adaptations must be completed before use; checked recommendations are the checklist, not an invented implementation plan.</p>}
+                    {kind === "reuse" && <p>Checked reusable starting points only. This is not production approval.</p>}
                     {items.length === 0 ? <p className="empty-state">No supported {label(kind).toLowerCase()} items are available.</p> : <div className="card-grid">{items.map((item, index) => <BriefCard key={`${item.caseId}-${item.artifactId}-${index}`} item={item} claims={briefClaims} inspect={setPassageRef} />)}</div>}
                   </section>;
                 })}

@@ -6,6 +6,7 @@ import { exactOriginal, exactPassage, EvidenceUnavailable, knowledgeCards, loadC
 import { HttpFailure } from "./errors.ts";
 import { getOwnedJob } from "./jobs.ts";
 import { requestSchema, startBriefSchema } from "./schemas.ts";
+import { exportStarterPack, starterPackMarkdown } from "./packs.ts";
 import {
   operatorBudgetSchema,
   operatorReconciliationSchema,
@@ -127,6 +128,19 @@ app.post("/api/jobs", async (c) => {
 app.get("/api/jobs/:jobId", async (c) => {
   const jobId = checkedRouteId(c.req.param("jobId"), "JOB_NOT_FOUND");
   return c.json(await getOwnedJob(c.env, jobId, c.req.header("Authorization") ?? null));
+});
+
+app.get("/api/jobs/:jobId/pack/:format", async (c) => {
+  const jobId = checkedRouteId(c.req.param("jobId"), "JOB_NOT_FOUND");
+  const format = c.req.param("format");
+  if (format !== "json" && format !== "markdown") throw new HttpFailure(404, "EXPORT_FORMAT_NOT_FOUND");
+  const pack = await exportStarterPack(c.env, jobId, c.req.header("Authorization") ?? null, new URL(c.req.url).origin);
+  return new Response(format === "json" ? JSON.stringify(pack, null, 2) + "\n" : starterPackMarkdown(pack), {
+    headers: {
+      "Content-Type": format === "json" ? "application/json; charset=UTF-8" : "text/markdown; charset=UTF-8",
+      "Content-Disposition": `attachment; filename="starter-pack-${jobId}.${format === "json" ? "json" : "md"}"`,
+    },
+  });
 });
 
 app.post("/api/jobs/:jobId/brief", async (c) => {
