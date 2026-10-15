@@ -4,15 +4,17 @@ import type { Env, WorkflowParams } from "./env.ts";
 import { database, transaction } from "./db.ts";
 import { loadCorpus } from "./corpus.ts";
 import { loadStageOutput, runPaidStage, ReconciliationRequired } from "./calls.ts";
-import { ModelCallError } from "./openrouter.ts";
+import { ModelCallError, type ModelStage } from "./openrouter.ts";
 import {
   assessmentDraftPrompt,
   assessmentReviewPrompt,
   briefDraftPrompt,
   briefReviewPrompt,
 } from "./prompts.ts";
+import type { StagePrompt } from "./prompts.ts";
 import {
-  assessmentDraftSchema,
+  parseAssessmentDraft,
+  assessmentReviewSchema,
   briefDraftSchema,
   supportReviewSchema,
 } from "./schemas.ts";
@@ -23,7 +25,10 @@ import {
   validateAssessmentDraft,
   validateBriefDraft,
   validateSupportReview,
+  validateLeadReview,
+  revalidateAssessment,
 } from "./gates.ts";
+import { validateSelections } from "./selections.ts";
 
 interface WorkflowJob {
   request_text: string;
@@ -122,10 +127,29 @@ async function finishFailure(env: Env, params: WorkflowParams, code: string, unc
 }
 
 function failureCode(error: unknown): { code: string; uncertain: boolean } {
-  if (error instanceof ReconciliationRequired) return { code: "MODEL_DISPATCH_UNCERTAIN", uncertain: true };
+  if (error instanceof ReconciliationRequired) return { code: error.code, uncertain: true };
   if (error instanceof ModelCallError) return { code: error.code, uncertain: error.uncertain };
   if (error instanceof GateFailure) return { code: "STRUCTURAL_CHECK_FAILED", uncertain: false };
   return { code: "INTERNAL_FAILURE", uncertain: false };
+}
+
+async function paidStep(
+  env: Env, params: WorkflowParams, step: WorkflowStep, name: string,
+  callIndex: 1 | 2, stage: ModelStage, prompt: StagePrompt,
+): Promise<string> {
+  const outcome = await step.do(name, {
+    retries: { limit: 0, delay: "1 second" },
+    timeout: "135 seconds",
+    sensitive: "output",
+  }, async () => {
+    try {
+      return { attemptId: await runPaidStage(env, params, callIndex, stage, prompt) };
+    } catch (error) {
+      return { failure: failureCode(error) };
+    }
+  });
+  if (outcome.failure) throw new ModelCallError(outcome.failure.code, null, outcome.failure.uncertain);
+  return outcome.attemptId;
 }
 
 export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
@@ -146,46 +170,33 @@ export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> 
         const request = job.request_text;
         const draftPrompt = assessmentDraftPrompt(request, corpus);
         await setStage(this.env, params, "drafting");
-        const draftAttemptId = await step.do("assessment-draft", {
-          retries: { limit: 0, delay: "1 second" },
-          timeout: "135 seconds",
-          sensitive: "output",
-        }, () => runPaidStage(this.env, params, 1, "assessment_draft", draftPrompt));
-        const draft = assessmentDraftSchema.parse(await loadStageOutput(this.env, draftAttemptId));
+        const draftAttemptId = await paidStep(this.env, params, step, "assessment-draft", 1, "assessment_draft", draftPrompt);
+        const draft = parseAssessmentDraft(await loadStageOutput(this.env, draftAttemptId));
         await setStage(this.env, params, "reference_check");
         const invalidRefs = validateAssessmentDraft(draft, request, corpus);
         const reviewPrompt = assessmentReviewPrompt(request, corpus, draft);
         await setStage(this.env, params, "support_review");
-        const reviewAttemptId = await step.do("assessment-support-review", {
-          retries: { limit: 0, delay: "1 second" },
-          timeout: "135 seconds",
-          sensitive: "output",
-        }, () => runPaidStage(this.env, params, 2, "assessment_review", reviewPrompt));
-        const review = supportReviewSchema.parse(await loadStageOutput(this.env, reviewAttemptId));
+        const reviewAttemptId = await paidStep(this.env, params, step, "assessment-support-review", 2, "assessment_review", reviewPrompt);
+        const review = assessmentReviewSchema.parse(await loadStageOutput(this.env, reviewAttemptId));
         const verdicts = validateSupportReview(draft.claims, review);
-        const checked = buildCheckedAssessment(draft, verdicts, invalidRefs, corpus);
+        const leadVerdicts = validateLeadReview(draft, review);
+        const checked = buildCheckedAssessment(draft, verdicts, invalidRefs, corpus, leadVerdicts, review.conclusion);
         await finishPhase(this.env, params, checked);
       } else {
         if (job.assessment_state !== "ready" || !job.assessment_result || !job.brief_selections?.length) throw new Error("BRIEF_PREREQUISITE_MISSING");
         const request = job.request_text;
         const selections = job.brief_selections;
-        const draftPrompt = briefDraftPrompt(request, selections, corpus, job.assessment_result);
+        const assessment = revalidateAssessment(job.assessment_result, request, corpus);
+        validateSelections(selections, assessment, corpus);
+        const draftPrompt = briefDraftPrompt(request, selections, corpus, assessment);
         await setStage(this.env, params, "drafting");
-        const draftAttemptId = await step.do("brief-draft", {
-          retries: { limit: 0, delay: "1 second" },
-          timeout: "135 seconds",
-          sensitive: "output",
-        }, () => runPaidStage(this.env, params, 1, "brief_draft", draftPrompt));
+        const draftAttemptId = await paidStep(this.env, params, step, "brief-draft", 1, "brief_draft", draftPrompt);
         const draft = briefDraftSchema.parse(await loadStageOutput(this.env, draftAttemptId));
         await setStage(this.env, params, "reference_check");
         const invalidRefs = validateBriefDraft(draft, request, selections, corpus);
-        const reviewPrompt = briefReviewPrompt(request, selections, corpus, job.assessment_result, draft);
+        const reviewPrompt = briefReviewPrompt(request, selections, corpus, assessment, draft);
         await setStage(this.env, params, "support_review");
-        const reviewAttemptId = await step.do("brief-support-review", {
-          retries: { limit: 0, delay: "1 second" },
-          timeout: "135 seconds",
-          sensitive: "output",
-        }, () => runPaidStage(this.env, params, 2, "brief_review", reviewPrompt));
+        const reviewAttemptId = await paidStep(this.env, params, step, "brief-support-review", 2, "brief_review", reviewPrompt);
         const review = supportReviewSchema.parse(await loadStageOutput(this.env, reviewAttemptId));
         const verdicts = validateSupportReview(draft.claims, review);
         const checked = buildCheckedBrief(draft, verdicts, invalidRefs);

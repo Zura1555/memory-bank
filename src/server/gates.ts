@@ -1,6 +1,6 @@
-import type { AssessmentResult, BriefResult, BriefDisposition, Claim, CaseAssessment, Lead, SupportVerdict } from "../shared/protocol.ts";
+import type { AssessmentConclusion, AssessmentResult, BriefResult, BriefDisposition, Claim, CaseAssessment, Lead, SupportVerdict } from "../shared/protocol.ts";
 import type { CorpusSnapshot } from "./corpus.ts";
-import type { AssessmentDraft, BriefDraft, SupportReview } from "./schemas.ts";
+import type { AssessmentDraft, AssessmentReview, BriefDraft, SupportReview } from "./schemas.ts";
 
 export class GateFailure extends Error {
   readonly code: string;
@@ -203,6 +203,19 @@ export function validateSupportReview(claims: Claim[], review: SupportReview): M
   return verdicts;
 }
 
+export function validateLeadReview(draft: AssessmentDraft, review: AssessmentReview): Map<string, SupportVerdict> {
+  const expected = new Set(draft.leads.flatMap((lead) => lead.usefulArtifactIds.map((id) => `${lead.caseId}/${id}`)));
+  const verdicts = new Map(review.leadReviews.map((item) => [`${item.caseId}/${item.artifactId}`, item.verdict]));
+  if (verdicts.size !== review.leadReviews.length || verdicts.size !== expected.size || [...expected].some((id) => !verdicts.has(id))) {
+    throw new GateFailure("INCOMPLETE_LEAD_REVIEW", "Every proposed lead artifact needs exactly one compatibility review.");
+  }
+  const supported = [...verdicts.values()].some((verdict) => verdict === "supported");
+  if ((review.conclusion === "precedent_found") !== supported) {
+    throw new GateFailure("CONFLICTING_LEAD_REVIEW", "The corpus conclusion conflicts with its useful-artifact reviews.");
+  }
+  return verdicts;
+}
+
 function supportedClaims(claims: Claim[], verdicts: Map<string, SupportVerdict>, referenceInvalid: Set<string>) {
   const all = new Map(claims.map((claim) => [claim.claimId, claim]));
   const accepted = new Set<string>();
@@ -224,8 +237,25 @@ function keepAll(ids: string[], accepted: Set<string>): boolean {
   return ids.length > 0 && ids.every((id) => accepted.has(id));
 }
 
-export function buildCheckedAssessment(draft: AssessmentDraft, verdicts: Map<string, SupportVerdict>, invalidRefs: Set<string>, corpus: CorpusSnapshot): AssessmentResult {
-  const checked = supportedClaims(draft.claims, verdicts, invalidRefs);
+export function buildCheckedAssessment(
+  draft: AssessmentDraft,
+  verdicts: Map<string, SupportVerdict>,
+  invalidRefs: Set<string>,
+  corpus: CorpusSnapshot,
+  leadVerdicts: Map<string, SupportVerdict>,
+  reviewedConclusion: AssessmentConclusion,
+): AssessmentResult {
+  const rejected = new Set(invalidRefs);
+  for (const item of draft.cases) {
+    for (const work of item.artifactWork) {
+      const compatibility = leadVerdicts.get(`${item.caseId}/${work.artifactId}`);
+      if ((compatibility !== undefined && compatibility !== "supported")
+        || (reviewedConclusion === "no_useful_precedent" && work.disposition !== "verify")) {
+        rejected.add(work.dispositionClaimId);
+      }
+    }
+  }
+  const checked = supportedClaims(draft.claims, verdicts, rejected);
   const cases: CaseAssessment[] = draft.cases.map((item) => {
     const outcomeClaimsValid = item.outcomeClaimIds.length > 0 && keepAll(item.outcomeClaimIds, checked.accepted);
     const pastCase = corpus.manifest.cases.find((candidate) => candidate.caseId === item.caseId);
@@ -264,13 +294,15 @@ export function buildCheckedAssessment(draft: AssessmentDraft, verdicts: Map<str
     if (!keepAll(lead.reasonClaimIds, checked.accepted)) return [];
     const caseResult = cases.find((item) => item.caseId === lead.caseId);
     const usableIds = new Set(caseResult?.artifactWork.filter((work) => work.disposition !== null && work.disposition !== "verify").map((work) => work.artifactId));
-    const usefulArtifactIds = lead.usefulArtifactIds.filter((id) => usableIds.has(id));
+    const usefulArtifactIds = lead.usefulArtifactIds.filter((id) => usableIds.has(id) && leadVerdicts.get(`${lead.caseId}/${id}`) === "supported");
     if (usefulArtifactIds.length === 0) return [];
     return [{ ...lead, usefulArtifactIds }];
   });
   const contrasts = draft.contrasts.filter((item) => keepAll(item.reasonClaimIds, checked.accepted));
   const complete = [...corpus.caseAvailability.values()].every((state) => state === "available");
-  const conclusion = leads.length > 0 ? "precedent_found" : complete && checked.withheld === 0 ? "no_useful_precedent" : "cannot_be_established";
+  const noUsefulPrecedent = reviewedConclusion === "no_useful_precedent" && complete && invalidRefs.size === 0
+    && ![...verdicts.values(), ...leadVerdicts.values()].includes("uncertain");
+  const conclusion = leads.length > 0 ? "precedent_found" : noUsefulPrecedent ? "no_useful_precedent" : "cannot_be_established";
   return {
     conclusion,
     clarifyingClaimIds: draft.clarifyingClaimIds.filter((id) => checked.accepted.has(id)),
@@ -306,4 +338,28 @@ export function buildCheckedBrief(draft: BriefDraft, verdicts: Map<string, Suppo
     claims: checked.visible,
     withheldClaimCount: checked.withheld,
   };
+}
+
+export function revalidateAssessment(result: AssessmentResult, request: string, corpus: CorpusSnapshot): AssessmentResult {
+  const draft: AssessmentDraft = {
+    ...result,
+    cases: result.cases.map((item) => ({
+      ...item,
+      artifactWork: item.artifactWork.flatMap((work) => work.disposition !== null && work.dispositionClaimId !== null
+        ? [{ ...work, disposition: work.disposition, dispositionClaimId: work.dispositionClaimId }]
+        : []),
+    })),
+  };
+  const verdicts = new Map(result.claims.map((claim) => [claim.claimId, "supported" as const]));
+  const leadVerdicts = new Map(result.leads.flatMap((lead) => lead.usefulArtifactIds.map((id) => [`${lead.caseId}/${id}`, "supported" as const])));
+  const checked = buildCheckedAssessment(draft, verdicts, validClaimReferences(result.claims, request, corpus), corpus, leadVerdicts, result.conclusion);
+  checked.withheldClaimCount += result.withheldClaimCount;
+  return checked;
+}
+
+export function revalidateBrief(result: BriefResult, request: string, corpus: CorpusSnapshot): BriefResult {
+  const verdicts = new Map(result.claims.map((claim) => [claim.claimId, "supported" as const]));
+  const checked = buildCheckedBrief(result, verdicts, validClaimReferences(result.claims, request, corpus));
+  checked.withheldClaimCount += result.withheldClaimCount;
+  return checked;
 }

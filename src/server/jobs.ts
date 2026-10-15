@@ -4,6 +4,8 @@ import type { Env } from "./env.ts";
 import { database } from "./db.ts";
 import { capabilityHash } from "./auth.ts";
 import { HttpFailure } from "./errors.ts";
+import { EvidenceUnavailable, loadCorpus } from "./corpus.ts";
+import { revalidateAssessment, revalidateBrief } from "./gates.ts";
 
 export interface JobRecord {
   id: string;
@@ -59,6 +61,7 @@ export function jobView(job: JobRecord, now = Date.now()): JobView {
     MODEL_OUTPUT_INVALID_JSON: "The generated response could not be validated. No unchecked output is shown.",
     MODEL_OUTPUT_INCOMPLETE_OR_REFUSED: "The model did not complete the required review. No unchecked output is shown.",
     STRUCTURAL_CHECK_FAILED: "The generated response failed reference or evidence checks. No unchecked output is shown.",
+    MODEL_DISPATCH_UNCERTAIN: "The model dispatch outcome is uncertain. Operator reconciliation is required; no automatic retry was made.",
     INTERNAL_FAILURE: "The requested stage failed. No unchecked output is shown.",
   } as Record<string, string>)[job.error_code] ?? "The requested stage failed. No unchecked output is shown." : undefined;
   return {
@@ -81,5 +84,14 @@ export function jobView(job: JobRecord, now = Date.now()): JobView {
 
 export async function getOwnedJob(env: Env, jobId: string, authorization: string | null): Promise<JobView> {
   const hash = await capabilityHash(authorization);
-  return jobView(await ownedJob(database(env), jobId, hash));
+  const job = await ownedJob(database(env), jobId, hash);
+  if ((job.assessment_state === "ready" && job.assessment_result) || (job.brief_state === "ready" && job.brief_result)) {
+    const corpus = await loadCorpus(env);
+    if (corpus.manifest.corpusVersion !== job.corpus_version || corpus.manifestSha256 !== job.corpus_sha256) {
+      throw new EvidenceUnavailable("The job's pinned corpus revision is unavailable.");
+    }
+    if (job.assessment_result) job.assessment_result = revalidateAssessment(job.assessment_result, job.request_text, corpus);
+    if (job.brief_result) job.brief_result = revalidateBrief(job.brief_result, job.request_text, corpus);
+  }
+  return jobView(job);
 }

@@ -15,14 +15,19 @@ const claim = z.strictObject({
   requestQuotes: z.array(z.string().min(1).max(500)).max(8),
   dependsOnClaimIds: z.array(id).max(32),
 });
-const artifactWork = z.strictObject({
+const artifactWorkFields = {
   artifactId: id,
-  disposition: z.enum(["reuse", "adapt", "verify"]),
-  dispositionClaimId: id,
-  claimIds: z.array(id).min(1).max(32),
+  recommendation: claim.omit({ claimId: true, kind: true }),
+  supportingClaimIds: z.array(id).max(32),
   blockerClaimIds: z.array(id).max(16),
   verificationClaimIds: z.array(id).max(16),
-});
+};
+// OpenAI accepts anyOf; Zod's discriminatedUnion emits unsupported oneOf.
+const artifactWork = z.union([
+  z.strictObject({ ...artifactWorkFields, disposition: z.literal("reuse"), blockerClaimIds: z.array(id).max(0), verificationClaimIds: z.array(id).max(0) }),
+  z.strictObject({ ...artifactWorkFields, disposition: z.literal("adapt") }),
+  z.strictObject({ ...artifactWorkFields, disposition: z.literal("verify"), verificationClaimIds: z.array(id).min(1).max(16) }),
+]);
 const caseDraft = z.strictObject({
   caseId: id,
   outcome: z.enum(["observed_success", "partial", "failed", "unknown"]),
@@ -77,12 +82,70 @@ export const supportReviewSchema = z.strictObject({
     verdict: z.enum(["supported", "unsupported", "uncertain"]),
   })).max(400),
 });
+export const assessmentReviewSchema = supportReviewSchema.extend({
+  conclusion: z.enum(["precedent_found", "no_useful_precedent", "cannot_be_established"]),
+  leadReviews: z.array(z.strictObject({
+    caseId: id,
+    artifactId: id,
+    verdict: z.enum(["supported", "unsupported", "uncertain"]),
+  })).max(96),
+});
 
-export type AssessmentDraft = z.infer<typeof assessmentDraftSchema>;
+export interface ReviewTargets {
+  claimIds: string[];
+  leadArtifacts?: { caseId: string; artifactId: string }[];
+}
+
+export function reviewSchema(targets: ReviewTargets) {
+  const claimReviews = z.array(z.strictObject({
+    claimId: targets.claimIds.length ? z.enum(targets.claimIds) : id,
+    verdict: z.enum(["supported", "unsupported", "uncertain"]),
+  })).length(targets.claimIds.length);
+  if (!targets.leadArtifacts) return supportReviewSchema.extend({ claimReviews });
+  return assessmentReviewSchema.extend({
+    claimReviews,
+    leadReviews: assessmentReviewSchema.shape.leadReviews.length(targets.leadArtifacts.length),
+  });
+}
+
+export type AssessmentOutput = z.infer<typeof assessmentDraftSchema>;
+type ArtifactWork = {
+  artifactId: string;
+  disposition: "reuse" | "adapt" | "verify";
+  dispositionClaimId: string;
+  claimIds: string[];
+  blockerClaimIds: string[];
+  verificationClaimIds: string[];
+};
+export type AssessmentDraft = Omit<AssessmentOutput, "cases"> & {
+  cases: (Omit<AssessmentOutput["cases"][number], "artifactWork"> & { artifactWork: ArtifactWork[] })[];
+};
 export type BriefDraft = z.infer<typeof briefDraftSchema>;
 export type SupportReview = z.infer<typeof supportReviewSchema>;
+export type AssessmentReview = z.infer<typeof assessmentReviewSchema>;
 export type Reference = z.infer<typeof sourceRef>;
 export type ModelClaim = z.infer<typeof claim>;
+
+export function parseAssessmentDraft(value: unknown): AssessmentDraft {
+  const output = assessmentDraftSchema.parse(value);
+  const claims = [...output.claims];
+  const cases = output.cases.map((item, caseIndex) => ({
+    ...item,
+    artifactWork: item.artifactWork.map((work, workIndex) => {
+      const dispositionClaimId = `disposition-${caseIndex}-${workIndex}`;
+      claims.push({ ...work.recommendation, claimId: dispositionClaimId, kind: "recommendation" });
+      return {
+        artifactId: work.artifactId,
+        disposition: work.disposition,
+        dispositionClaimId,
+        claimIds: [...new Set([dispositionClaimId, ...work.supportingClaimIds, ...work.blockerClaimIds, ...work.verificationClaimIds])],
+        blockerClaimIds: work.blockerClaimIds,
+        verificationClaimIds: work.verificationClaimIds,
+      };
+    }),
+  }));
+  return { ...output, cases, claims };
+}
 
 export function openRouterSchema(name: string, schema: z.ZodType): {
   type: "json_schema";
