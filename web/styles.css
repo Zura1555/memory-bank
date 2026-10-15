@@ -42,7 +42,7 @@ button, a { -webkit-touch-callout: none; }
 button { font: inherit; }
 a { color: var(--teal-dark); }
 
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, dialog:focus-visible {
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, .evidence-dialog:focus-visible {
   outline: 3px solid #287f9a;
   outline-offset: 3px;
 }
@@ -341,6 +341,10 @@ input[type="checkbox"] { width: 1.15rem; height: 1.15rem; flex: 0 0 auto; accent
 .fictional-reminder p { margin: 0; color: #284b46; line-height: 1.5; }
 
 .evidence-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   width: min(100% - 2rem, 44rem);
   max-width: none;
   max-height: min(88dvh, 52rem);
@@ -354,8 +358,8 @@ input[type="checkbox"] { width: 1.15rem; height: 1.15rem; flex: 0 0 auto; accent
   box-shadow: 0 25px 90px rgb(0 0 0 / 22%);
   overscroll-behavior: contain;
 }
-.evidence-dialog::backdrop { background: rgb(12 24 27 / 58%); }
-.dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.2rem; }
+.evidence-backdrop { position: fixed; inset: 0; background: rgb(12 24 27 / 58%); }
+.dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; margin-bottom: 1.2rem; border-bottom: 1px solid var(--line); }
 .dialog-header h2 { margin: 0; font-size: 1.5rem; }
 .dialog-header .eyebrow { margin-bottom: .3rem; }
 .icon-button { min-height: 2.5rem; padding: .55rem .75rem; font-size: .85rem; }

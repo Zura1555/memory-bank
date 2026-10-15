@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
+import { Dialog } from "@base-ui/react/dialog";
 import type {
   ArtifactAssessment,
   AssessmentResult,
@@ -513,17 +514,13 @@ interface Session {
 
 type PollMode = "assessment" | "brief" | null;
 
-function EvidenceDialog({ sourceRef, onClose }: { sourceRef: SourceRef | null; onClose: () => void }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
+function EvidencePassage({ sourceRef }: { sourceRef: SourceRef }) {
   const [passage, setPassage] = useState<PassageView | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!sourceRef) return;
     const passageId = sourceRef.passageId;
-    const dialog = dialogRef.current;
-    if (dialog && !dialog.open) dialog.showModal();
     const controller = new AbortController();
     let active = true;
     setPassage(null);
@@ -555,14 +552,7 @@ function EvidenceDialog({ sourceRef, onClose }: { sourceRef: SourceRef | null; o
   }, [sourceRef]);
 
   return (
-    <dialog ref={dialogRef} className="evidence-dialog" aria-labelledby="evidence-dialog-title" onClose={onClose}>
-      <div className="dialog-header">
-        <div>
-          <p className="eyebrow">Checked evidence · Fictional source</p>
-          <h2 id="evidence-dialog-title">Exact passage</h2>
-        </div>
-        <form method="dialog"><button className="icon-button" type="submit" aria-label="Close passage">Close</button></form>
-      </div>
+    <>
       {loading && <p role="status" className="muted">Retrieving the checked passage…</p>}
       {error && <p role="alert" className="notice notice-error">{error}</p>}
       {passage && (
@@ -579,7 +569,27 @@ function EvidenceDialog({ sourceRef, onClose }: { sourceRef: SourceRef | null; o
           <div className="source-links"><a href={`/api/evidence/originals/${encodeURIComponent(passage.versionId)}`}>Download exact fictional original</a></div>
         </div>
       )}
-    </dialog>
+    </>
+  );
+}
+
+function EvidenceDialog({ sourceRef, onClose }: { sourceRef: SourceRef | null; onClose: () => void }) {
+  return (
+    <Dialog.Root open={sourceRef !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="evidence-backdrop" />
+        <Dialog.Popup className="evidence-dialog" aria-modal="true">
+          <div className="dialog-header">
+            <div>
+              <Dialog.Description className="eyebrow">Checked evidence · Fictional source</Dialog.Description>
+              <Dialog.Title>Exact passage</Dialog.Title>
+            </div>
+            <Dialog.Close className="icon-button" aria-label="Close passage">Close</Dialog.Close>
+          </div>
+          {sourceRef && <EvidencePassage key={JSON.stringify(sourceRef)} sourceRef={sourceRef} />}
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
