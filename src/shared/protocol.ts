@@ -15,6 +15,33 @@ export interface SourceRef {
   passageId: string;
 }
 
+interface KnowledgeRecordBase {
+  recordId: string;
+  caseId: string;
+  basis: "source_fact" | "curator_interpretation";
+  applicability: string;
+  evidence: SourceRef[];
+  reviewStatus: "reviewed";
+  reviewer: string;
+  reviewedAt: string;
+  supersedesId?: string;
+}
+
+export type KnowledgeRecord = KnowledgeRecordBase & ({
+  kind: "decision";
+  context: string;
+  choice: string;
+  recordedRationale?: string;
+  recordedRejectedAlternatives?: string[];
+} | {
+  kind: "lesson";
+  observation: string;
+  recommendedFutureAction: string;
+  outcomeLimitations: string;
+});
+
+export type KnowledgeCard = KnowledgeRecord & { supersededById?: string };
+
 export interface Claim {
   claimId: string;
   text: string;

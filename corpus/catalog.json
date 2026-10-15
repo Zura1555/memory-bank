@@ -1,11 +1,12 @@
 {
-  "schemaVersion": 1,
-  "corpusVersion": "fictional-onboarding-v1",
+  "schemaVersion": 2,
+  "corpusVersion": "fictional-onboarding-v2",
   "cases": [
     {
       "caseId": "cedar-batch-import",
       "title": "Cedar Supply sandbox import",
       "fictional": true,
+      "records": [],
       "artifacts": [
         { "artifactId": "request", "title": "Request and acceptance", "fictional": true, "versions": [{ "versionId": "request-2025-02-03", "sourcePath": "corpus/originals/cedar-batch-import/request.md", "mimeType": "text/markdown", "statedDate": "2025-02-03" }] },
         { "artifactId": "delivery-log", "title": "Import work log", "fictional": true, "versions": [{ "versionId": "notes-2025-02-13", "sourcePath": "corpus/originals/cedar-batch-import/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-02-13" }] },
@@ -16,6 +17,7 @@
       "caseId": "ash-volume-import",
       "title": "Ash Goods high-volume import attempt",
       "fictional": true,
+      "records": [],
       "artifacts": [
         { "artifactId": "request", "title": "Migration request", "fictional": true, "versions": [{ "versionId": "request-2025-03-04", "sourcePath": "corpus/originals/ash-volume-import/request.md", "mimeType": "text/markdown", "statedDate": "2025-03-04" }] },
         { "artifactId": "delivery-log", "title": "Import attempts and status", "fictional": true, "versions": [{ "versionId": "notes-2025-03-18", "sourcePath": "corpus/originals/ash-volume-import/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-03-18" }] },
@@ -26,6 +28,7 @@
       "caseId": "elm-bulk-integration",
       "title": "Elm Rentals batch connector",
       "fictional": true,
+      "records": [],
       "artifacts": [
         { "artifactId": "request", "title": "Billing integration request", "fictional": true, "versions": [{ "versionId": "request-2025-04-02", "sourcePath": "corpus/originals/elm-bulk-integration/request.md", "mimeType": "text/markdown", "statedDate": "2025-04-02" }] },
         { "artifactId": "delivery-log", "title": "Connector notes and sandbox outcome", "fictional": true, "versions": [{ "versionId": "notes-2025-04-17", "sourcePath": "corpus/originals/elm-bulk-integration/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-04-17" }] },
@@ -36,6 +39,7 @@
       "caseId": "finch-legacy-api",
       "title": "Finch Travel legacy connector and version limits",
       "fictional": true,
+      "records": [],
       "artifacts": [
         { "artifactId": "request", "title": "Reservation sync request", "fictional": true, "versions": [{ "versionId": "request-2024-11-06", "sourcePath": "corpus/originals/finch-legacy-api/request.md", "mimeType": "text/markdown", "statedDate": "2024-11-06" }] },
         { "artifactId": "delivery-log", "title": "Connector history and correction", "fictional": true, "versions": [{ "versionId": "notes-2025-05-06", "sourcePath": "corpus/originals/finch-legacy-api/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-05-06" }] },
@@ -46,6 +50,60 @@
       "caseId": "grove-scoped-access",
       "title": "Grove Clinic scoped test access",
       "fictional": true,
+      "records": [
+        {
+          "kind": "decision",
+          "recordId": "grove-broad-admin",
+          "caseId": "grove-scoped-access",
+          "basis": "source_fact",
+          "context": "An early draft proposed temporary tenant-wide administrator access. Security rejected it because only job diagnostics were requested; no account was provisioned from the draft.",
+          "choice": "Propose temporary tenant-wide administrator access (rejected, never provisioned).",
+          "recordedRationale": "To avoid delays.",
+          "applicability": "Historical rejected proposal for Grove's diagnostic-access request only; not current access advice.",
+          "evidence": [
+            { "caseId": "grove-scoped-access", "artifactId": "delivery-log", "versionId": "notes-2025-01-22", "passageId": "p-cb43aa551e1eaa58e53a4eead7002428" }
+          ],
+          "reviewStatus": "reviewed",
+          "reviewer": "Zura1555",
+          "reviewedAt": "2026-10-15"
+        },
+        {
+          "kind": "decision",
+          "recordId": "grove-scoped-setup",
+          "caseId": "grove-scoped-access",
+          "basis": "source_fact",
+          "context": "The corrective test-workspace setup was accepted from client screenshots. Audit omitted viewed record identifiers; account removal after expiry was not observed.",
+          "choice": "Create two named accounts in Import-Diagnostics-Readers with read-only job-status and rejected-row access in the test workspace, MFA, and configured expiry on 2025-01-31. Exclude chart and configuration access; membership depends on the identity provider retaining expiry.",
+          "applicability": "Grove's named diagnostic-access accounts in the test workspace and requested test period only; no verified post-expiry removal or equivalent controls elsewhere.",
+          "evidence": [
+            { "caseId": "grove-scoped-access", "artifactId": "delivery-log", "versionId": "notes-2025-01-22", "passageId": "p-b52fd830a5e2afabfafa304f32a9fb51" },
+            { "caseId": "grove-scoped-access", "artifactId": "delivery-log", "versionId": "notes-2025-01-22", "passageId": "p-f75eee725dd6856e4a3e0cf41227358c" }
+          ],
+          "reviewStatus": "reviewed",
+          "reviewer": "Zura1555",
+          "reviewedAt": "2026-10-15",
+          "supersedesId": "grove-broad-admin"
+        },
+        {
+          "kind": "lesson",
+          "recordId": "grove-verify-access-lifecycle",
+          "caseId": "grove-scoped-access",
+          "basis": "curator_interpretation",
+          "observation": "Configured expiry and accepted setup screenshots did not establish actual account removal; the audit lacked viewed record identifiers.",
+          "recommendedFutureAction": "For analogous diagnostic-access requests, verify identity-provider expiry retention, actual account removal, and the audit detail required by the new client; do not infer those guarantees from configured expiry.",
+          "applicability": "Named, networked test-workspace diagnostic access only. Check the new request's constraints before applying; portability to another tenant/provider or production is not established.",
+          "outcomeLimitations": "The client accepted the setup for the test period, but removal after expiry was not observed and account status on 2025-02-01 is unknown.",
+          "evidence": [
+            { "caseId": "grove-scoped-access", "artifactId": "delivery-log", "versionId": "notes-2025-01-22", "passageId": "p-b52fd830a5e2afabfafa304f32a9fb51" },
+            { "caseId": "grove-scoped-access", "artifactId": "delivery-log", "versionId": "notes-2025-01-22", "passageId": "p-f75eee725dd6856e4a3e0cf41227358c" },
+            { "caseId": "grove-scoped-access", "artifactId": "access-checklist", "versionId": "checklist-2025-01-21", "passageId": "p-20478b0862439cc32d662330036dbe8e" },
+            { "caseId": "grove-scoped-access", "artifactId": "access-checklist", "versionId": "checklist-2025-01-21", "passageId": "p-b0069024d06f11b169efc97bb0c82fa1" }
+          ],
+          "reviewStatus": "reviewed",
+          "reviewer": "Zura1555",
+          "reviewedAt": "2026-10-15"
+        }
+      ],
       "artifacts": [
         { "artifactId": "request", "title": "Support access request", "fictional": true, "versions": [{ "versionId": "request-2025-01-14", "sourcePath": "corpus/originals/grove-scoped-access/request.md", "mimeType": "text/markdown", "statedDate": "2025-01-14" }] },
         { "artifactId": "delivery-log", "title": "Access setup notes and correction", "fictional": true, "versions": [{ "versionId": "notes-2025-01-22", "sourcePath": "corpus/originals/grove-scoped-access/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-01-22" }] },
@@ -56,6 +114,7 @@
       "caseId": "harbor-offline-access",
       "title": "Harbor Research air-gapped access inquiry",
       "fictional": true,
+      "records": [],
       "artifacts": [
         { "artifactId": "request", "title": "Air-gapped operator access request", "fictional": true, "versions": [{ "versionId": "request-2025-06-09", "sourcePath": "corpus/originals/harbor-offline-access/request.md", "mimeType": "text/markdown", "statedDate": "2025-06-09" }] },
         { "artifactId": "delivery-log", "title": "Provisioning investigation", "fictional": true, "versions": [{ "versionId": "notes-2025-06-16", "sourcePath": "corpus/originals/harbor-offline-access/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-06-16" }] },
@@ -66,6 +125,7 @@
       "caseId": "ibis-verified-handover",
       "title": "Ibis Foods tested handover",
       "fictional": true,
+      "records": [],
       "artifacts": [
         { "artifactId": "request", "title": "Operations handover request", "fictional": true, "versions": [{ "versionId": "request-2025-05-05", "sourcePath": "corpus/originals/ibis-verified-handover/request.md", "mimeType": "text/markdown", "statedDate": "2025-05-05" }] },
         { "artifactId": "delivery-log", "title": "Handover and exercise record", "fictional": true, "versions": [{ "versionId": "notes-2025-05-23", "sourcePath": "corpus/originals/ibis-verified-handover/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-05-23" }] },
@@ -76,6 +136,7 @@
       "caseId": "kestrel-pending-handover",
       "title": "Kestrel Parts unresolved handover",
       "fictional": true,
+      "records": [],
       "artifacts": [
         { "artifactId": "request", "title": "Warehouse handover request", "fictional": true, "versions": [{ "versionId": "request-2025-06-02", "sourcePath": "corpus/originals/kestrel-pending-handover/request.md", "mimeType": "text/markdown", "statedDate": "2025-06-02" }] },
         { "artifactId": "delivery-log", "title": "Handover status notes", "fictional": true, "versions": [{ "versionId": "notes-2025-06-11", "sourcePath": "corpus/originals/kestrel-pending-handover/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-06-11" }] },

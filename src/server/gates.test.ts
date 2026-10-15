@@ -14,7 +14,7 @@ function fixture(): CorpusSnapshot {
   const versions = new Map<string, { version: SourceVersion; artifact: Artifact; pastCase: PastCase }>();
   for (let index = 1; index <= 8; index++) {
     const caseId = `case-${index}`;
-    const pastCase: PastCase = { caseId, title: `Fictional case ${index}`, fictional: true, artifacts: [] };
+    const pastCase: PastCase = { caseId, title: `Fictional case ${index}`, fictional: true, artifacts: [], records: [] };
     const artifactIds = index === 1 ? ["request", "handover"] : ["request"];
     for (const artifactId of artifactIds) {
       const sourceVersions = index === 1 && artifactId === "request" ? ["request-v1", "request-v2"] : [`${artifactId}-v1-${caseId}`];
@@ -54,7 +54,7 @@ function fixture(): CorpusSnapshot {
     caseAvailability.set(caseId, "available");
   }
   return {
-    manifest: { schemaVersion: 1, corpusVersion: "test-v1", cases },
+    manifest: { schemaVersion: 2, corpusVersion: "test-v1", cases },
     manifestSha256: "b".repeat(64),
     availableVersions,
     caseAvailability,
@@ -103,6 +103,31 @@ test("assessment rejects omitted artifacts even when all eight cases are present
     () => validateAssessmentDraft(draft, "current request", corpus),
     (error: unknown) => error instanceof GateFailure && error.code === "INCOMPLETE_ARTIFACT_WORK",
   );
+});
+
+test("artifact recommendations retain ownership while reviewed same-case context can block them", () => {
+  const corpus = fixture();
+  const draft = assessmentDraft(corpus);
+  const work = draft.cases[0].artifactWork[1];
+  const contextId = "fact-0-0";
+  work.claimIds.push(contextId);
+  work.blockerClaimIds.push(contextId);
+  const invalid = validateAssessmentDraft(draft, "current request", corpus);
+  const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
+  const checked = buildCheckedAssessment(draft, verdicts, invalid, corpus, new Map(), "cannot_be_established");
+  assert.equal(checked.cases[0].artifactWork[1].disposition, "adapt");
+  assert.deepEqual(checked.cases[0].artifactWork[1].blockerClaimIds, [contextId]);
+  verdicts.set(contextId, "unsupported");
+  assert.equal(buildCheckedAssessment(draft, verdicts, invalid, corpus, new Map(), "cannot_be_established").cases[0].artifactWork[1].disposition, null);
+  const recommendation = draft.claims.find((claim) => claim.claimId === work.dispositionClaimId)!;
+  const ownRefs = recommendation.sourceRefs;
+  recommendation.sourceRefs = draft.claims[0].sourceRefs;
+  assert.throws(() => validateAssessmentDraft(draft, "current request", corpus),
+    (error: unknown) => error instanceof GateFailure && error.code === "CLAIM_ARTIFACT_SCOPE");
+  recommendation.sourceRefs = ownRefs;
+  work.claimIds.push("fact-1-0");
+  assert.throws(() => validateAssessmentDraft(draft, "current request", corpus),
+    (error: unknown) => error instanceof GateFailure && error.code === "CLAIM_CASE_SCOPE");
 });
 
 test("selection cannot substitute a different version of an assessed artifact", () => {

@@ -84,13 +84,16 @@ function assertCaseReferences(draft: AssessmentDraft, corpus: CorpusSnapshot): v
         throw new GateFailure("UNKNOWN_CLAIM_REFERENCE", "Artifact work refers to a missing claim.");
       }
       for (const claimId of work.claimIds) {
-        if (!claims.get(claimId)?.sourceRefs.some((ref) => ref.caseId === item.caseId && ref.artifactId === work.artifactId)) {
-          throw new GateFailure("CLAIM_ARTIFACT_SCOPE", "Artifact work lacks evidence from that exact artifact.");
+        if (!claims.get(claimId)?.sourceRefs.some((ref) => ref.caseId === item.caseId)) {
+          throw new GateFailure("CLAIM_CASE_SCOPE", "Artifact context lacks evidence from its own case.");
         }
       }
       const dispositionClaim = claims.get(work.dispositionClaimId);
       if (!work.claimIds.includes(work.dispositionClaimId) || dispositionClaim?.kind !== "recommendation" || dispositionClaimIds.has(work.dispositionClaimId)) {
         throw new GateFailure("DISPOSITION_RECOMMENDATION_REQUIRED", "Each artifact disposition needs its own reviewed recommendation claim.");
+      }
+      if (!dispositionClaim.sourceRefs.some((ref) => ref.caseId === item.caseId && ref.artifactId === work.artifactId)) {
+        throw new GateFailure("CLAIM_ARTIFACT_SCOPE", "Artifact recommendation lacks evidence from that exact artifact.");
       }
       dispositionClaimIds.add(work.dispositionClaimId);
       if (work.blockerClaimIds.some((id) => !work.claimIds.includes(id)) || work.verificationClaimIds.some((id) => !work.claimIds.includes(id))) {

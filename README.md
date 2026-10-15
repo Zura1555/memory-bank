@@ -37,9 +37,12 @@ Verify operator authentication and concurrent database access with `node --env-f
 - `evaluation/keys.json` is offline-only and is not copied into `dist/`, R2, prompts, or application routes. Do not use evaluation keys for prompt tuning.
 - Anonymous job capabilities protect status/results. Application request/results expire after seven days; minimal accounting/idempotency records remain for operator reconciliation. Workflow checkpoint retention is configured for seven days; provider/platform/backup retention is separate and is not promised to be zero.
 - Queue/Workflow duplicates use stable IDs. Paid model calls have no automatic retries or fallback; uncertain dispatch requires operator reconciliation.
+- Human-reviewed decision and lesson cards live in the versioned curator corpus, not expiring jobs. Browse `/?knowledge`, address a record with `/?knowledge=<recordId>`, or inspect it in case details. Cards link exact supporting passages/originals and mark superseded advice as history. Applying a lesson still requires the existing checked, request-specific recommendation pipeline; no new paid stage is added. See [curator authoring and review](ingestion/README.md#decision-and-lesson-records).
 
 ## Verification and release gates
 
 Run `npm run typecheck`, `npm test`, `npm run build`, and `npm run ingest`. Then exercise the local Worker and verify source downloads, capability ownership, budget-denied admission, queue/outbox recovery, workflow state transitions, and retention cleanup. Paid qualification requires the approved existing credit, a valid key, and measured full P1–P4 runs; freeze configuration before H1–H4. Record real model usage/cost, queue wait, phase processing time, full-context fit, extraction fidelity, memory, replay behavior, and source/version access. Do not claim these results from fictional fixtures or code inspection.
+
+The [2026-10-15 qualification report](docs/qualification-2026-10-15.md) records a failed P1 baseline, the approved artifact-ownership correction, and a real ready assessment-to-brief run with reconciled charges and remaining assessment-quality failures. This establishes a bounded development baseline, not release qualification. Admission is disabled after qualification.
 
 Remote deployment requires separately approved Cloudflare/Neon resources and credentials, including Hyperdrive, Queue/dead-letter queue, Workflow, R2, and the deployed static asset binding. Keep the repository private until the source/secrets review is complete; make it public only under the approved submission plan.

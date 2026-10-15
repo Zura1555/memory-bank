@@ -16,6 +16,7 @@ import type {
   JobStage,
   JobView,
   Lead,
+  KnowledgeCard,
   OutcomeStatus,
   PassageView,
   PhaseState,
@@ -60,6 +61,20 @@ function isSourceRef(value: unknown): value is SourceRef {
 
 function isSourceRefs(value: unknown): value is SourceRef[] {
   return Array.isArray(value) && value.every(isSourceRef);
+}
+
+function isKnowledgeCard(value: unknown): value is KnowledgeCard {
+  if (!isRecord(value) || !isText(value.recordId) || !isText(value.caseId)
+    || !["source_fact", "curator_interpretation"].includes(value.basis as string)
+    || !isText(value.applicability) || !isSourceRefs(value.evidence) || value.evidence.length === 0
+    || value.reviewStatus !== "reviewed" || !isText(value.reviewer) || !isText(value.reviewedAt)
+    || (value.supersedesId !== undefined && !isText(value.supersedesId))
+    || (value.supersededById !== undefined && !isText(value.supersededById))) return false;
+  return value.kind === "decision"
+    ? isText(value.context) && isText(value.choice)
+      && (value.recordedRationale === undefined || isText(value.recordedRationale))
+      && (value.recordedRejectedAlternatives === undefined || isTextList(value.recordedRejectedAlternatives))
+    : value.kind === "lesson" && isText(value.observation) && isText(value.recommendedFutureAction) && isText(value.outcomeLimitations);
 }
 
 function isClaim(value: unknown): value is Claim {
@@ -362,6 +377,76 @@ function LeadCard({ lead, contrast = false, claims, inspect }: { lead: Lead; con
   );
 }
 
+function CuratedCard({ record, inspect }: { record: KnowledgeCard; inspect: InspectPassage }) {
+  return <article className="claim-card" id={record.recordId}>
+    <div className="card-heading">
+      <h3>{record.kind === "decision" ? "Decision" : "Lesson"}: {record.recordId}</h3>
+      <Badge tone={record.basis}>{record.basis === "source_fact" ? "Recorded source facts" : "Curator interpretation"}</Badge>
+    </div>
+    <p className="record-id">Fictional case {record.caseId} · Human reviewed by {record.reviewer} on {record.reviewedAt}</p>
+    {record.supersededById && <p className="notice notice-warning"><strong>Historical — superseded; not current advice.</strong>{" "}
+      <a href={`?knowledge=${encodeURIComponent(record.supersededById)}`}>Inspect correction: {record.supersededById}</a></p>}
+    {record.supersedesId && <p>Corrects <a href={`?knowledge=${encodeURIComponent(record.supersedesId)}`}>{record.supersedesId}</a>; the earlier record remains inspectable.</p>}
+    {record.kind === "decision" ? <>
+      <h4>Context</h4><p>{record.context}</p>
+      <h4>Recorded choice</h4><p>{record.choice}</p>
+      <h4>Recorded rationale</h4><p>{record.recordedRationale ?? "Not recorded."}</p>
+      <h4>Recorded rejected alternatives</h4>
+      {record.recordedRejectedAlternatives ? <ul>{record.recordedRejectedAlternatives.map((item) => <li key={item}>{item}</li>)}</ul> : <p>Not recorded.</p>}
+    </> : <>
+      <h4>Observation</h4><p>{record.observation}</p>
+      <h4>Recommended future action — requires a checked application</h4><p>{record.recommendedFutureAction}</p>
+      <h4>Outcome and limitations</h4><p>{record.outcomeLimitations}</p>
+    </>}
+    <h4>Applicability</h4><p>{record.applicability}</p>
+    <p className="field-hint">Historical evidence is not approval for a new request. Applying this record requires a checked recommendation against relevant passages and the client's constraints.</p>
+    <SourceLinks refs={record.evidence} inspect={inspect} />
+    <a href={`?knowledge=${encodeURIComponent(record.recordId)}`}>Permanent record link</a>
+  </article>;
+}
+
+function CuratedKnowledge({ caseId, recordId, inspect }: { caseId?: string; recordId?: string; inspect: InspectPassage }) {
+  const [records, setRecords] = useState<KnowledgeCard[] | null>(null);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    setRecords(null);
+    setError(false);
+    const path = recordId ? `/api/knowledge/${encodeURIComponent(recordId)}` : `/api/knowledge${caseId ? `?caseId=${encodeURIComponent(caseId)}` : ""}`;
+    void (async () => {
+      try {
+        const response = await fetch(path, { signal: controller.signal });
+        if (!response.ok) throw new Error("Knowledge unavailable");
+        const body: unknown = await response.json();
+        const items: unknown = recordId ? [body] : isRecord(body) ? body.records : null;
+        if (!Array.isArray(items) || !items.every(isKnowledgeCard)) throw new Error("Invalid knowledge response");
+        setRecords(items);
+      } catch {
+        if (!controller.signal.aborted) setError(true);
+      }
+    })();
+    return () => controller.abort();
+  }, [caseId, recordId]);
+  if (error) return <p className="notice notice-error" role="alert">Reviewed knowledge or its exact source evidence is unavailable.</p>;
+  if (records === null) return <p role="status">Loading reviewed knowledge…</p>;
+  if (records.length === 0) return caseId ? null : <p>No reviewed knowledge records are available.</p>;
+  return <section className="content-section" aria-label="Reviewed decisions and lessons">
+    <h2>Reviewed decisions and lessons</h2>
+    <div className="claim-list">{records.map((record) => <CuratedCard key={record.recordId} record={record} inspect={inspect} />)}</div>
+  </section>;
+}
+
+function KnowledgePage({ recordId }: { recordId?: string }) {
+  const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
+  return <main className="app-shell">
+    <header className="app-header"><a href="/" className="brand">Memory Bank</a><span className="fictional-banner">Fictional examples only</span><a href="?knowledge">All reviewed records</a></header>
+    <h1>Curated knowledge</h1>
+    <p>Human-reviewed historical records, independent of expiring assessment jobs.</p>
+    <CuratedKnowledge recordId={recordId} inspect={setPassageRef} />
+    <EvidenceDialog sourceRef={passageRef} onClose={() => setPassageRef(null)} />
+  </main>;
+}
+
 function CaseCard({ item, claims, inspect }: { item: CaseAssessment; claims: ClaimMap; inspect: InspectPassage }) {
   const outcomeHasSupport = claimsFor(item.outcomeClaimIds, claims).length > 0;
   return (
@@ -375,6 +460,7 @@ function CaseCard({ item, claims, inspect }: { item: CaseAssessment; claims: Cla
       </div>
       <ClaimGroup title="Checked case claims" ids={item.claimIds} claims={claims} inspect={inspect} />
       <ClaimGroup title="Evidence for observed outcome" ids={item.outcomeClaimIds} claims={claims} inspect={inspect} />
+      <CuratedKnowledge caseId={item.caseId} inspect={inspect} />
     </article>
   );
 }
@@ -824,6 +910,7 @@ function App() {
       <header className="app-header">
         <a href="/" className="brand" aria-label="Memory Bank home"><span className="brand-mark" aria-hidden="true">M</span><span>Memory Bank</span></a>
         <span className="fictional-banner">Fictional examples only</span>
+        <a href="?knowledge">Reviewed decisions and lessons</a>
 
         {session && <button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</button>}
       </header>
@@ -968,4 +1055,7 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+const knowledgeQuery = new URLSearchParams(window.location.search);
+createRoot(document.getElementById("root")!).render(knowledgeQuery.has("knowledge")
+  ? <KnowledgePage recordId={knowledgeQuery.get("knowledge") || undefined} />
+  : <App />);
