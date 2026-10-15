@@ -275,8 +275,13 @@ export function buildCheckedAssessment(
     }
   }
   const checked = supportedClaims(draft.claims, verdicts, rejected);
-  const cases: CaseAssessment[] = draft.cases.map((item) => {
-    const outcomeClaimsValid = item.outcomeClaimIds.length > 0 && keepAll(item.outcomeClaimIds, checked.accepted);
+  const cases: CaseAssessment[] = draft.cases.map((item, caseIndex) => {
+    const classificationId = `outcome-${caseIndex}`;
+    const classification = draft.claims.find((claim) => claim.claimId === classificationId);
+    const outcomeClaimsValid = classification?.kind === "interpretation"
+      && classification.text === `Observed case outcome: ${item.outcome}.`
+      && item.outcomeClaimIds.includes(classificationId)
+      && keepAll(item.outcomeClaimIds, checked.accepted);
     const pastCase = corpus.manifest.cases.find((candidate) => candidate.caseId === item.caseId);
     const workByArtifact = new Map(item.artifactWork.map((work) => [work.artifactId, work]));
     const artifactWork = (pastCase?.artifacts ?? []).map((artifact) => {

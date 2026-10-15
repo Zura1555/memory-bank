@@ -188,6 +188,70 @@ test("support review must cover each claim exactly once", () => {
   );
 });
 
+test("case outcome labels need their own review even when the underlying facts pass", () => {
+  const corpus = fixture();
+  const wireIds = assessmentPassageIds(corpus);
+  const output: AssessmentOutput = {
+    cases: corpus.manifest.cases.map((pastCase) => ({
+      caseId: pastCase.caseId, outcome: "failed",
+      artifactWork: pastCase.artifacts.map((artifact) => ({
+        artifactId: artifact.artifactId, disposition: "adapt", usefulForLead: false,
+        recommendation: {
+          text: "Adapt the recorded work after checking the client's capabilities.",
+          sourceRefs: [wireIds.get(artifact.versions[0].passages[0].passageId)!],
+          requestQuotes: ["current request"], dependsOnClaimIds: [],
+        },
+        supportingClaims: [], blockerClaims: [], verificationClaims: [],
+      })),
+    })),
+    claims: corpus.manifest.cases.map((pastCase, index) => ({
+      claimId: `fact-${index}`, caseId: pastCase.caseId, kind: "source_fact", outcomeEvidence: true,
+      text: index === 0 ? "Work stopped; the client-dependent provisioning outcome is unknown." : "The attempted provisioning failed with a recorded error.",
+      sourceRefs: [wireIds.get(pastCase.artifacts[0].versions[0].passages[0].passageId)!],
+      requestQuotes: [], dependsOnClaimIds: [],
+    })),
+    leads: [], contrasts: [], clarifyingClaimIds: [], comparisons: [],
+  };
+  output.cases[4].outcome = "unknown";
+  output.claims[5].outcomeEvidence = false;
+  output.cases[6].outcome = "partial";
+  output.cases[7].outcome = "observed_success";
+  const draft = parseAssessmentDraft(output, corpus);
+  const invalid = validateAssessmentDraft(draft, "current request", corpus);
+  const review = { claimReviews: draft.claims.map((claim) => ({
+    claimId: claim.claimId,
+    verdict: (claim.claimId === "outcome-0" ? "unsupported" : claim.claimId === "outcome-2" ? "uncertain" : "supported") as SupportVerdict,
+  })) };
+  const verdicts = validateSupportReview(draft.claims, review);
+  // A missing verdict also fails closed; production rejects incomplete reviews.
+  verdicts.delete("outcome-3");
+  const checked = buildCheckedAssessment(draft, verdicts, invalid, corpus, new Map(), "cannot_be_established");
+  assert.deepEqual(checked.cases.map((item) => item.outcome), ["unknown", "failed", "unknown", "unknown", "unknown", "unknown", "partial", "observed_success"]);
+  assert.deepEqual(checked.cases[0].outcomeClaimIds, []);
+  assert.ok(checked.claims.some((claim) => claim.claimId === "fact-0"));
+  assert.ok(!checked.claims.some((claim) => claim.claimId === "outcome-0"));
+  const classification = checked.claims.find((claim) => claim.claimId === "outcome-1")!;
+  assert.equal(classification.kind, "interpretation");
+  assert.deepEqual(classification.dependsOnClaimIds, ["fact-1"]);
+  assert.throws(
+    () => validateSupportReview(draft.claims, { claimReviews: review.claimReviews.filter((item) => item.claimId !== "outcome-1") }),
+    (error: unknown) => error instanceof GateFailure && error.code === "INCOMPLETE_SUPPORT_REVIEW",
+  );
+  assert.equal(revalidateAssessment(checked, "current request", corpus).cases[1].outcome, "failed");
+  const legacy = structuredClone(checked);
+  legacy.claims = legacy.claims.filter((claim) => claim.claimId !== "outcome-1");
+  legacy.cases[1].outcomeClaimIds = ["fact-1"];
+  assert.equal(revalidateAssessment(legacy, "current request", corpus).cases[1].outcome, "unknown");
+  for (const rejection of ["unsupported", "uncertain"] as const) {
+    verdicts.set("fact-1", rejection);
+    assert.equal(buildCheckedAssessment(draft, verdicts, invalid, corpus, new Map(), "cannot_be_established").cases[1].outcome, "unknown");
+  }
+  verdicts.set("fact-1", "supported");
+  assert.equal(buildCheckedAssessment(draft, verdicts, new Set(["fact-1"]), corpus, new Map(), "cannot_be_established").cases[1].outcome, "unknown");
+  corpus.passages.delete(corpus.manifest.cases[1].artifacts[0].versions[0].passages[0].passageId);
+  assert.equal(revalidateAssessment(checked, "current request", corpus).cases[1].outcome, "unknown");
+});
+
 test("artifact recommendations and role claims remain independently reviewable", () => {
   const corpus = fixture();
   const draft = assessmentDraft(corpus);

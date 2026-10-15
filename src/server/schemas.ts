@@ -178,10 +178,30 @@ export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): As
     );
     return { ...row, evidenceClaimId, requirementClaimId, assessmentClaimId, implicationClaimId };
   });
+  // Outcome facts and the classification are separate review targets.
+  const outcomeClaimIdsByCase = new Map<string, string[]>();
+  for (const [caseIndex, item] of output.cases.entries()) {
+    const evidence = output.claims.filter((claim) => claim.caseId === item.caseId && claim.outcomeEvidence);
+    const evidenceIds = evidence.map((claim) => claim.claimId);
+    const classificationId = `outcome-${caseIndex}`;
+    if (item.outcome !== "unknown" && evidence.length > 0) {
+      claims.push({
+        claimId: classificationId,
+        text: `Observed case outcome: ${item.outcome}.`,
+        kind: "interpretation",
+        sourceRefs: resolveRefs([...new Set(evidence.flatMap((claim) => claim.sourceRefs))]),
+        requestQuotes: [],
+        dependsOnClaimIds: evidenceIds,
+      });
+      outcomeClaimIdsByCase.set(item.caseId, [...evidenceIds, classificationId]);
+    } else {
+      outcomeClaimIdsByCase.set(item.caseId, []);
+    }
+  }
   const cases = output.cases.map((item, caseIndex) => ({
     ...item,
     claimIds: output.claims.filter((claim) => claim.caseId === item.caseId).map((claim) => claim.claimId),
-    outcomeClaimIds: output.claims.filter((claim) => claim.caseId === item.caseId && claim.outcomeEvidence).map((claim) => claim.claimId),
+    outcomeClaimIds: outcomeClaimIdsByCase.get(item.caseId)!,
     artifactWork: item.artifactWork.map((work, workIndex) => {
       const dispositionClaimId = `disposition-${caseIndex}-${workIndex}`;
       claims.push({ ...work.recommendation, sourceRefs: resolveRefs(work.recommendation.sourceRefs), claimId: dispositionClaimId, kind: "recommendation" });
