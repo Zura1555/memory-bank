@@ -2,7 +2,47 @@
 
 Related: issue #4. Base: `4153ad3` (pulled main before implementation). Local Worker `127.0.0.1:8793`, PostgreSQL, local R2/Queue/Workflow; no deployment.
 
-## Result and boundaries
+## Completed acceptance: supported live disposition replacement
+
+The remaining live acceptance gate passed on job `a02b6048-2c66-49b4-a571-8663842f19fc`, using the retained authorized baseline `0a2b049d-f8f6-4e56-882a-98fda6c0a716`. No implementation change, model retry, generated-output repair, or gate relaxation was needed. Earlier runs below remain historical evidence, not the final acceptance status.
+
+The approved clarification supplied factual compatibility and scope information, rather than requesting a particular disposition:
+
+> This is another batch in the same LedgerLeaf sandbox and unchanged product/version/configuration used for Cedar, not a new target. Client validation confirms exactly 1,200 active rows; CSV headers source_key, legal_name, contact_email, payment_term_code, status; and target fields external_reference, supplier_name, email, payment_terms. The field rules are unchanged: preserve source_key, trim names and email without changing email case, include exact active status, and only NET30 and DUE payment codes. Duplicate emails remain separate by source key. Client sign-off confirms the mapping and count reconciliation need no changes. There are no production writes, corrected-row retries, restart/recovery, increased scale, or other new capabilities in scope. Past acceptance counts are evidence of Cedar only, not a promised result for this batch.
+
+All 848 clarification characters were asserted equal in the controlled textarea before submission. The stored request was asserted equal to the baseline, clarification delimiter, and full clarification afterward. Baseline replay used its actual retained receipt/capability; real status reads succeeded. Clarification submission and both model stages were real. This is a fictional client-confirmation scenario, not independent verification of a real client's configuration.
+
+Result: `precedent_found`, 85 accepted claims, 14 withheld, 11 comparison rows, zero next actions. Cedar mapping and delivery-log both changed **Adapt → Reuse**. Independent review marked both current recommendation claims (`disposition-0-2`, `disposition-0-1`) supported and separately approved both lead artifacts. Every visible claim and dependency, and every comparison role, resolved to accepted checked claims. Mapping reuse remained bounded to the confirmed sandbox rules; recorded acceptance counts were not promised for the new batch.
+
+Actual Chromium displayed both supported changes with previous/current recommendation text and canonical evidence links. Opening a lineage evidence link displayed the exact original source-key/email-handling passage. Before submission, the mapping, retained version `map-2025-02-11`, and a passage were selected. Immediately afterward selections were cleared and one prior snapshot remained; at ready, selected-card count was zero and “Check selected work” was disabled. Starting a new request removed lineage entirely.
+
+| Measurement | Observed value |
+|---|---:|
+| Queue wait | 439.498 ms |
+| Processing | 61,636.301 ms |
+| Draft generation `gen-1792060554-OdEvIFTVbmPK27H9IePo` | USD 0.005847855 |
+| Review generation `gen-1792060604-SJ7qmctLxePHiAF3LMtR` | USD 0.005776328 |
+| Exact combined charge | USD 0.011624183 |
+
+Provider terminal generation records were retrieved before reconciling reservation `f95244e2-ec93-4887-b527-b05ee39b7f3d` at 11,625 microUSD. Final campaign: admission disabled, zero holds, zero pending jobs, no active attempt, 153,507 microUSD reconciled spend. No additional paid attempt was made.
+
+### Issue #4 acceptance evidence
+
+| Criterion | Evidence |
+|---|---|
+| Accepted claims and fail-closed dependencies | Existing regression coverage; live 85-claim dependency closure and all comparison roles checked against independent supported verdicts. |
+| Unknown facts, no fabricated scores | Baseline product/version comparison explicitly unknown; comparison contract has categorical relations, not numeric similarity/confidence. |
+| Visible applicability, contrasts, and reuse uncertainty | Baseline lead comparisons exposed mapping/version uncertainty; current Cedar scope/rules matched while Ash scale mismatch remained visible. Exact passage inspector exercised. |
+| Up to three supported next actions, no filler | Baseline displayed three checked actions; confirmed-current result displayed zero. Existing unsupported-dependency regressions cover withholding. |
+| Clarification changes disposition and clears selections | Live mapping and delivery-log Adapt → Reuse with two checked recommendations per change, evidence links, immediate invalidation, and disabled brief until fresh selection. |
+| Conservative conclusions remain possible | Earlier exact-input run reached `cannot_be_established` with no invented replacement; empty-inventory conclusion regression retained. |
+| Actual approved UI workflow, quality and latency recorded | This two-stage approved workflow, exact inputs, provider charges, timing, and earlier failure/latency history are recorded here; no held-out key used. |
+
+All named acceptance criteria now have evidence. This is bounded feature acceptance, not a claim of broad semantic reliability, guaranteed new-client results, or universal sub-90-second latency. PR #17 may close #4 on merge; neither merge nor deployment is authorized by this verification.
+
+Publication checks reran successfully: `npm run typecheck`, `npm test` (17 TypeScript tests and one Python test), and `npm run build`. The first combined non-PTY shell call timed out without usable output; isolated PTY checks completed successfully. The task-owned Worker was stopped after verification; PostgreSQL was not restarted.
+
+## Historical runs and boundaries before completed acceptance
 
 The workbench, bounded in-tab lineage, evidence links, and fail-closed projection were exercised through Chromium. A checked baseline displayed 64 accepted claims, four withheld, four comparison rows, and three next actions. Its Cedar product/version was explicitly unknown; sandbox and approximately 1,200-row limits were explicit. Exact source-key passage inspection and all 24 original SHA-256 checks passed.
 
