@@ -2,11 +2,11 @@
 
 Related: [issue #2](https://github.com/Zura1555/memory-bank/issues/2), [issue #3](https://github.com/Zura1555/memory-bank/issues/3).
 
-## Gate result: BLOCKED on final integrated revision; interim P1 baseline passed
+## Gate result: BLOCKED by fresh baseline lead/work inconsistency
 
-An owner-approved visible P1 run reached **ready assessment and ready brief in the actual development UI** after an interim artifact-claim ownership correction. The chosen Cedar mapping brief was checked against its exact original and preserved its limits. Terminal phases were reconciled before further admission. After later upstream integration, one interrupted dispatch remains unresolved with its hold preserved; see the final section for the current state.
+An earlier owner-approved visible P1 run reached **ready assessment and ready brief in the actual development UI** after an interim artifact-claim ownership correction. It does not qualify the subsequently integrated output contract. The latest owner-approved fresh-campaign run on revision `2f7466d` failed the structural gate: a proposed useful lead artifact was classified as verify-only work. No checked assessment or brief is claimed.
 
-The interim P1 run established an end-to-end baseline, but it does not qualify the subsequently integrated output contract. The final integrated revision is blocked by the timeout/interrupted-dispatch evidence at the end of this report. Full P2–P4 flows, held-out evaluation, production, and broad latency/reliability qualification remain unverified. No configuration was tuned using held-out keys. Do not treat issue #2 or issue #3's delivery dependency as complete.
+The previously interrupted dispatch now has independently verified terminal provider evidence, but its ephemeral local ledger was lost before reconciliation. The owner approved a fresh audited campaign without reconstructing historical rows. The latest run's exact charge was reconciled; admission is disabled, with no held funds or active attempt in the new ledger. See the final section for recovery, timing, cost, and failure evidence. Issue #2 and the dependent issue #3/#4 delivery gates remain incomplete; held-out evaluation, production, and broad latency/reliability qualification remain unverified.
 
 ## Configuration and provenance
 
@@ -131,7 +131,7 @@ Final observed operator state: admission disabled, zero held funds, no active at
 
 Final feature checks: `npm run typecheck`, `npm test` (12 TypeScript tests plus one Python test with publishing-validation subcases), and `npm run build` passed. `npm run ingest` had successfully built the schema-v2 edition before publication and the P3 run; it was not rerun afterward to avoid silently changing the captured manifest's import timestamps. Task-owned browser/Worker processes and temporary ingestion scaffolding were released after verification; the worktree was retained.
 
-## Upstream integration and final ownership contract
+## Historical upstream integration and ownership contract
 
 During publication, `main` advanced to `2a3a487`, merging PR #6 (`414b5ea`). Its ownership fix uses artifact-local inline supporting/blocker/verification claims, with global facts referenced only through dependencies. The task branch incorporated that change with a normal merge, not a rebase or force-push. The interim same-case-role gate relaxation and its overlapping regression were removed. The final implementation retains upstream's stricter exact-artifact provenance gate and the reviewed-card additions; the earlier runs above remain historical observations, not proof of this changed output contract.
 
@@ -144,3 +144,54 @@ The separately approved compact integrated attempt, job `2f549f57-4305-498d-a9a3
 The owner explicitly chose **“Preserve unresolved hold and stop paid runs.”** The 600,000-microUSD reservation remains held; admission remains disabled. No manual reconciliation or automatic retry was performed for that dispatch. Final integrated qualification therefore **has not passed**. All previously terminal attempts have provider-record reconciliation; this interrupted attempt is the explicit unresolved exception blocking further admission.
 
 The cards, authoring validation, UI surfaces, and model context are implemented and were exercised as recorded above, but delivery against the final output contract remains blocked by issue #2. The earlier PASS heading was revised rather than silently applying historical success to a different revision. Final integrated static checks passed (`npm run typecheck`, `npm test`: 11 TypeScript tests plus one Python validation test, `npm run build`); they do not replace the failed runtime qualification. The final integration is retained locally and must not be presented as a verified published result.
+
+## Fresh audited campaign and qualification failure — 2026-10-15
+
+### Historical dispatch identified; old ledger unavailable
+
+The owner supplied generation `gen-1792037443-J9YbEsAXIek0Eh8wYF9U`. A read-only `GET /api/v1/generation?id=...` independently confirmed creation at `2026-10-15T04:10:42.934Z`, OpenAI model `openai/gpt-6-luna-20260922`, `finish_reason: stop`, `native_finish_reason: completed`, `cancelled: false`, generation time 102,397 ms, and exact `total_cost` USD **0.008031300**. The timestamp matches the captured dispatch at `04:10:42.119Z`, and the charge matches the previously observed provider balance delta. This establishes terminal billing evidence, not an accepted application result.
+
+Before a reconciliation could be submitted, the operator endpoint returned HTTP 500 because PostgreSQL was stopped. Docker inspection confirmed that both retained Memory Bank PostgreSQL containers stored `/var/lib/postgresql/data` on `tmpfs`, with no persistent database volume. No SQL dump or database backup was found in the main or qualification checkout. The historical reservation therefore was **not** reconciled through the operator endpoint; no missing historical rows were reconstructed and no old hold was claimed released.
+
+The owner explicitly chose **“Start a fresh audited local campaign.”** `docker compose up -d --wait postgres` initialized the new local ledger. Operator status confirmed no reservations, no active attempt, admission disabled, and zero reconciled spend. This is a new campaign, not a restoration of the prior ledger. The historical provider charge above remains recorded here separately.
+
+### Executed revision and actual UI result
+
+- Application revision: `2f7466d` on `main`; no application, prompt, schema, gate, or model-setting changes were made for this run.
+- Corpus: `fictional-onboarding-v2`, eight fictional cases; manifest SHA-256 `fbc1d4ae92275efafb23b660446ac78a4b6c624e4ce603d67d2d320e142b63ca`. The live knowledge endpoint returned all three Grove records.
+- Worker: `http://127.0.0.1:8791`, local PostgreSQL and Wrangler-local R2/Queue/Workflow. Chromium was launched explicitly through `/usr/bin/chromium-browser` after the default managed browser failed.
+- The model/provider contract above remained unchanged: `openai/gpt-6-luna`, OpenAI-only, no fallback, `stream: false`, default service tier, no reasoning, strict structured output, 16,384-token ceiling, 120-second request deadline. Read-only model metadata confirmed the route and current pricing before admission.
+- Provider credit before admission: USD 5 total credit, USD `0.520918838` used, USD `4.479081162` remaining. The new campaign recorded 4,479,081 microUSD, rounded down. No credit purchase or budget-limit increase occurred.
+
+The same visible P1 request quoted earlier in this report was entered through the actual UI and submitted with **Check past examples**. Job `03dc6eb7-f55a-46c4-8202-1d3a62856d11` was accepted; admission was immediately disabled to prevent another job. No build or source edits were performed in the running checkout during the paid dispatch.
+
+The UI reached **“Evidence check failed. No past-example result is available.”** The job stored `STRUCTURAL_CHECK_FAILED`. Replaying its captured `result_json` through `parseAssessmentDraft` and `validateAssessmentDraft`, without another model call, produced:
+
+```text
+GateFailure LEAD_ARTIFACT_NOT_USABLE:
+A lead includes work that was not checked as reusable or adaptable.
+```
+
+Specifically, the Cedar lead listed `delivery-log` in `usefulArtifactIds`, but its corresponding artifact work had `disposition: verify`. The existing prompt already requires lead useful artifacts to be reuse/adapt work, never verify work. The gate correctly rejected that inconsistent recommendation; neither the gate nor the captured output was weakened, repaired, or reclassified to manufacture readiness. No support-review call or brief was dispatched.
+
+### Measured timing and reconciled charge
+
+| Observation | Value |
+| --- | --- |
+| Assessment queued | `2026-10-15T06:52:04.290Z` |
+| Processing started | `2026-10-15T06:52:10.920Z` |
+| Failed terminal committed | `2026-10-15T06:53:55.852Z` |
+| Queue wait | 6.630 s |
+| Processing | 104.932 s |
+| Queued-to-terminal | 111.562 s |
+| Provider generation | `gen-1792047134-8AhWlswDCLFYBcIau22R` |
+| Provider generation time | 100,084 ms |
+| Application-reported prompt/completion tokens | 18,420 / 12,947 |
+| Provider `total_cost` | USD 0.008688165 |
+| Operator reconciliation | 8,689 microUSD |
+
+The UI independently displayed 6.6 s queue wait and 104.9 s processing, exceeding the 90-second processing target. These are one failed request's observations, not a latency percentile or a successful workflow baseline.
+
+The read-only generation endpoint confirmed terminal `stop` / `completed`. Provider total usage increased from USD `0.520918838` to `0.529607003`, exactly matching USD `0.008688165`. Reservation `2a360f73-1019-46e5-91ae-8325f4905ccf` was reconciled through `POST /api/operator/reconciliations` to 8,689 microUSD, rounded upward once. Final new-campaign status: admission disabled, zero held funds, 8,689 microUSD reconciled spend, no active attempt, and no pending job. No automatic paid retry occurred.
+
+**Qualification remains blocked.** The current run exercised real UI submission, model dispatch, structural rejection, exact provider reconciliation, and fail-closed presentation. It did not exercise ready assessment, supporting-passage inspection, retained selection, ready brief, or their semantic quality on this revision. Issue #4 implementation remains paused under the owner's qualification-first decision; no held-out key was consulted or used to tune prompts.
