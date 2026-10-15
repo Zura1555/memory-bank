@@ -196,17 +196,20 @@ test("artifact recommendations and role claims remain independently reviewable",
         const { claimId: _, kind: __, ...recommendation } = byId.get(work.dispositionClaimId)!;
         return {
           artifactId: work.artifactId, disposition: "adapt", recommendation,
-          supportingClaimIds: work.claimIds.filter((id) => id !== work.dispositionClaimId),
-          blockerClaimIds: [], verificationClaimIds: [],
+          supportingClaims: work.claimIds.filter((id) => id !== work.dispositionClaimId).map((id) => {
+            const { claimId: _, ...claim } = byId.get(id)!;
+            return claim;
+          }),
+          blockerClaims: [], verificationClaims: [],
         };
       }),
     })),
   };
-  const blocker: Claim = {
-    ...draft.claims[0], claimId: "blocker", kind: "recommendation", text: "Verify the new target before adaptation.",
+  const { claimId: _, ...blocker } = {
+    ...draft.claims[0], kind: "recommendation" as const, text: "Verify the new target before adaptation.",
+    dependsOnClaimIds: ["fact-0-1"],
   };
-  output.claims.push(blocker);
-  output.cases[0].artifactWork[0].blockerClaimIds.push(blocker.claimId);
+  output.cases[0].artifactWork[0].blockerClaims.push(blocker);
   const parsed = parseAssessmentDraft(output);
   const invalid = validateAssessmentDraft(parsed, "current request", corpus);
   const rejected = parsed.cases[0].artifactWork[0].dispositionClaimId;
@@ -217,7 +220,14 @@ test("artifact recommendations and role claims remain independently reviewable",
   assert.equal(checked.cases[0].artifactWork[0].disposition, null);
   assert.equal(checked.cases[0].artifactWork[1].disposition, "adapt");
   assert.ok(checked.claims.some((claim) => claim.claimId === kept));
-  assert.ok(checked.claims.some((claim) => claim.claimId === blocker.claimId));
+  assert.ok(checked.claims.some((claim) => claim.claimId === parsed.cases[0].artifactWork[0].blockerClaimIds[0]));
+  assert.deepEqual(parsed.claims.find((claim) => claim.claimId === parsed.cases[0].artifactWork[0].blockerClaimIds[0])?.dependsOnClaimIds, ["fact-0-1"]);
+  const wrongOwner = structuredClone(output);
+  wrongOwner.cases[0].artifactWork[1].blockerClaims.push(blocker);
+  assert.throws(
+    () => validateAssessmentDraft(parseAssessmentDraft(wrongOwner), "current request", corpus),
+    (error: unknown) => error instanceof GateFailure && error.code === "CLAIM_ARTIFACT_SCOPE",
+  );
 });
 
 test("true historical facts cannot promote an incompatible artifact into a useful precedent", () => {
