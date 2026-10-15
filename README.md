@@ -55,6 +55,12 @@ Selected work uses Base UI Select for artifacts with multiple checked retained v
 
 For a browser smoke, choose a multi-version artifact, select a passage, and switch versions by pointer and by keyboard (Arrow keys/Home/End, then Enter). Confirm the previous passages are cleared, the brief action stays disabled until a new passage is selected, and the submitted brief contains only the chosen version and its passages. Verify the “Retained version” label, announced selected value, visible keyboard focus, Escape dismissal/focus return, draft persistence after going back to checked examples, and open/closed layouts at 320px and in dark mode. Browser-only assessment fixtures exercise the UI without paid calls; they do not qualify the model or Worker workflow.
 
+### Shared Anduin colors
+
+The existing shared CSS roles now use Anduin's observed public blue `#0158AE`, navy `#162950`, and decorative blue-gray `#CCD2DB`. Actions, links, evidence accents, focus, and the Base UI picker/dialog share light/dark roles; semantic green/amber/red/unknown labels remain distinct. Small muted text and functional control borders use contrast-safe assignments rather than copying low-contrast website values.
+
+See the [source selectors, explicit application/dark-mode derivations, measured contrast pairs, and browser screenshot record](docs/anduin-palette-2026-10-15.md). This is website-matched branding, not a claim of access to private product tokens. Browser replay proof is separate from the still-blocked paid workflow qualification.
+
 ## Verification and release gates
 
 Run `npm run typecheck`, `npm test`, `npm run build`, and `npm run ingest`. Then exercise the local Worker and verify source downloads, capability ownership, budget-denied admission, queue/outbox recovery, workflow state transitions, and retention cleanup. Paid qualification requires the approved existing credit, a valid key, and measured full P1–P4 runs; freeze configuration before H1–H4. Record real model usage/cost, queue wait, phase processing time, full-context fit, extraction fidelity, memory, replay behavior, and source/version access. Do not claim these results from fictional fixtures or code inspection.
