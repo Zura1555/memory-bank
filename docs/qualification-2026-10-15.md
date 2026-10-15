@@ -2,11 +2,11 @@
 
 Related: [issue #2](https://github.com/Zura1555/memory-bank/issues/2), [issue #3](https://github.com/Zura1555/memory-bank/issues/3).
 
-## Gate result: BLOCKED by fresh baseline lead/work inconsistency
+## Gate result: bounded P1 UI baseline passed on the consistency fix; quality defects remain
 
-An earlier owner-approved visible P1 run reached **ready assessment and ready brief in the actual development UI** after an interim artifact-claim ownership correction. It does not qualify the subsequently integrated output contract. The latest owner-approved fresh-campaign run on revision `2f7466d` failed the structural gate: a proposed useful lead artifact was classified as verify-only work. No checked assessment or brief is claimed.
+The latest separately approved run reached **ready assessment → exact passage inspection → retained version/passage selection → ready brief** in the actual development UI. The artifact-local generation contract prevents verify work from being nominated as useful lead work. This qualifies the exercised P1 flow, not semantic perfection, held-out evaluation, production, or latency percentiles. See the final section for this run's revision, quality findings, timings, and exact reconciled charges.
 
-The previously interrupted dispatch now has independently verified terminal provider evidence, but its ephemeral local ledger was lost before reconciliation. The owner approved a fresh audited campaign without reconstructing historical rows. The latest run's exact charge was reconciled; admission is disabled, with no held funds or active attempt in the new ledger. See the final section for recovery, timing, cost, and failure evidence. Issue #2 and the dependent issue #3/#4 delivery gates remain incomplete; held-out evaluation, production, and broad latency/reliability qualification remain unverified.
+Earlier runs and failures below remain historical evidence. The previously interrupted dispatch has independently verified terminal provider evidence, but its ephemeral ledger was lost before reconciliation; those historical rows were not reconstructed. Every attempt in the fresh campaign is now reconciled. Final admission is disabled, with zero holds, no active attempt, and no pending job. Broader delivery decisions must retain the recorded quality defects and unverified boundaries.
 
 ## Configuration and provenance
 
@@ -195,3 +195,76 @@ The UI independently displayed 6.6 s queue wait and 104.9 s processing, exceedin
 The read-only generation endpoint confirmed terminal `stop` / `completed`. Provider total usage increased from USD `0.520918838` to `0.529607003`, exactly matching USD `0.008688165`. Reservation `2a360f73-1019-46e5-91ae-8325f4905ccf` was reconciled through `POST /api/operator/reconciliations` to 8,689 microUSD, rounded upward once. Final new-campaign status: admission disabled, zero held funds, 8,689 microUSD reconciled spend, no active attempt, and no pending job. No automatic paid retry occurred.
 
 **Qualification remains blocked.** The current run exercised real UI submission, model dispatch, structural rejection, exact provider reconciliation, and fail-closed presentation. It did not exercise ready assessment, supporting-passage inspection, retained selection, ready brief, or their semantic quality on this revision. Issue #4 implementation remains paused under the owner's qualification-first decision; no held-out key was consulted or used to tune prompts.
+
+## Artifact-local useful-lead contract and approved P1 baseline
+
+### Change and verification
+
+- Executed code: `fix/assessment-generation-consistency`, based on merged PR #15, `bc84ef6c9e9c8f33c7f3a7d65b0489802d94851f`, with the schema/parser, prompt-contract, regression, and server-documentation changes in this PR. No source writes or builds occurred while either paid phase was active.
+- Before editing, replay of the stored failed job `03dc6eb7-f55a-46c4-8202-1d3a62856d11` reproduced `LEAD_ARTIFACT_NOT_USABLE`. Its output and accounting were not modified.
+- Root cause: the model independently generated a lead artifact-ID list and artifact dispositions. The new contract puts an explicit `usefulForLead` boolean beside each disposition and constrains it to `false` in the verify branch. Lead metadata contains only case/state/reasons; the parser constructs the unchanged API ID list from the explicitly nominated artifacts in that case. Reuse/adapt artifacts are not automatically nominated. Contrasts retain their existing lists.
+- `gates.ts` was inspected and intentionally unchanged: exact ownership, coverage, support review, separate compatibility review, and `LEAD_ARTIFACT_NOT_USABLE` remain fail-closed defenses.
+- `npm run typecheck`, `npm test` (12 TypeScript tests and one Python validation test), and `npm run build` passed. The regression exercises both reuse/adapt nominations, an unselected adapt artifact, valid verify exclusion, rejection of verify-plus-useful by both emitted provider JSON Schema and runtime parsing, and the retained defensive gate.
+- A throwaway `node --experimental-strip-types --input-type=module -e ...` smoke fed the captured draft's original disposition/membership choices into the new representation: both provider JSON Schema and runtime parsing rejected Cedar's verify-plus-useful choice. This was a contract smoke, not a repaired or accepted historical result.
+
+- `npm run ingest -- --root /tmp/memory-bank-consistency-ingest-j58z_2w8` passed against a temporary copy of `corpus/` and `contracts/`; the temporary tree was removed and the paid run's frozen manifest was not rewritten.
+
+### Approval, environment, and actual UI flow
+
+The owner explicitly selected **“Approve one full UI flow”** after local checks and accounting preflight. Before admission, operator status showed disabled admission, zero held funds, no active attempt or pending job, and the previous 8,689-microUSD reconciliation. Read-only provider lookup reconfirmed the previous exact charge, USD 0.008688165, and credits showed USD 0.529607003 used from USD 5.
+
+The same visible P1 request above was submitted through Chromium to the task-owned local Worker at `http://127.0.0.1:8792`. Corpus remained `fictional-onboarding-v2`, manifest SHA-256 `fbc1d4ae92275efafb23b660446ac78a4b6c624e4ce603d67d2d320e142b63ca`. Model settings remained `openai/gpt-6-luna`, OpenAI-only/no fallback/strict parameters, `stream: false`, default service tier, reasoning none, strict JSON Schema, 16,384 maximum tokens, 120-second request deadline, and 135-second Workflow step deadline. Provider records identify `openai/gpt-6-luna-20260922` / OpenAI. No model, deadline, ceiling, corpus, or held-out key was changed.
+
+1. UI **Check past examples** created job `232833ce-9a30-4302-8d69-ef86a99d1748`. Admission was disabled after acceptance. The UI reached **Precedent found**, with 52 accepted claims and zero withheld claims.
+2. Cedar was the only lead. Its explicit useful artifacts were `delivery-log` and `mapping`; both were Adapt. No verify artifact appeared in the checked lead.
+3. UI **Choose work from these examples** opened artifact selection. The mapping's **Inspect checked passage** dialog displayed the exact source-key rule, source kind `native`, stated date `2025-02-11`, and text line 9. Visual inspection confirmed the dialog and source text.
+4. Selected Cedar `mapping`, sole retained version `map-2025-02-11`, and checked passages `p-3ea71e1ac22714630e66f900bd99ce17` and `p-7f1a25ed5a9ec4bf27bc83acaee2fa55` using UI checkboxes. Stored `brief_selections` matched all identities.
+5. Assessment provider records were obtained and its reservation reconciled before further admission. With no active work or hold, admission was enabled only for UI **Check selected work**, then disabled.
+6. The UI reached ready **Checked brief**: one Verify mapping item, no Reuse/Adapt items, six supported claims, zero withheld. The brief conservatively asks compatibility checks rather than promising unchanged reuse; this is a separate brief disposition, not verify membership in an assessment lead.
+7. The brief's **Download exact selected original** link resolved to `/api/evidence/originals/map-2025-02-11`; a read-only byte fetch matched manifest SHA-256 `7dd4e8ae29cdd878b579364f03207430cfd0e904b7e75eeb01e4f9bfaf09644a`. Browser download completion is not claimed.
+
+The initial managed browser attachment failed twice; an explicitly launched `/usr/bin/chromium-browser --headless=new --no-sandbox --disable-dev-shm-usage --remote-debugging-port=9337` was attached through CDP and exercised the real application. Two text waits used wording absent from the UI and timed out, but the accepted phases continued normally; neither caused a new submission or model retry. Screenshots confirmed the evidence dialog and terminal brief.
+
+8. Read-only `GET /api/jobs/232833ce-9a30-4302-8d69-ef86a99d1748` checks with missing and syntactically valid wrong Bearer capabilities both returned `404 JOB_NOT_FOUND`. Three concurrent authenticated operator reads succeeded and observed zero holds. No capability or credential is included in this report.
+
+### Exact phase latency
+
+Database timestamps and differences, UTC:
+
+| Phase | Queued | Processing started | Terminal committed | Queue wait | Processing | Queued-to-terminal |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| Assessment | 07:12:21.304813 | 07:12:21.771214 | 07:13:50.105230 | 0.466401 s | 88.334016 s | 88.800417 s |
+| Brief | 07:15:25.408829 | 07:15:26.083172 | 07:15:44.387213 | 0.674343 s | 18.304041 s | 18.978384 s |
+
+First queued request to ready brief: 203.082400 s, including manual evidence inspection, selection, and reconciliation between phases. The UI displayed 467 ms / 88.3 s assessment and 675 ms / 18.3 s brief. Both processing observations met their targets in this single run; neither establishes a percentile. Host-captured assessment submit time (`07:12:29.282320`) was later than the DB's queue timestamp; cross-clock submit latency is therefore not trustworthy and is not reported as a precise measurement.
+
+### Exact provider charges and every-attempt reconciliation
+
+All four generation records were terminal `stop` / `completed`. Token columns below are generation-endpoint fields, not application response usage.
+
+| Generation ID | Phase | Provider prompt tokens | Provider completion tokens | Provider generation time | Exact USD |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `gen-1792048346-thZ0ExgMped48eyhZ97e` | Assessment draft | 15,617 | 9,189 | 71,848 ms | 0.007373198 |
+| `gen-1792048420-srkpq8SgwhtZBfbX8IBN` | Assessment review | 25,140 | 693 | 6,594 ms | 0.003896689 |
+| `gen-1792048528-8qsmDD8C73rrD1wVJWEi` | Brief draft | 13,064 | 1,093 | 12,650 ms | 0.002463417 |
+| `gen-1792048541-fZY4MdIHuieiotnx7yHa` | Brief review | 13,920 | 63 | 1,893 ms | 0.001962105 |
+
+- Assessment: exact USD **0.011269887**; reservation `598247e9-c268-41d7-944f-738cb4747d85` reconciled to **11,270 microUSD**.
+- Brief: exact USD **0.004425522**; reservation `7424042c-c4a7-4087-900a-c91c38ec00ce` reconciled to **4,426 microUSD**.
+- New full flow: exact USD **0.015695409**. Provider credit usage increased from `0.529607003` to `0.540876890` after assessment and `0.545302412` after brief, exactly matching both phase totals. Remaining provider credit: USD **4.454697588**.
+- Response usage differs from generation-endpoint token counts: assessment draft 18,510/10,268; assessment review 28,277/803; brief draft 14,719/1,297; brief review 15,536/80 prompt/completion tokens. Response cost also contains finer precision; exact charges above use provider generation `total_cost`, as in prior reconciliation.
+- Final fresh-campaign reconciled spend: **24,385 microUSD**, including the earlier failed draft's 8,689. Zero held, no active attempt or pending job, admission disabled. Every one of the five fresh-campaign calls is accounted for. No automatic paid retry or uncertain dispatch occurred.
+- PostgreSQL's tmpfs container was never restarted; the existing ledger was preserved. Task-owned Worker/browser processes were stopped only after terminal accounting.
+
+### Manual quality findings and gate scope
+
+All 52 accepted assessment claims and all six brief claims were compared with their cited original excerpts; the selected mapping original was also fetched and checked byte-for-byte. Cedar preserves active-only scope, exact source keys, separate duplicate-email records, 1,198 accepted plus two rejected, no corrected-row retry, sandbox-only outcome, and concrete new-target checks. The brief's six claims retain those limits and do not promise new-client results.
+
+Remaining assessment defects are not hidden by readiness:
+
+- `artifact-3-1-blocker-0` says “the v2 polling route was retired.” The cited probe says TripPine v2 returned 410 for the **v1 polling route**. Independent support review accepted this imprecision.
+- Non-lead artifacts remain labeled Adapt while their recommendation explicitly says not to use them as an implementation starting point, e.g. Elm `batch-adapter-notes`, Grove `access-checklist`, and Harbor `scope-inventory`. Useful-lead membership is now structurally consistent, but disposition/prose quality is not solved by this fix.
+- `artifact-0-2-blocker-0` is a source_fact phrased as an instruction (“Do not assume…”), rather than cleanly distinguishing recorded limits from recommendation. Elm's accepted 598/600 summary still omits the separate malformed-input count tension recorded earlier.
+- Harbor is labeled Failed while its claims preserve unknown client-dependent provisioning outcome. Stopped work and unknown outcome should not be conflated.
+
+**Bounded P1 flow gate passed with recorded quality defects.** No held-out evaluation, all-request qualification, broad reliability/latency claim, production deployment, or public release is authorized by this result. The historical ledger-loss limitation remains explicit; this run reconciles the fresh campaign, not missing historical rows.
