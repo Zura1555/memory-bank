@@ -15,18 +15,19 @@ const claim = z.strictObject({
   requestQuotes: z.array(z.string().min(1).max(500)).max(8),
   dependsOnClaimIds: z.array(id).max(32),
 });
+const artifactClaim = claim.omit({ claimId: true });
 const artifactWorkFields = {
   artifactId: id,
   recommendation: claim.omit({ claimId: true, kind: true }),
-  supportingClaimIds: z.array(id).max(32),
-  blockerClaimIds: z.array(id).max(16),
-  verificationClaimIds: z.array(id).max(16),
+  supportingClaims: z.array(artifactClaim).max(32),
+  blockerClaims: z.array(artifactClaim).max(16),
+  verificationClaims: z.array(artifactClaim.extend({ kind: z.literal("recommendation") })).max(16),
 };
 // OpenAI accepts anyOf; Zod's discriminatedUnion emits unsupported oneOf.
 const artifactWork = z.union([
-  z.strictObject({ ...artifactWorkFields, disposition: z.literal("reuse"), blockerClaimIds: z.array(id).max(0), verificationClaimIds: z.array(id).max(0) }),
+  z.strictObject({ ...artifactWorkFields, disposition: z.literal("reuse"), blockerClaims: z.array(artifactClaim).max(0), verificationClaims: z.array(artifactClaim).max(0) }),
   z.strictObject({ ...artifactWorkFields, disposition: z.literal("adapt") }),
-  z.strictObject({ ...artifactWorkFields, disposition: z.literal("verify"), verificationClaimIds: z.array(id).min(1).max(16) }),
+  z.strictObject({ ...artifactWorkFields, disposition: z.literal("verify"), verificationClaims: z.array(artifactClaim.extend({ kind: z.literal("recommendation") })).min(1).max(16) }),
 ]);
 const caseDraft = z.strictObject({
   caseId: id,
@@ -134,13 +135,21 @@ export function parseAssessmentDraft(value: unknown): AssessmentDraft {
     artifactWork: item.artifactWork.map((work, workIndex) => {
       const dispositionClaimId = `disposition-${caseIndex}-${workIndex}`;
       claims.push({ ...work.recommendation, claimId: dispositionClaimId, kind: "recommendation" });
+      const addClaims = (role: string, items: z.infer<typeof artifactClaim>[]): string[] => items.map((claim, index) => {
+        const claimId = `artifact-${caseIndex}-${workIndex}-${role}-${index}`;
+        claims.push({ ...claim, claimId });
+        return claimId;
+      });
+      const supportingClaimIds = addClaims("support", work.supportingClaims);
+      const blockerClaimIds = addClaims("blocker", work.blockerClaims);
+      const verificationClaimIds = addClaims("verify", work.verificationClaims);
       return {
         artifactId: work.artifactId,
         disposition: work.disposition,
         dispositionClaimId,
-        claimIds: [...new Set([dispositionClaimId, ...work.supportingClaimIds, ...work.blockerClaimIds, ...work.verificationClaimIds])],
-        blockerClaimIds: work.blockerClaimIds,
-        verificationClaimIds: work.verificationClaimIds,
+        claimIds: [dispositionClaimId, ...supportingClaimIds, ...blockerClaimIds, ...verificationClaimIds],
+        blockerClaimIds,
+        verificationClaimIds,
       };
     }),
   }));
