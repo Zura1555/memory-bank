@@ -6,6 +6,7 @@ import type {
   ArtifactAssessment,
   AssessmentResult,
   AssessmentConclusion,
+  ComparisonRow,
   BriefDisposition,
   BriefItem,
   BriefResult,
@@ -27,6 +28,7 @@ import type {
   StartBriefRequest,
   StartBriefResponse,
 } from "../src/shared/protocol";
+import { dispositionChanges } from "../src/ui/lineage";
 import "./styles.css";
 
 const phaseStates: PhaseState[] = ["not_started", "queued", "running", "ready", "failed", "reconciliation_required"];
@@ -125,6 +127,15 @@ function isCount(value: unknown): value is number {
 }
 
 
+function isComparison(value: unknown): value is ComparisonRow {
+  return isRecord(value) && isText(value.caseId)
+    && ["product_version", "environment", "scale", "identity_access", "recovery_operations"].includes(value.dimension as string)
+    && (value.requirementClaimId === null || isText(value.requirementClaimId))
+    && isText(value.evidenceClaimId) && isText(value.assessmentClaimId) && isText(value.implicationClaimId)
+    && ["match", "mismatch", "unknown"].includes(value.relation as string)
+    && (value.requirementClaimId !== null || value.relation === "unknown");
+}
+
 function isAssessment(value: unknown): value is AssessmentResult {
   if (!isRecord(value)
     || !Array.isArray(value.cases) || !value.cases.every(isCaseAssessment)
@@ -133,8 +144,27 @@ function isAssessment(value: unknown): value is AssessmentResult {
     || !Array.isArray(value.claims) || !value.claims.every(isClaim)
     || !isAssessmentConclusion(value.conclusion)
     || !isTextList(value.clarifyingClaimIds)
+    || !Array.isArray(value.comparisons) || value.comparisons.length > 24 || !value.comparisons.every(isComparison)
+    || !Array.isArray(value.nextActions) || value.nextActions.length > 3
+    || !value.nextActions.every((item: unknown) => isRecord(item) && isText(item.caseId) && isText(item.artifactId) && isText(item.claimId))
     || !isCount(value.withheldClaimCount)) return false;
   const claims = new Map<string, Claim>(value.claims.map((claim: Claim) => [claim.claimId, claim]));
+  if (claims.size !== value.claims.length || value.claims.some((claim: Claim) => claim.dependsOnClaimIds.some((id) => !claims.has(id)))) return false;
+  if (!value.comparisons.every((row: ComparisonRow) =>
+    (row.requirementClaimId === null || (claims.get(row.requirementClaimId)?.kind === "interpretation"
+      && claims.get(row.requirementClaimId)?.requestQuotes.length === 1))
+    && claims.get(row.evidenceClaimId)?.kind === "source_fact"
+    && claims.get(row.assessmentClaimId)?.kind === "interpretation"
+    && claims.get(row.implicationClaimId)?.kind === "recommendation"
+    && claims.get(row.assessmentClaimId)?.dependsOnClaimIds.includes(row.evidenceClaimId)
+    && (row.requirementClaimId === null || claims.get(row.assessmentClaimId)?.dependsOnClaimIds.includes(row.requirementClaimId))
+    && claims.get(row.implicationClaimId)?.dependsOnClaimIds.includes(row.assessmentClaimId))) return false;
+  const cases: CaseAssessment[] = value.cases;
+  if (!value.nextActions.every((action: { caseId: string; artifactId: string; claimId: string }) => {
+    const work = cases.find((item) => item.caseId === action.caseId)?.artifactWork.find((item) => item.artifactId === action.artifactId);
+    return work?.disposition && [...work.verificationClaimIds, ...work.blockerClaimIds].includes(action.claimId)
+      && claims.get(action.claimId)?.kind === "recommendation";
+  })) return false;
   if (!value.cases.every((item: CaseAssessment) => item.artifactWork.every((work) =>
     work.disposition === null || (work.dispositionClaimId !== null && claims.get(work.dispositionClaimId)?.kind === "recommendation")))) return false;
   if (value.conclusion === "precedent_found") return value.leads.length > 0;
@@ -321,9 +351,11 @@ function StringList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function SourceLinks({ refs, inspect }: { refs: SourceRef[]; inspect: InspectPassage }) {
+function SourceLinks({ refs, inspect, compact = false }: { refs: SourceRef[]; inspect: InspectPassage; compact?: boolean }) {
   if (refs.length === 0) return <p className="muted">No checked source references are available.</p>;
   const uniqueRefs = Array.from(new Map(refs.map((ref) => [`${ref.versionId}\u0000${ref.passageId}`, ref])).values());
+  if (compact) return <div className="source-links" aria-label="Checked comparison evidence">{uniqueRefs.map((ref, index) =>
+    <button key={`${ref.versionId}-${ref.passageId}`} className="text-button" type="button" onClick={() => inspect(ref)}>Inspect evidence{uniqueRefs.length > 1 ? ` ${index + 1}` : ""}</button>)}</div>;
   return (
     <div className="source-links" aria-label="Checked source records">
       {uniqueRefs.map((ref) => (
@@ -377,6 +409,55 @@ function LeadCard({ lead, contrast = false, claims, inspect }: { lead: Lead; con
       <ClaimGroup title={contrast ? "Checked contrast claims" : "Why this lead may be relevant"} ids={lead.reasonClaimIds} claims={claims} inspect={inspect} />
     </article>
   );
+}
+
+function ComparisonTable({ rows, claims, inspect }: { rows: ComparisonRow[]; claims: ClaimMap; inspect: InspectPassage }) {
+  if (!rows.length) return <p className="muted">No supported dimension comparison is established.</p>;
+  return <div className="comparison-scroll" tabIndex={0} role="region" aria-label="Checked applicability comparison">
+    <table className="comparison-table">
+      <caption>Topical similarity is not demonstrated applicability. Unknowns prevent assuming unchanged reuse.</caption>
+      <thead><tr><th scope="col">Dimension</th><th scope="col">Current requirement</th><th scope="col">Past evidence</th><th scope="col">Applicability</th><th scope="col">Reuse implication</th></tr></thead>
+      <tbody>{rows.map((row) => <tr key={row.assessmentClaimId}>
+        <th scope="row">{label(row.dimension)}</th>
+        <td>{row.requirementClaimId === null ? "Unknown — not stated in this request." : claims.get(row.requirementClaimId)?.requestQuotes[0]}</td>
+        <td>{claims.get(row.evidenceClaimId)?.text}<SourceLinks refs={claims.get(row.evidenceClaimId)?.sourceRefs ?? []} inspect={inspect} compact /></td>
+        <td><Badge tone={row.relation === "unknown" ? "unknown" : row.relation === "mismatch" ? "failed" : "neutral"}>{row.relation === "unknown" ? "Unknown" : row.relation === "match" ? "Match" : "Mismatch"}</Badge><p>{claims.get(row.assessmentClaimId)?.text}</p></td>
+        <td>{claims.get(row.implicationClaimId)?.text}<SourceLinks refs={claims.get(row.implicationClaimId)?.sourceRefs ?? []} inspect={inspect} compact /></td>
+      </tr>)}</tbody>
+    </table>
+  </div>;
+}
+
+function AssessmentLineage({ previous, current, inspect }: { previous: JobView; current?: AssessmentResult; inspect: InspectPassage }) {
+  if (!previous.assessment) return null;
+  const changes = current ? dispositionChanges(previous.assessment, current) : [];
+  const supportedChanges = changes.filter((change) => change.currentClaim !== null);
+  const noLongerEstablished = changes.filter((change) => change.currentClaim === null);
+  const previousClaims = new Map(previous.assessment.claims.map((claim) => [claim.claimId, claim]));
+  return <section className="content-section lineage-section" aria-label="Assessment lineage">
+    <h3>Clarification recheck</h3>
+    <p>Previous selections were cleared. Only the immediately previous checked assessment is retained in this tab, until its original expiry.</p>
+    {current ? <><p>Previous conclusion: {label(previous.assessment.conclusion)}. Current conclusion: {label(current.conclusion)}.</p>
+      <h4>Supported disposition changes</h4>
+      {supportedChanges.length ? supportedChanges.map((change) => <article className="claim-card" key={`${change.caseId}/${change.artifactId}`}>
+        <h4>{change.caseId} / {change.artifactId}: {label(change.before)} → {label(change.after!)}</h4>
+        <p><strong>Previous:</strong> {change.previousClaim.text}</p><SourceLinks refs={change.previousClaim.sourceRefs} inspect={inspect} />
+        <p><strong>Current:</strong> {change.currentClaim!.text}</p><SourceLinks refs={change.currentClaim!.sourceRefs} inspect={inspect} />
+      </article>) : <p>No disposition change is established by two checked recommendations. Missing or withheld recommendations are not a supported change.</p>}
+      {noLongerEstablished.length > 0 && <div className="notice notice-warning">
+        <h4>Prior lead recommendations no longer established</h4>
+        <ul>{noLongerEstablished.map((change) => <li key={`${change.caseId}/${change.artifactId}`}>{change.caseId} / {change.artifactId}: previous {label(change.before)} → not established. The current recommendation is missing or withheld, not a supported replacement.</li>)}</ul>
+      </div>}
+      <p className="muted">These compare checked results, not a claim that clarification alone caused a change.</p>
+    </> : <p>The recheck has not produced a checked result. The previous result below is historical, not the current recommendation.</p>}
+    <details><summary>Previous checked assessment — read only</summary>
+      <p>{previous.request}</p>
+      <p>{assessmentConclusions[previous.assessment.conclusion]}</p>
+      {previous.assessment.leads.map((lead) => <LeadCard key={lead.caseId} lead={lead} claims={previousClaims} inspect={inspect} />)}
+      <ComparisonTable rows={previous.assessment.comparisons} claims={previousClaims} inspect={inspect} />
+      <ClaimGroup title="Previous checked claims" ids={previous.assessment.claims.map((claim) => claim.claimId)} claims={previousClaims} inspect={inspect} />
+    </details>
+  </section>;
 }
 
 function CuratedCard({ record, inspect }: { record: KnowledgeCard; inspect: InspectPassage }) {
@@ -706,6 +787,7 @@ function App() {
   const [request, setRequest] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [job, setJob] = useState<JobView | null>(null);
+  const [previousJob, setPreviousJob] = useState<JobView | null>(null);
   const [pollMode, setPollMode] = useState<PollMode>(null);
   const [workDrafts, setWorkDrafts] = useState<Record<string, WorkDraft>>({});
   const [serviceError, setServiceError] = useState<string | null>(null);
@@ -718,6 +800,14 @@ function App() {
   const requestController = useRef<AbortController | null>(null);
   const briefController = useRef<AbortController | null>(null);
   const pollController = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!previousJob) return;
+    const remaining = Date.parse(previousJob.expiresAt) - Date.now();
+    if (!Number.isFinite(remaining) || remaining <= 0) { setPreviousJob(null); return; }
+    const timer = window.setTimeout(() => { setPreviousJob(null); setPassageRef(null); }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [previousJob]);
 
   useEffect(() => {
     if (!session || !pollMode) return;
@@ -772,6 +862,16 @@ function App() {
   const briefClaims = useMemo(() => new Map((job?.brief?.claims ?? []).map((claim) => [claim.claimId, claim] as const)), [job?.brief]);
   const checkedLeads = (assessment?.leads ?? []).filter((lead) => claimsFor(lead.reasonClaimIds, assessmentClaims).length > 0);
   const checkedContrasts = (assessment?.contrasts ?? []).filter((lead) => claimsFor(lead.reasonClaimIds, assessmentClaims).length > 0);
+  const unrankedComparisons = useMemo(() => {
+    const ranked = new Set([...(assessment?.leads ?? []), ...(assessment?.contrasts ?? [])].map((item) => item.caseId));
+    const groups = new Map<string, ComparisonRow[]>();
+    for (const row of assessment?.comparisons ?? []) {
+      if (ranked.has(row.caseId)) continue;
+      const rows = groups.get(row.caseId);
+      if (rows) rows.push(row); else groups.set(row.caseId, [row]);
+    }
+    return [...groups];
+  }, [assessment]);
   const workChoices = useMemo(() => (assessment?.cases ?? []).flatMap((caseItem) => caseItem.artifactWork.map((item) => {
     const claimIds = [...item.claimIds, ...item.blockerClaimIds, ...item.verificationClaimIds];
     const sourceRefs = claimsFor(claimIds, assessmentClaims).flatMap((claim) => claim.sourceRefs)
@@ -795,13 +895,27 @@ function App() {
   });
   const selectionsValid = selectedCount > 0 && selections.length === selectedCount && selections.every((selection) => selection.passageIds.length > 0);
 
-  async function createAssessment(requestText: string) {
+  async function createAssessment(requestText: string, clarification = false) {
     const trimmed = requestText.trim();
     if (!trimmed || submittingRequest) return;
     if (new TextEncoder().encode(trimmed).byteLength > 16 * 1024) {
       setServiceError("The request and answers must stay within 16 KiB.");
       return;
     }
+    if (clarification && job?.assessment && job.assessmentState === "ready" && Date.parse(job.expiresAt) > Date.now()) setPreviousJob(job);
+    else if (!clarification) setPreviousJob(null);
+    sessionGeneration.current += 1;
+    pollController.current?.abort();
+    briefController.current?.abort();
+    setWorkDrafts({});
+    setPassageRef(null);
+    setSubmittingBrief(false);
+    setJob(null);
+    setSession(null);
+    setPollMode(null);
+    setStep(2);
+    setRequest(trimmed);
+    setQuestionAnswers("");
     const submissionId = ++requestSubmissionId.current;
     requestController.current?.abort();
     const controller = new AbortController();
@@ -857,7 +971,7 @@ function App() {
     event.preventDefault();
     const answers = questionAnswers.trim();
     if (!answers || submittingRequest) return;
-    await createAssessment(`${request.trim()}\n\nClarifications supplied by the delivery lead:\n${answers}`);
+    await createAssessment(`${request.trim()}\n\nClarifications supplied by the delivery lead:\n${answers}`, true);
   }
 
   function startNewRequest() {
@@ -872,6 +986,8 @@ function App() {
     setStep(1);
     setSession(null);
     setJob(null);
+    setPreviousJob(null);
+    setPassageRef(null);
     setPollMode(null);
     setWorkDrafts({});
     setQuestionAnswers("");
@@ -942,7 +1058,7 @@ function App() {
         <span className="fictional-banner">Fictional examples only</span>
         <a href="?knowledge">Reviewed decisions and lessons</a>
 
-        {session && <button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</button>}
+        {(session || previousJob || step > 1) && <button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</button>}
       </header>
       <section className="workflow" aria-labelledby="workflow-title">
         <div className="intro">
@@ -977,7 +1093,8 @@ function App() {
           <section className="screen" aria-labelledby="examples-title">
             <div className="screen-heading"><span className="step-kicker">Step 2 of 4</span><h2 id="examples-title">Checked past examples</h2><p>These are checked fictional records, not proof that the same outcome will happen again.</p></div>
             {job && <div className="submitted-request"><h3>Your request</h3><p>{request.trim()}</p></div>}
-            {(assessmentState === "queued" || assessmentState === "running" || assessmentState === "not_started") && (
+            {previousJob && <AssessmentLineage previous={previousJob} current={assessmentAvailable ? assessment : undefined} inspect={setPassageRef} />}
+            {(session || submittingRequest) && (assessmentState === "queued" || assessmentState === "running" || assessmentState === "not_started") && (
               <div className="status-panel" role="status" aria-live="polite">
                 <span className="status-indicator" aria-hidden="true" />
                 <div><strong>{assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job?.stage ?? "assembling")}</strong><p>No result is shown until the evidence check is ready.</p></div>
@@ -993,26 +1110,42 @@ function App() {
                   <p>{assessmentConclusions[visibleConclusion(assessment, assessmentClaims)]}</p>
                 </div>
                 <WithheldNote count={assessment.withheldClaimCount} />
-                {assessment.clarifyingClaimIds.length > 0 && (
+                {assessment.nextActions.length > 0 && <section className="content-section" aria-label="Checked next actions">
+                  <h3>What to verify next — and why it affects reuse</h3>
+                  <div className="card-grid">{assessment.nextActions.map((action) => <article key={action.claimId}>
+                    <h4>{action.caseId} / {action.artifactId}</h4>
+                    <ClaimCard claim={assessmentClaims.get(action.claimId)!} inspect={setPassageRef} />
+                  </article>)}</div>
+                </section>}
                   <section className="content-section clarification-section" aria-labelledby="clarification-title">
                     <div className="section-heading">
-                      <div><p className="eyebrow">Decisive missing details</p><h3 id="clarification-title">Questions that may change which work applies</h3></div>
+                      <div><p className="eyebrow">Decision-critical constraints</p><h3 id="clarification-title">{assessment.clarifyingClaimIds.length ? "Questions that may change which work applies" : "Add or clarify client constraints"}</h3></div>
                     </div>
                     <ClaimGroup title="Checked questions and why they matter" ids={assessment.clarifyingClaimIds} claims={assessmentClaims} inspect={setPassageRef} />
                     <form className="request-form clarification-form" onSubmit={submitClarifications}>
                       <label htmlFor="clarification-answers">Client answers</label>
-                      <textarea id="clarification-answers" value={questionAnswers} onChange={(event) => setQuestionAnswers(event.currentTarget.value)} rows={4} maxLength={4000} placeholder="Answer the questions that apply. Submitting starts a fresh assessment and clears these results and selections." />
+                      <textarea id="clarification-answers" value={questionAnswers} onChange={(event) => setQuestionAnswers(event.currentTarget.value)} rows={4} maxLength={4000} placeholder="Answer relevant questions. A fresh assessment clears selections and retains one previous checked result in this tab." />
                       <button className="secondary-button" type="submit" disabled={submittingRequest || !questionAnswers.trim()}>{submittingRequest ? "Rechecking…" : "Recheck with these answers"}</button>
                     </form>
                   </section>
-                )}
                 <section className="content-section" aria-labelledby="lead-title">
                   <div className="section-heading"><div><p className="eyebrow">Checked leads</p><h3 id="lead-title">Examples that may be relevant</h3></div><span className="muted">Up to three leads</span></div>
-                  {checkedLeads.length === 0 ? <p className="empty-state">No supported checked leads were returned.</p> : <div className="card-grid">{checkedLeads.slice(0, 3).map((lead, index) => <LeadCard key={`${lead.caseId}-${index}`} lead={lead} claims={assessmentClaims} inspect={setPassageRef} />)}</div>}
+                  {checkedLeads.length === 0 ? <p className="empty-state">No supported checked leads were returned.</p> : checkedLeads.slice(0, 3).map((lead) => <div key={lead.caseId}>
+                    <LeadCard lead={lead} claims={assessmentClaims} inspect={setPassageRef} />
+                    <ComparisonTable rows={assessment.comparisons.filter((row) => row.caseId === lead.caseId)} claims={assessmentClaims} inspect={setPassageRef} />
+                  </div>)}
                 </section>
                 {checkedContrasts.length > 0 && <section className="content-section" aria-labelledby="contrast-title">
                   <div className="section-heading"><div><p className="eyebrow">Contrasts</p><h3 id="contrast-title">Comparisons, not recommendations</h3></div></div>
-                  <div className="card-grid">{checkedContrasts.slice(0, 3).map((lead, index) => <LeadCard key={`${lead.caseId}-${index}`} lead={lead} contrast claims={assessmentClaims} inspect={setPassageRef} />)}</div>
+                  {checkedContrasts.map((lead) => <div key={lead.caseId}>
+                    <LeadCard lead={lead} contrast claims={assessmentClaims} inspect={setPassageRef} />
+                    <ComparisonTable rows={assessment.comparisons.filter((row) => row.caseId === lead.caseId)} claims={assessmentClaims} inspect={setPassageRef} />
+                  </div>)}
+                </section>}
+                {unrankedComparisons.length > 0 && <section className="content-section" aria-label="Unestablished applicability">
+                  <h3>Applicability not established</h3>
+                  <p>These checked conflicts or unknowns explain why a proposed example is not a checked lead. They do not recommend its work as a starting point.</p>
+                  {unrankedComparisons.map(([caseId, rows]) => <div key={caseId}><h4>{caseId}</h4><ComparisonTable rows={rows} claims={assessmentClaims} inspect={setPassageRef} /></div>)}
                 </section>}
                 <section className="content-section" aria-labelledby="claim-title">
                   <div className="section-heading"><div><p className="eyebrow">Checked claims</p><h3 id="claim-title">Facts, interpretations, and recommendations</h3></div></div>

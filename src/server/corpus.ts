@@ -312,12 +312,25 @@ export interface ModelCaseContext {
   }[];
 }
 
-export function modelCorpus(snapshot: CorpusSnapshot): ModelCaseContext[] {
+export function assessmentPassageIds(snapshot: CorpusSnapshot): Map<string, string> {
+  const ids = new Map<string, string>();
+  // Use the pinned manifest, not availability: a missing source must never rebind a label.
+  for (const pastCase of snapshot.manifest.cases) for (const artifact of pastCase.artifacts) {
+    for (const version of artifact.versions) for (const passage of version.passages) {
+      ids.set(passage.passageId, `e${ids.size + 1}`);
+    }
+  }
+  return ids;
+}
+
+export function modelCorpus(snapshot: CorpusSnapshot, passageIds?: ReadonlyMap<string, string>): ModelCaseContext[] {
   return snapshot.manifest.cases.map((pastCase) => ({
     caseId: pastCase.caseId,
     title: pastCase.title,
     availability: snapshot.caseAvailability.get(pastCase.caseId),
-    records: knowledgeCards(snapshot, pastCase.caseId),
+    records: passageIds ? knowledgeCards(snapshot, pastCase.caseId).map((record) => ({
+      ...record, evidence: record.evidence.map((ref) => ({ ...ref, passageId: passageIds.get(ref.passageId)! })),
+    })) : knowledgeCards(snapshot, pastCase.caseId),
     artifacts: pastCase.artifacts.map((artifact) => ({
       artifactId: artifact.artifactId,
       title: artifact.title,
@@ -326,7 +339,9 @@ export function modelCorpus(snapshot: CorpusSnapshot): ModelCaseContext[] {
         statedDate: version.statedDate,
         extractionStatus: snapshot.availableVersions.has(version.versionId) ? "available" : "unavailable",
         exclusionReasons: version.exclusionReasons,
-        passages: snapshot.availableVersions.has(version.versionId) ? version.passages : [],
+        passages: snapshot.availableVersions.has(version.versionId)
+          ? passageIds ? version.passages.map((passage) => ({ ...passage, passageId: passageIds.get(passage.passageId)! })) : version.passages
+          : [],
       })),
     })),
   }));

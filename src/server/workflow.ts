@@ -171,7 +171,7 @@ export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> 
         const draftPrompt = assessmentDraftPrompt(request, corpus);
         await setStage(this.env, params, "drafting");
         const draftAttemptId = await paidStep(this.env, params, step, "assessment-draft", 1, "assessment_draft", draftPrompt);
-        const draft = parseAssessmentDraft(await loadStageOutput(this.env, draftAttemptId));
+        const draft = parseAssessmentDraft(await loadStageOutput(this.env, draftAttemptId), corpus);
         await setStage(this.env, params, "reference_check");
         const invalidRefs = validateAssessmentDraft(draft, request, corpus);
         const reviewPrompt = assessmentReviewPrompt(request, corpus, draft);
