@@ -14,7 +14,7 @@ An English, evidence-backed reuse guide built from explicitly fictional client-o
    ```
 
 3. Copy `.dev.vars.example` to `.dev.vars`. Set `OPERATOR_TOKEN` to `openssl rand -hex 32`. Set `OPENROUTER_API_KEY` only when you are ready to make the approved paid model calls. Never commit `.dev.vars`.
-4. Start local PostgreSQL: `docker compose up -d postgres`. The first database initialization applies `migrations/0001_init.sql`; the local database is loopback-only on port 5433 and ephemeral. Its budget and admission state reset when the container is recreated.
+4. Start local PostgreSQL: `docker compose up -d --wait postgres`. First initialization applies the SQL files in `migrations/` in filename order. The database is loopback-only on port 5433; the project-scoped `postgres_data` Docker volume preserves accounting and admission state across restarts and container recreation. Keep the same Compose project name/directory when returning to a campaign; another worktree/project gets a different volume, not the original ledger.
 5. Build the curator manifest and audit: `npm run ingest`. Publish only to Wrangler local R2: `npm run publish:corpus`.
 6. Run `npm run dev`, then open `http://127.0.0.1:8787`. The Worker builds the static UI before starting.
 
@@ -29,6 +29,45 @@ Use `Authorization: Bearer $OPERATOR_TOKEN` with `/api/operator/status` to inspe
 Verify operator authentication and concurrent database access with `node --env-file=.dev.vars --experimental-strip-types src/server/db.smoke.ts` while the local Worker is running. This read-only check submits no model jobs. Each database operation gets its own pool, and each checked-out connection is retired on release; neither sockets nor pending pool connections may cross Worker request contexts.
 
 `POST /api/operator/reconciliations` accepts `reservationId`, `actualMicroUsd`, and a non-empty audit `note`. If a model attempt remains `dispatching`, wait at least two minutes, verify in provider records that it is no longer active, and include `confirmAbandonedDispatch: true`. Never reconcile an uncertain charge by assuming it was free. Reconciliation blocks replay and does not cancel an in-flight provider request.
+
+### Local ledger durability and recovery
+
+The data volume is not a backup. `docker compose down` retains it; **do not use `down --volumes`, `docker volume rm`, or volume pruning on a campaign ledger**. Restarting does not reset budgets, clear holds, or disable previously enabled admission. Existing volumes do not rerun initialization SQL; apply later migrations explicitly before Worker startup.
+
+Cold initialization flushes real disk storage and can take minutes on this WSL host. The health check uses TCP so the temporary socket-only initialization server cannot report readiness before migrations finish. A ten-minute startup grace and PostgreSQL's [`PGCTLTIMEOUT=300`](https://www.postgresql.org/docs/17/app-pg-ctl.html) allow initialization/checkpointing to finish without disabling disk synchronization. These are local database startup controls, not changes to paid model deadlines or retry policy.
+
+**Before replacing a running tmpfs installation:** stop/drain the app's Worker, queue, and Workflow processing and take the backup below before any database restart/recreation. Restore it into the durable setup before resuming. A previously lost tmpfs ledger cannot be recovered by adding a volume; do not reconstruct historical reservations or treat the approved lost-ledger exception as a reconciliation. This change does not initialize or authorize a replacement paid campaign.
+
+With application processing stopped, save a private PostgreSQL custom archive outside Git and `/tmp`:
+
+```sh
+umask 077
+backup_dir="$HOME/.local/state/memory-bank/backups"
+mkdir -p "$backup_dir"
+partial=$(mktemp "$backup_dir/ledger-XXXXXXXX.dump.partial")
+backup="${partial%.partial}"
+docker compose exec -T postgres pg_dump -U memory_bank -d memory_bank --format=custom > "$partial" &&
+  mv "$partial" "$backup"
+```
+
+Only a successful dump is renamed to `.dump`. Retain the completed archive on durable storage; a second protected copy on a separate device/storage service is needed to survive host/disk loss. Archives contain private job and accounting data: never commit or publish them, and manage their retention separately from the app's seven-day expiry.
+
+Restore a verified archive into a **new, empty database**, not over an existing ledger. Keep all app processing stopped:
+
+```sh
+# Set backup to the completed archive's absolute path if using a new shell.
+docker compose exec -T postgres createdb -U memory_bank -T template0 memory_bank_restore
+docker compose exec -T postgres pg_restore -U memory_bank -d memory_bank_restore \
+  --exit-on-error --single-transaction < "$backup"
+docker compose exec -T postgres psql -U memory_bank -d memory_bank_restore -v ON_ERROR_STOP=1 \
+  -c 'UPDATE campaign_budget SET admission_enabled = false, updated_at = now() WHERE singleton AND admission_enabled;'
+```
+
+After every command succeeds, point development `LOCAL_DATABASE_URL` at `memory_bank_restore` and inspect `/api/operator/status` with the operator token before allowing app processing to resume. Verify the budget, holds, active reservation, model attempts, and reconciliation audit against the saved evidence. Keep paid admission closed until recovery and current credit are verified and the next run is separately authorized. Do not release an uncertain hold or replay a dispatch to discover its cost. Preserve the original database/archive while investigating any mismatch. A PostgreSQL archive does **not** back up R2 originals or Queue/Workflow checkpoints; those runtime resources need their own recovery checks before resuming work.
+
+Run `node --experimental-transform-types src/server/ledger.smoke.ts` for an isolated, no-paid-call recovery check (Docker Compose 2.24.4+). It creates a random Compose project with a loopback ephemeral port, seeds only synthetic accounting, checks exact rows and replay rejection after restart and container recreation, and restores a private archive outside `/tmp` into a fresh database. It removes only its own synthetic containers/volumes/archive; it never reads `.dev.vars` or touches the campaign database.
+
+Observed local verification (2026-10-16): the smoke failed against tmpfs after restart with cleared budgets/holds, an empty attempt/reservation/audit ledger, and a lost active lock. With the named volume and durable-startup settings, all seven tables survived restart and container recreation unchanged; a custom archive restored the same rows into a fresh database. Uncertain and reconciled attempts rejected replay before provider access in every verification phase; provider requests were zero and admission stayed disabled. This verifies synthetic local ledger recovery, not restoration of the lost historical reservation or qualification of a paid workflow.
 
 ## Application boundaries
 
