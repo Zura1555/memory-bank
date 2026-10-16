@@ -93,6 +93,8 @@ export interface ComparisonRow {
   implicationClaimId: string;
 }
 
+export type RequestConstraints = Record<ComparisonRow["dimension"], string[]>;
+
 export interface NextAction {
   caseId: string;
   artifactId: string;
@@ -103,6 +105,7 @@ export interface AssessmentResult {
   conclusion: AssessmentConclusion;
   clarifyingClaimIds: string[];
   comparisons: ComparisonRow[];
+  requestConstraints: RequestConstraints;
   nextActions: NextAction[];
   cases: CaseAssessment[];
   leads: Lead[];

@@ -66,6 +66,13 @@ export const startBriefSchema = z.strictObject({
   selections: z.array(selectionSchema).min(1).max(32),
 });
 
+export const requestConstraintsSchema = z.strictObject({
+  product_version: claim.shape.requestQuotes,
+  environment: claim.shape.requestQuotes,
+  scale: claim.shape.requestQuotes,
+  identity_access: claim.shape.requestQuotes,
+  recovery_operations: claim.shape.requestQuotes,
+});
 const comparisonFields = {
   caseId: id,
   dimension: z.enum(["product_version", "environment", "scale", "identity_access", "recovery_operations"]),
@@ -79,6 +86,7 @@ const comparison = z.union([
 ]);
 
 export const assessmentDraftSchema = z.strictObject({
+  requestConstraints: requestConstraintsSchema,
   cases: z.array(caseDraft).length(8),
   leads: z.array(lead.omit({ usefulArtifactIds: true })).max(3),
   contrasts: z.array(lead).max(8),
@@ -102,6 +110,7 @@ export const supportReviewSchema = z.strictObject({
   })).max(400),
 });
 export const assessmentReviewSchema = supportReviewSchema.extend({
+  requestConstraints: requestConstraintsSchema,
   conclusion: z.enum(["precedent_found", "no_useful_precedent", "cannot_be_established"]),
   leadReviews: z.array(z.strictObject({
     caseId: id,

@@ -23,6 +23,7 @@ import type {
   OutcomeStatus,
   PassageView,
   PhaseState,
+  RequestConstraints,
   Selection,
   SourceRef,
   StartBriefRequest,
@@ -136,7 +137,14 @@ function isComparison(value: unknown): value is ComparisonRow {
     && (value.requirementClaimId !== null || value.relation === "unknown");
 }
 
-function isAssessment(value: unknown): value is AssessmentResult {
+function isRequestConstraints(value: unknown): value is RequestConstraints {
+  return isRecord(value)
+    && Object.keys(value).length === 5
+    && ["product_version", "environment", "scale", "identity_access", "recovery_operations"]
+      .every((dimension) => isTextList(value[dimension]) && value[dimension].length <= 8);
+}
+
+function isAssessment(value: unknown, request: string): value is AssessmentResult {
   if (!isRecord(value)
     || !Array.isArray(value.cases) || !value.cases.every(isCaseAssessment)
     || !Array.isArray(value.leads) || !value.leads.every(isLead)
@@ -144,13 +152,17 @@ function isAssessment(value: unknown): value is AssessmentResult {
     || !Array.isArray(value.claims) || !value.claims.every(isClaim)
     || !isAssessmentConclusion(value.conclusion)
     || !isTextList(value.clarifyingClaimIds)
+    || !isRequestConstraints(value.requestConstraints)
     || !Array.isArray(value.comparisons) || value.comparisons.length > 24 || !value.comparisons.every(isComparison)
     || !Array.isArray(value.nextActions) || value.nextActions.length > 3
     || !value.nextActions.every((item: unknown) => isRecord(item) && isText(item.caseId) && isText(item.artifactId) && isText(item.claimId))
     || !isCount(value.withheldClaimCount)) return false;
+  const requestConstraints = value.requestConstraints;
+  if (Object.values(requestConstraints).some((quotes) => quotes.some((quote) => !request.includes(quote)))) return false;
   const claims = new Map<string, Claim>(value.claims.map((claim: Claim) => [claim.claimId, claim]));
   if (claims.size !== value.claims.length || value.claims.some((claim: Claim) => claim.dependsOnClaimIds.some((id) => !claims.has(id)))) return false;
   if (!value.comparisons.every((row: ComparisonRow) =>
+    (row.requirementClaimId === null) === (requestConstraints[row.dimension].length === 0) &&
     (row.requirementClaimId === null || (claims.get(row.requirementClaimId)?.kind === "interpretation"
       && claims.get(row.requirementClaimId)?.requestQuotes.length === 1))
     && claims.get(row.evidenceClaimId)?.kind === "source_fact"
@@ -229,7 +241,7 @@ function isJobView(value: unknown): value is JobView {
     && isDuration(value.assessmentProcessingMs)
     && isDuration(value.briefQueueWaitMs)
     && isDuration(value.briefProcessingMs)
-    && (value.assessment === undefined || isAssessment(value.assessment))
+    && (value.assessment === undefined || isAssessment(value.assessment, value.request))
     && (value.brief === undefined || isBrief(value.brief))
     && (value.error === undefined || (isRecord(value.error) && isText(value.error.code) && isText(value.error.message) && typeof value.error.retryable === "boolean"));
 }

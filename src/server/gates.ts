@@ -1,6 +1,7 @@
-import type { AssessmentConclusion, AssessmentResult, BriefResult, BriefDisposition, Claim, CaseAssessment, Lead, SupportVerdict } from "../shared/protocol.ts";
-import type { CorpusSnapshot } from "./corpus.ts";
+import type { AssessmentConclusion, AssessmentResult, BriefResult, BriefDisposition, Claim, CaseAssessment, Lead, RequestConstraints, SupportVerdict } from "../shared/protocol.ts";
+import { EvidenceUnavailable, type CorpusSnapshot } from "./corpus.ts";
 import type { AssessmentDraft, AssessmentReview, BriefDraft, SupportReview } from "./schemas.ts";
+import { requestConstraintsSchema } from "./schemas.ts";
 
 export class GateFailure extends Error {
   readonly code: string;
@@ -263,8 +264,24 @@ export function buildCheckedAssessment(
   corpus: CorpusSnapshot,
   leadVerdicts: Map<string, SupportVerdict>,
   reviewedConclusion: AssessmentConclusion,
+  requirementReview: { request: string; constraints: RequestConstraints },
 ): AssessmentResult {
   const rejected = new Set(invalidRefs);
+  const constraints = requestConstraintsSchema.safeParse(requirementReview.constraints);
+  const draftConstraints = requestConstraintsSchema.safeParse(draft.requestConstraints);
+  if (!constraints.success || !draftConstraints.success
+    || Object.values(constraints.data).some((quotes) => quotes.some((quote) => !requirementReview.request.includes(quote)))
+    || Object.values(draftConstraints.data).some((quotes) => quotes.some((quote) => !requirementReview.request.includes(quote)))) {
+    throw new GateFailure("INVALID_REQUEST_CONSTRAINT_REVIEW", "Draft and independent review need every request-constraint dimension with exact request quotations.");
+  }
+  let requirementConflict = false;
+  for (const row of draft.comparisons) {
+    if ((row.requirementClaimId === null) !== (constraints.data[row.dimension].length === 0)
+      || (row.requirementClaimId === null) !== (draftConstraints.data[row.dimension].length === 0)) {
+      rejected.add(row.assessmentClaimId);
+      requirementConflict = true;
+    }
+  }
   const draftClaims = new Map(draft.claims.map((claim) => [claim.claimId, claim]));
   for (const item of draft.cases) {
     for (const work of item.artifactWork) {
@@ -335,7 +352,7 @@ export function buildCheckedAssessment(
   });
   const contrasts = draft.contrasts.filter((item) => keepAll(item.reasonClaimIds, checked.accepted));
   const complete = [...corpus.caseAvailability.values()].every((state) => state === "available");
-  const noUsefulPrecedent = reviewedConclusion === "no_useful_precedent" && complete && invalidRefs.size === 0
+  const noUsefulPrecedent = reviewedConclusion === "no_useful_precedent" && complete && invalidRefs.size === 0 && !requirementConflict
     && ![...verdicts.values(), ...leadVerdicts.values()].includes("uncertain");
   const conclusion = leads.length > 0 ? "precedent_found" : noUsefulPrecedent ? "no_useful_precedent" : "cannot_be_established";
   const visibleCases = new Set([...leads, ...contrasts].map((item) => item.caseId));
@@ -354,6 +371,7 @@ export function buildCheckedAssessment(
     conclusion,
     clarifyingClaimIds: draft.clarifyingClaimIds.filter((id) => checked.accepted.has(id)),
     comparisons,
+    requestConstraints: constraints.data,
     nextActions,
     cases,
     leads: deterministicOrder(leads, cases),
@@ -401,9 +419,16 @@ export function revalidateAssessment(result: AssessmentResult, request: string, 
   };
   const verdicts = new Map(result.claims.map((claim) => [claim.claimId, "supported" as const]));
   const leadVerdicts = new Map(result.leads.flatMap((lead) => lead.usefulArtifactIds.map((id) => [`${lead.caseId}/${id}`, "supported" as const])));
-  const checked = buildCheckedAssessment(draft, verdicts, validClaimReferences(result.claims, request, corpus), corpus, leadVerdicts, result.conclusion);
-  checked.withheldClaimCount += result.withheldClaimCount;
-  return checked;
+  try {
+    const checked = buildCheckedAssessment(draft, verdicts, validClaimReferences(result.claims, request, corpus), corpus, leadVerdicts, result.conclusion, { request, constraints: result.requestConstraints });
+    checked.withheldClaimCount += result.withheldClaimCount;
+    return checked;
+  } catch (error) {
+    if (error instanceof GateFailure && error.code === "INVALID_REQUEST_CONSTRAINT_REVIEW") {
+      throw new EvidenceUnavailable("Required independent request-constraint review is unavailable; a new checked assessment is needed.");
+    }
+    throw error;
+  }
 }
 
 export function revalidateBrief(result: BriefResult, request: string, corpus: CorpusSnapshot): BriefResult {

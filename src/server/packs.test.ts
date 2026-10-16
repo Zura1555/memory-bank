@@ -33,6 +33,7 @@ async function fixture() {
   const brief: BriefResult = { reuse: items.filter((item) => item.disposition === "reuse"), adapt: items.filter((item) => item.disposition === "adapt"), verify: items.filter((item) => item.disposition === "verify"), claims, withheldClaimCount: 2 };
   const assessment: AssessmentResult = {
     conclusion: "cannot_be_established", clarifyingClaimIds: [], comparisons: [], nextActions: [], leads: [], contrasts: [], claims: [...claims], withheldClaimCount: 0,
+    requestConstraints: { product_version: [], environment: [], scale: [], identity_access: [], recovery_operations: [] },
     cases: [{ caseId: pastCase.caseId, availability: "available", outcome: "unknown", outcomeClaimIds: [], claimIds: claims.map((claim) => claim.claimId), artifactWork: items.map((item) => ({ artifactId: item.artifactId, availability: "available", exclusionReasons: [], disposition: item.disposition, dispositionClaimId: item.dispositionClaimId, claimIds: item.claimIds, blockerClaimIds: [], verificationClaimIds: item.disposition === "verify" ? [item.dispositionClaimId] : [] })) }],
   };
   for (const work of assessment.cases[0].artifactWork) {
