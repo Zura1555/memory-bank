@@ -730,7 +730,7 @@ function PackExport({ session, expiresAt }: { session: Session; expiresAt: strin
   return <section className="content-section" aria-labelledby="pack-title">
     <h3 id="pack-title">Export evidence-linked starter pack</h3>
     <p>Review reusable material, required adaptations, and blocked verification below. Export preserves the checked brief, selected version inventory, hashes, reviewed context, and cited excerpts without another model call.</p>
-    <p>Fictional data only; not production approval. Excerpts remain readable offline. Originals are linked, not bundled or changed; live links are not guaranteed indefinitely. New exports stop at job expiry: <time dateTime={expiresAt}>{new Date(expiresAt).toLocaleString()}</time>.</p>
+    <p>Fictional data only; not production approval. Excerpts remain readable offline. Originals are linked, not bundled or changed; live links are not guaranteed indefinitely. New exports stop at the application job expiry shown above.</p>
     <div className="action-row">
       <button className="secondary-button" type="button" disabled={busy || expired} onClick={() => void download("markdown")}>Download Markdown pack</button>
       <button className="secondary-button" type="button" disabled={busy || expired} onClick={() => void download("json")}>Download JSON manifest</button>
@@ -1128,6 +1128,7 @@ function App() {
         </nav>
 
         {serviceError && <p role="alert" className="notice notice-error">{serviceError}</p>}
+        {step > 1 && job && <p className="field-hint">Application job access expires: <time dateTime={job.expiresAt}>{new Date(job.expiresAt).toLocaleString()}</time> (seven days after creation). Provider/platform and backup retention is separate; downloaded packs remain on your device.</p>}
         {step > 1 && job && <JobTimings job={job} />}
 
         {step === 1 && (
@@ -1135,8 +1136,10 @@ function App() {
             <div className="screen-heading"><span className="step-kicker">Step 1 of 4</span><h2 id="request-title">What does the client need?</h2><p>Describe the request and constraints. This is sent to the service to check against fictional past examples.</p></div>
             <form onSubmit={submitRequest} className="request-form">
               <label htmlFor="client-request">Client request</label>
-              <textarea id="client-request" name="request" value={request} onChange={(event) => setRequest(event.currentTarget.value)} rows={8} maxLength={6000} required placeholder="Describe the requested work, relevant constraints, and what a useful outcome would look like." />
-              <p className="field-hint">Do not include sensitive personal information.</p>
+              <textarea id="client-request" name="request" aria-describedby="request-hint request-processing request-retention" value={request} onChange={(event) => setRequest(event.currentTarget.value)} rows={8} maxLength={6000} required placeholder="Describe the requested work, relevant constraints, and what a useful outcome would look like." />
+              <p id="request-hint" className="field-hint">Do not include sensitive personal information.</p>
+              <p id="request-processing" className="field-hint">Requests, fictional evidence, and generated drafts/reviews are sent through <a href="https://openrouter.ai/privacy">OpenRouter</a> to <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI</a>. The deployed app uses <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a> for processing/storage and <a href="https://neon.com/privacy-policy">Neon</a> for job storage; development uses local platform/database equivalents.</p>
+              <p id="request-retention" className="field-hint">Application request/results and job access expire seven days after creation; minimal billing and replay-prevention records remain. Provider/platform copies follow the linked policies, not this seven-day expiry; backup retention is separate. Downloaded packs remain on your device.</p>
               <button className="primary-button" type="submit" disabled={submittingRequest || !request.trim()}>{submittingRequest ? "Sending request…" : "Check past examples"}</button>
             </form>
           </section>
@@ -1153,8 +1156,8 @@ function App() {
                 <div><strong>{assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job?.stage ?? "assembling")}</strong><p>No result is shown until the evidence check is ready.</p></div>
               </div>
             )}
-            {assessmentState === "failed" && <div className="notice notice-error" role="alert"><strong>Evidence check failed.</strong> No past-example result is available.</div>}
-            {assessmentState === "reconciliation_required" && <div className="notice notice-warning" role="alert"><strong>Evidence reconciliation is required.</strong> Results are withheld until the checked evidence can be reconciled.</div>}
+            {assessmentState === "failed" && <div className="notice notice-error" role="alert"><strong>Assessment failed.</strong> {job?.error?.message ?? "No checked past-example result is available."}</div>}
+            {assessmentState === "reconciliation_required" && <div className="notice notice-warning" role="alert"><strong>Assessment needs operator reconciliation.</strong> {job?.error?.message ?? "The service could not establish the dispatch outcome. No automatic retry was made."}</div>}
             {assessmentState === "ready" && !assessment && <div className="notice notice-error" role="alert">The service did not return a supported checked assessment. No result is shown.</div>}
             {assessmentAvailable && (
               <>
@@ -1241,8 +1244,8 @@ function App() {
               </div>
             )}
             {briefState === "ready" && !job?.brief && pollMode === "brief" && <div className="status-panel" role="status" aria-live="polite"><span className="status-indicator" aria-hidden="true" /><div><strong>Retrieving the checked brief</strong><p>The service reported readiness; the checked result is still being fetched.</p></div></div>}
-            {briefState === "failed" && <div className="notice notice-error" role="alert"><strong>Brief check failed.</strong> No checked brief is available.</div>}
-            {briefState === "reconciliation_required" && <div className="notice notice-warning" role="alert"><strong>Brief reconciliation is required.</strong> No unsupported brief content is shown.</div>}
+            {briefState === "failed" && <div className="notice notice-error" role="alert"><strong>Brief check failed.</strong> {job?.error?.message ?? "No checked brief is available."}</div>}
+            {briefState === "reconciliation_required" && <div className="notice notice-warning" role="alert"><strong>Brief needs operator reconciliation.</strong> {job?.error?.message ?? "The service could not establish the dispatch outcome. No automatic retry was made."}</div>}
             {briefState === "ready" && !job?.brief && pollMode !== "brief" && <div className="notice notice-error" role="alert">The service did not return a supported checked brief. No result is shown.</div>}
             {briefState === "ready" && job?.brief && (
               <>

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import { ReconciliationRequired, runPaidStage } from "./calls.ts";
 import type { Env } from "./env.ts";
+import { operatorStatus } from "./operator.ts";
 
 // Never reads .dev.vars, accepts a target database, or uses an existing Compose project.
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -21,11 +22,18 @@ const composeArgs = ["compose", "-p", project, "-f", join(root, "compose.yaml"),
 function compose(args: string[], input?: Buffer): Buffer {
   return execFileSync("docker", [...composeArgs, ...args], { cwd: root, input, timeout: 720_000 });
 }
-const [jobId, reservationId, attemptId, settledJobId, settledReservationId, settledAttemptId] =
-  Array.from({ length: 6 }, () => randomUUID());
+const [jobId, reservationId, settledJobId, settledReservationId, settledAttemptId] =
+  Array.from({ length: 5 }, () => randomUUID());
+let attemptId: string;
 let providerRequests = 0;
 const originalFetch = globalThis.fetch;
-globalThis.fetch = async () => { providerRequests++; throw new Error("PROVIDER_DISPATCH_FORBIDDEN_IN_SMOKE"); };
+globalThis.fetch = async () => {
+  providerRequests++;
+  if (providerRequests !== 1) throw new Error("PROVIDER_REPLAY_FORBIDDEN_IN_SMOKE");
+  return new Response(new ReadableStream({
+    start(controller) { controller.error(new TypeError("PRIVATE_SYNTHETIC_TRANSPORT_DETAIL")); },
+  }), { headers: { "x-generation-id": "gen-synthetic-interrupted" } });
+};
 
 async function verify(connectionString: string, expected: unknown): Promise<void> {
   const pool = new Pool({ connectionString });
@@ -42,7 +50,7 @@ async function verify(connectionString: string, expected: unknown): Promise<void
       }, 1, "assessment_draft", { instructions: "No dispatch permitted", untrustedData: {} }),
       (error: unknown) => error instanceof ReconciliationRequired && error.attemptId === attempt);
     }
-    assert.equal(providerRequests, 0, "Uncertain and reconciled attempts must reject replay before provider access");
+    assert.equal(providerRequests, 1, "Replay must not add to the single synthetic provider request");
     for (const [table, rows] of Object.entries(snapshot)) {
       assert.deepEqual((await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows, rows,
         "Rejected replay must not mutate accounting");
@@ -73,13 +81,37 @@ try {
         ('${settledReservationId}', '${settledJobId}', 'assessment', 1, 600000, 'reconciled', 12345, 'Synthetic smoke only', now());
       UPDATE workflow_control SET active_attempt_id = '${reservationId}' WHERE singleton;
       INSERT INTO model_attempts (id, reservation_id, job_id, phase, call_index, state, requested_model, generation_id, error_code) VALUES
-        ('${attemptId}', '${reservationId}', '${jobId}', 'assessment', 1, 'uncertain', 'smoke-no-provider', 'synthetic-uncertain', 'MODEL_DISPATCH_UNCERTAIN'),
         ('${settledAttemptId}', '${settledReservationId}', '${settledJobId}', 'assessment', 1, 'reconciled', 'smoke-no-provider', 'synthetic-settled', NULL);
       INSERT INTO job_outbox (id, job_id, phase, attempt_no, workflow_id)
         VALUES ('${randomUUID()}', '${jobId}', 'assessment', 1, '${jobId}-assessment-1');
       INSERT INTO operator_reconciliations (id, reservation_id, actual_micro_usd, note, operator_subject)
         VALUES ('${randomUUID()}', '${settledReservationId}', 12345, 'Synthetic smoke only; not provider billing', 'ledger-smoke');
       COMMIT;`);
+    const env = { APP_ENV: "development", LOCAL_DATABASE_URL: connectionString, OPENROUTER_API_KEY: "synthetic-only" } as Env;
+    await assert.rejects(runPaidStage(env, {
+      jobId, attemptId: reservationId, phase: "assessment", workflowId: `${jobId}-assessment-1`,
+    }, 1, "assessment_draft", { instructions: "Synthetic interrupted-body smoke", untrustedData: {} }),
+    (error: unknown) => {
+      assert.ok(error instanceof ReconciliationRequired);
+      assert.equal(error.code, "MODEL_DISPATCH_UNCERTAIN");
+      attemptId = error.attemptId;
+      return true;
+    });
+    const diagnostic = (await pool.query(
+      `SELECT state, error_code, generation_id, http_status, failure_phase, failure_cause
+       FROM model_attempts WHERE id = $1`, [attemptId!],
+    )).rows[0];
+    assert.deepEqual(diagnostic, {
+      state: "uncertain", error_code: "MODEL_DISPATCH_UNCERTAIN", generation_id: "gen-synthetic-interrupted",
+      http_status: 200, failure_phase: "response_body", failure_cause: "transport_error",
+    });
+    const status = await operatorStatus(env) as { recentModelAttempts: { id: string }[] };
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(status.recentModelAttempts.find((attempt) => attempt.id === attemptId)!)
+        .filter(([key]) => key in diagnostic)), diagnostic,
+    );
+    assert.ok(!JSON.stringify(status).includes("PRIVATE_SYNTHETIC_TRANSPORT_DETAIL"));
+    console.log("Real paid-stage failure persisted safe diagnostics and operator status; one synthetic response, no provider network access.");
     expected = {};
     for (const table of ["campaign_budget", "workflow_control", "jobs", "phase_reservations", "model_attempts", "job_outbox", "operator_reconciliations"]) {
       expected[table] = (await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows;
@@ -110,7 +142,7 @@ try {
   const restoredConnection = new URL(recreatedConnection);
   restoredConnection.pathname = "/memory_bank_restore";
   await verify(restoredConnection.href, expected);
-  console.log("Private backup outside /tmp restored every row into a fresh database; replay guards passed; provider requests: 0.");
+  console.log("Private backup outside /tmp restored every row, including failure diagnostics; replay added zero provider requests.");
 } catch (error) {
   console.error(compose(["logs", "--no-color", "postgres"]).toString());
   throw error;
