@@ -113,7 +113,7 @@ function resultSchema(stage: ModelStage, prompt: StagePrompt) {
     case "brief_draft": return briefDraftSchema;
     case "assessment_review":
     case "brief_review":
-      if (!prompt.reviewTargets || (stage === "assessment_review") !== (prompt.reviewTargets.leadArtifacts !== undefined)) {
+      if (!prompt.reviewTargets || (stage === "assessment_review") !== (prompt.reviewTargets.artifacts !== undefined)) {
         throw new ModelCallError("MODEL_REVIEW_TARGETS_UNAVAILABLE", null, false);
       }
       return reviewSchema(prompt.reviewTargets);

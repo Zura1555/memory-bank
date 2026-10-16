@@ -2,11 +2,11 @@
 
 Related: [issue #2](https://github.com/Zura1555/memory-bank/issues/2), [issue #3](https://github.com/Zura1555/memory-bank/issues/3).
 
-## Current gate: requirement/ownership fixes verified; P2/P4 semantic qualification failed
+## Current gate: P2/P4 resolved; visible central checks passed; held-out and memory gates open
 
 The original candidate `569a793` accepted a false claim that the explicitly requested sandbox scope was unstated. The captured draft and supported review remain immutable. The replacement contract requires separate request-constraint inventories in drafting and independent review, and withholds a comparison's assessment and dependents when either inventory conflicts with its stated/absent requirement. Exact quotations, original references, eight-case coverage, independent outcome/disposition review, and the four-call assessment/brief workflow remain required.
 
-The owner authorized completing the remaining qualification and verification without restarting billing monitoring. Final-contract P1 and P3 reached checked briefs with their central source facts and limits intact, but P2 lost the required Elm starting material and P4 offered context-only artifacts as Adapt. The candidate is not release-qualified; held-out requests remain unopened. Actual JS heap was sampled, but total isolate/RSS memory is not qualified. Earlier runs and the unreconciled lost-ledger reservation below remain historical evidence, not qualification of this candidate.
+The owner authorized resolving P2/P4 in the existing worktree and committing the verified changes, without restarting billing monitoring. The artifact-role correction below preserves relevant conditional starting material while explicitly excluding context-only work. Fresh P1–P3 reached checked briefs with their central source facts and limits intact; P4 established bounded no-useful-precedent without selectable work. The candidate is not release-qualified: held-out requests remain unopened and total isolate/RSS memory is not qualified. Earlier failures and the unreconciled lost-ledger reservation below remain historical evidence, not erased by these bounded passes.
 
 ## Configuration and provenance
 
@@ -466,3 +466,35 @@ P4's accepted `disposition-2-0` says, “This is a bulk asynchronous billing int
 - The local Wrangler proxy emitted canceled-background-request messages and one operator settlement request lost its network connection. Ledger inspection showed that settlement had not committed; its later idempotent terminal settlement succeeded. Assessment/brief results above reached their recorded terminal states; these proxy events are not claimed as proof of production behavior or a diagnosed runtime fix.
 
 `npm run typecheck`, all 29 TypeScript tests plus one Python test, and `npm run build` passed after the ownership cutover. Earlier `npm run ingest` passed with timestamp-only manifest changes restored. Private evidence contains immutable drafts/reviews, checked outputs, receipts, phase timings, exact references, heap samples, and verdicts. Source changes remain on the existing task worktree/PR; no main-branch push, merge, production deployment, public-source release, or held-out tuning occurred.
+
+## Artifact-role correction and visible requalification — 2026-10-16
+
+### Root cause and contract
+
+An offline replay of the immutable P2/P4 captures reproduced both failures through the original parser, authentic review, and checked-result path. P2 had no invalid references: all Elm claims and Adapt classifications were supported, but the separate nominated-only lead review returned uncertain and removed the starting material. P4 forced every artifact into Reuse/Adapt/Verify, allowing a supported description of irrelevant request context to remain Adapt. Unrelated claim uncertainty also vetoed the corpus-wide negative conclusion.
+
+The shared correction replaces nominated-only lead verdicts with an independent role inventory for every assessed artifact: `starting_point`, `context_only`, `not_relevant`, or `unresolved`. Reuse/Adapt require source-established starting material as well as the existing claim/classification/reference/dependency gates. Conditional Adapt retains explicit new-client checks; unknown compatibility is not approval for unchanged Reuse. Drafts can explicitly exclude work with null disposition, empty role arrays, and a cited explanation, treated as an interpretation rather than a recommendation. The UI adds no work disposition and keeps exclusions unselectable.
+
+A no-useful-precedent conclusion now requires the complete canonical artifact inventory, complete source availability, settled context-only/not-relevant roles, valid references, and consistent request inventories. Unrelated historical outcome uncertainty does not manufacture uncertainty about implementation relevance. Missing/duplicate role reviews, contradictory role conclusions, unresolved relevance, or missing source evidence fail closed. Roles are persisted and rechecked on owned reads, brief admission, export, and browser parsing; legacy results without them are unavailable rather than upgraded.
+
+### Actual visible workflow evidence
+
+The same updated drafting/review contract, provider/model configuration, 16,384-token output bound, no-retry/fallback policy, and pinned eight-case corpus were used throughout. All results were read/exported through the final gate, including its defensive complete-inventory check. No captured draft, verdict, or generated result was repaired or relabeled. These are single observed runs, not percentiles or broad model-reliability claims.
+
+| Request / job | Assessment processing (s) | Assessment queue (s) | Brief processing (s) | Brief queue (s) | Observed central check |
+| --- | ---: | ---: | ---: | ---: | --- |
+| P1 / `90710ce9-2933-47d4-8161-c6410110dd45` | 52.078 | 4.213 | 10.602 | 2.120 | Cedar mapping remained conditional Adapt; sandbox Match, 1,198 accepted/2 rejected, source-key reconciliation, retained duplicate emails, no recorded retry, and production/scale limits remained explicit. |
+| P2 / `a4424e3f-f4a9-4d46-b858-9aaa7d12440b` | 64.298 | 3.516 | 18.869 | 3.739 | Elm batch-adapter-notes survived as conditional Adapt lead and checked brief. The brief retained submit/status/per-item handling, version/500-record/two-300-item limits, new-tenant checks, and no production/general-retry guarantee. Finch was not offered for unchanged reuse. |
+| P3 / `e9d445e3-13c7-4286-97d3-17ffe11d7942` | 66.680 | 3.155 | 17.142 | 3.228 | Corrected scoped delivery log/checklist reached an Adapt brief. Named accounts, read-only diagnostics, MFA, rejected never-provisioned administrator draft, missing viewed-record audit detail, and unobserved expiry removal remained explicit. |
+| P4 / `645424c1-32b6-4892-8ba3-7bab5fda45a7` | 30.828 | 11.577 | — | — | API and actual Chromium showed no useful precedent; all 24 artifacts had settled negative roles and null work dispositions. Historical outcomes stayed Unknown. No migration plan or brief was invented. |
+
+- All 14 real provider attempts completed: four each for P1–P3, two for P4 assessment. Requested/returned model was `openai/gpt-6-luna`, provider OpenAI. Observed prompts ranged 13,866–39,549 tokens and completions 58–5,881; no observed context/output overflow or corpus omission.
+- Every assessment covered all eight cases; accepted references, exact request quotations, and dependencies resolved against the canonical manifest. All 24 live original downloads matched SHA-256. Stored corpus version/hash remained `fictional-onboarding-v2` / `fbc1d4ae92275efafb23b660446ac78a4b6c624e4ce603d67d2d320e142b63ca`.
+- Actual Chromium selected the supported work and submitted each P1–P3 brief once. P4's completed receipt was additionally replayed with admission disabled against real owned status/evidence routes: selection showed 19 Context only and 5 Not applicable artifacts, zero enabled work checkboxes. A direct context-artifact brief submission returned 422 `INVALID_SELECTION_PASSAGE` before paid admission.
+- All six actual JSON/Markdown pack downloads for P1–P3 returned 200 through final revalidation and contained no visitor capability. P4 had no supported selections and no brief submission.
+- `npm run typecheck`, `npm test` (32 TypeScript tests plus one Python test), and `npm run build` passed. New behavior regressions preserve conditional starting material with all claims supported, reject context-only Adapt, block unchanged Reuse with checks, establish a complete negative review despite unrelated outcome uncertainty, reject incomplete/legacy roles and missing source evidence, and exercise explicit exclusion through the parser. LSP navigation had no server for this worktree; independent TypeScript checking is the compiler evidence.
+- `npm run ingest -- --root /tmp/memory-bank-role-ingest-gFnlKa` passed against an isolated corpus/contracts copy; the candidate's pinned manifest and originals were not rewritten.
+
+Local admission was disabled after terminal phases; a real POST returned 503 `ADMISSION_NOT_ENABLED` without changing job/reservation/attempt counts. There was no active Workflow. New completed-phase holds were settled only from actual stored terminal provider-response usage. No billing monitor, credit purchase, abandoned-dispatch release, old-ledger reconstruction, production admission change, merge, or deployment occurred. The durable campaign and immutable private captures/backups remain outside Git.
+
+**Remaining gates:** H1–H4 are still unopened/unrun; total-isolate/RSS memory and the separately recorded release gates remain unqualified. These visible central checks resolve P2/P4, not production reliability, held-out qualification, deployment approval, or public release. Prior recovery/replay/heap measurements above retain their stated historical boundaries; they were not reclassified as fresh measurements of this candidate.

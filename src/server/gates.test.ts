@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import Ajv from "ajv";
 import test from "node:test";
-import type { AssessmentResult, Claim, RequestConstraints, Selection, SupportVerdict } from "../shared/protocol.ts";
+import type { ArtifactRole, AssessmentResult, Claim, RequestConstraints, Selection, SupportVerdict } from "../shared/protocol.ts";
 import { assessmentDraftSchema, assessmentReviewSchema, openRouterSchema, parseAssessmentDraft, reviewSchema, type AssessmentDraft, type AssessmentOutput, type BriefDraft } from "./schemas.ts";
-import { buildCheckedAssessment, buildCheckedBrief, GateFailure, revalidateAssessment, revalidateBrief, validateAssessmentDraft, validateBriefDraft, validateLeadReview, validateSupportReview } from "./gates.ts";
+import { buildCheckedAssessment, buildCheckedBrief, GateFailure, revalidateAssessment, revalidateBrief, validateAssessmentDraft, validateBriefDraft, validateArtifactReview, validateSupportReview } from "./gates.ts";
 import { validateSelections } from "./selections.ts";
 import { assessmentPassageIds, EvidenceUnavailable, type Artifact, type CorpusSnapshot, type PastCase, type SourceVersion } from "./corpus.ts";
 import { dispositionChanges } from "../ui/lineage.ts";
@@ -12,6 +12,10 @@ const emptyRequirementReview: { request: string; constraints: RequestConstraints
   request: "current request",
   constraints: { product_version: [], environment: [], scale: [], identity_access: [], recovery_operations: [] },
 };
+
+function artifactRoles(draft: AssessmentDraft, role: ArtifactRole = "starting_point"): Map<string, ArtifactRole> {
+  return new Map(draft.cases.flatMap((item) => item.artifactWork.map((work) => [`${item.caseId}/${work.artifactId}`, role] as const)));
+}
 
 function fixture(): CorpusSnapshot {
   const cases: PastCase[] = [];
@@ -134,6 +138,7 @@ test("selection cannot substitute a different version of an assessed artifact", 
     clarifyingClaimIds: [],
     comparisons: [],
     requestConstraints: emptyRequirementReview.constraints,
+    artifactReviews: [{ caseId, artifactId: "request", role: "starting_point" }],
     nextActions: [],
     cases: [{ caseId, availability: "available", outcome: "unknown", outcomeClaimIds: [], claimIds: [claim.claimId], artifactWork: [{ artifactId: "request", availability: "available", exclusionReasons: [], disposition: "adapt", dispositionClaimId: claim.claimId, claimIds: [claim.claimId], blockerClaimIds: [], verificationClaimIds: [] }] }],
     leads: [],
@@ -237,7 +242,7 @@ test("case outcome labels need their own review even when the underlying facts p
   const verdicts = validateSupportReview(draft.claims, review);
   // A missing verdict also fails closed; production rejects incomplete reviews.
   verdicts.delete("outcome-3");
-  const checked = buildCheckedAssessment(draft, verdicts, invalid, corpus, new Map(), "cannot_be_established", emptyRequirementReview);
+  const checked = buildCheckedAssessment(draft, verdicts, invalid, corpus, artifactRoles(draft), "cannot_be_established", emptyRequirementReview);
   assert.deepEqual(checked.cases.map((item) => item.outcome), ["unknown", "failed", "unknown", "unknown", "unknown", "unknown", "partial", "observed_success"]);
   assert.deepEqual(checked.cases[0].outcomeClaimIds, []);
   assert.ok(checked.claims.some((claim) => claim.claimId === "fact-0"));
@@ -256,10 +261,10 @@ test("case outcome labels need their own review even when the underlying facts p
   assert.equal(revalidateAssessment(legacy, "current request", corpus).cases[1].outcome, "unknown");
   for (const rejection of ["unsupported", "uncertain"] as const) {
     verdicts.set("fact-1", rejection);
-    assert.equal(buildCheckedAssessment(draft, verdicts, invalid, corpus, new Map(), "cannot_be_established", emptyRequirementReview).cases[1].outcome, "unknown");
+    assert.equal(buildCheckedAssessment(draft, verdicts, invalid, corpus, artifactRoles(draft), "cannot_be_established", emptyRequirementReview).cases[1].outcome, "unknown");
   }
   verdicts.set("fact-1", "supported");
-  assert.equal(buildCheckedAssessment(draft, verdicts, new Set(["fact-1"]), corpus, new Map(), "cannot_be_established", emptyRequirementReview).cases[1].outcome, "unknown");
+  assert.equal(buildCheckedAssessment(draft, verdicts, new Set(["fact-1"]), corpus, artifactRoles(draft), "cannot_be_established", emptyRequirementReview).cases[1].outcome, "unknown");
   corpus.passages.delete(corpus.manifest.cases[1].artifacts[0].versions[0].passages[0].passageId);
   assert.equal(revalidateAssessment(checked, "current request", corpus).cases[1].outcome, "unknown");
 });
@@ -325,7 +330,7 @@ test("artifact recommendations and role claims remain independently reviewable",
   const rejected = parsed.cases[0].artifactWork[0].dispositionClaimId;
   const kept = parsed.cases[0].artifactWork[1].dispositionClaimId;
   const verdicts = new Map<string, SupportVerdict>(parsed.claims.map((claim) => [claim.claimId, claim.claimId === rejected ? "unsupported" : "supported"]));
-  const checked = buildCheckedAssessment(parsed, verdicts, invalid, corpus, new Map([["case-1/handover", "supported"]]), "precedent_found", emptyRequirementReview);
+  const checked = buildCheckedAssessment(parsed, verdicts, invalid, corpus, artifactRoles(parsed), "precedent_found", emptyRequirementReview);
   assert.equal(checked.cases[0].artifactWork[0].disposition, null);
   assert.equal(checked.cases[0].artifactWork[1].disposition, "adapt");
   assert.ok(checked.claims.some((claim) => claim.claimId === kept));
@@ -335,7 +340,7 @@ test("artifact recommendations and role claims remain independently reviewable",
   assert.equal(checked.cases[0].outcome, "observed_success");
   verdicts.set("fact-0-0", "unsupported");
   verdicts.set(parsed.comparisons[0].evidenceClaimId, "unsupported");
-  const withheldComparison = buildCheckedAssessment(parsed, verdicts, invalid, corpus, new Map([["case-1/handover", "supported"]]), "precedent_found", emptyRequirementReview);
+  const withheldComparison = buildCheckedAssessment(parsed, verdicts, invalid, corpus, artifactRoles(parsed), "precedent_found", emptyRequirementReview);
   assert.deepEqual(withheldComparison.comparisons, []);
   assert.equal(withheldComparison.cases[0].outcome, "unknown");
   assert.ok(!withheldComparison.claims.some((claim) => claim.claimId === parsed.comparisons[0].implicationClaimId));
@@ -343,7 +348,7 @@ test("artifact recommendations and role claims remain independently reviewable",
   Object.assign(inventedRequirement.leads[0].comparisons[0], { requirementQuote: "an unstated target version", relation: "match" });
   const inventedDraft = parseAssessmentDraft(inventedRequirement, corpus);
   const invalidQuoteRefs = validateAssessmentDraft(inventedDraft, "current request", corpus);
-  const inventedChecked = buildCheckedAssessment(inventedDraft, new Map(inventedDraft.claims.map((claim) => [claim.claimId, "supported"])), invalidQuoteRefs, corpus, new Map([["case-1/handover", "supported"]]), "precedent_found", emptyRequirementReview);
+  const inventedChecked = buildCheckedAssessment(inventedDraft, new Map(inventedDraft.claims.map((claim) => [claim.claimId, "supported"])), invalidQuoteRefs, corpus, artifactRoles(inventedDraft), "precedent_found", emptyRequirementReview);
   assert.deepEqual(inventedChecked.comparisons, []);
   assert.ok(!inventedChecked.claims.some((claim) => claim.claimId === inventedDraft.comparisons[0].implicationClaimId));
   const wrongOwner = structuredClone(output);
@@ -411,15 +416,15 @@ test("true historical facts cannot promote an incompatible artifact into a usefu
     conclusion: "no_useful_precedent" as const,
     requestConstraints: emptyRequirementReview.constraints,
     claimReviews: draft.claims.map((claim) => ({ claimId: claim.claimId, verdict: "supported" as const })),
-    leadReviews: [{ caseId: "case-1", artifactId: "request", verdict: "unsupported" as const }],
+    artifactReviews: [...artifactRoles(draft, "not_relevant")].map(([key, role]) => ({ caseId: key.split("/")[0], artifactId: key.split("/")[1], role })),
   };
-  const checked = buildCheckedAssessment(draft, validateSupportReview(draft.claims, review), new Set(), corpus, validateLeadReview(draft, review), review.conclusion, emptyRequirementReview);
+  const checked = buildCheckedAssessment(draft, validateSupportReview(draft.claims, review), new Set(), corpus, validateArtifactReview(draft, review), review.conclusion, emptyRequirementReview);
   assert.equal(checked.conclusion, "no_useful_precedent");
   assert.deepEqual(checked.leads, []);
   assert.equal(checked.cases[0].artifactWork[0].disposition, null);
   assert.ok(checked.claims.some((claim) => claim.claimId === "fact-0-0"));
-  const uncertain = { ...review, conclusion: "cannot_be_established" as const, leadReviews: [{ caseId: "case-1", artifactId: "request", verdict: "uncertain" as const }] };
-  assert.equal(buildCheckedAssessment(draft, validateSupportReview(draft.claims, uncertain), new Set(), corpus, validateLeadReview(draft, uncertain), uncertain.conclusion, emptyRequirementReview).conclusion, "cannot_be_established");
+  const uncertain = { ...review, conclusion: "cannot_be_established" as const, artifactReviews: review.artifactReviews.map((item, index) => ({ ...item, role: index === 0 ? "unresolved" as const : item.role })) };
+  assert.equal(buildCheckedAssessment(draft, validateSupportReview(draft.claims, uncertain), new Set(), corpus, validateArtifactReview(draft, uncertain), uncertain.conclusion, emptyRequirementReview).conclusion, "cannot_be_established");
 });
 
 test("persisted assessments and briefs lose claims transitively when original evidence becomes unavailable", () => {
@@ -428,7 +433,7 @@ test("persisted assessments and briefs lose claims transitively when original ev
   draft.claims.find((claim) => claim.claimId === "decision-0-1")!.dependsOnClaimIds.push("fact-0-0");
   draft.leads = [{ caseId: "case-1", state: "conditional", usefulArtifactIds: ["handover"], reasonClaimIds: ["fact-0-1"] }];
   const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
-  const persisted = buildCheckedAssessment(draft, verdicts, new Set(), corpus, new Map([["case-1/handover", "supported"]]), "precedent_found", emptyRequirementReview);
+  const persisted = buildCheckedAssessment(draft, verdicts, new Set(), corpus, artifactRoles(draft), "precedent_found", emptyRequirementReview);
   const base = { ...draft.claims[0], sourceRefs: [...draft.claims[0].sourceRefs, ...draft.claims[2].sourceRefs] };
   const dependent = { ...draft.claims[3], dependsOnClaimIds: [base.claimId] };
   const brief = {
@@ -485,11 +490,11 @@ test("comparisons preserve unknown and mismatch and withhold rejected dependenci
   const invalid = validateAssessmentDraft(draft, "current request", corpus);
   const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
   const requirementReview = { ...emptyRequirementReview, constraints: { ...emptyRequirementReview.constraints, environment: ["current request"] } };
-  const build = () => buildCheckedAssessment(draft, verdicts, invalid, corpus, new Map([["case-1/handover", "supported"]]), "precedent_found", requirementReview);
+  const build = () => buildCheckedAssessment(draft, verdicts, invalid, corpus, artifactRoles(draft), "precedent_found", requirementReview);
   const checked = build();
   assert.deepEqual(checked.comparisons.map((row) => row.relation), ["mismatch", "unknown"]);
   assert.deepEqual(checked.nextActions, [{ caseId: "case-1", artifactId: "request", claimId: "verify-environment" }]);
-  const unestablished = buildCheckedAssessment(draft, verdicts, invalid, corpus, new Map([["case-1/handover", "unsupported"]]), "cannot_be_established", requirementReview);
+  const unestablished = buildCheckedAssessment(draft, verdicts, invalid, corpus, new Map([...artifactRoles(draft), ["case-1/handover", "unresolved"]]), "cannot_be_established", requirementReview);
   assert.deepEqual(unestablished.leads, []);
   assert.deepEqual(unestablished.comparisons.map((row) => row.relation), ["mismatch", "unknown"]);
   draft.comparisons[1].relation = "match";
@@ -519,7 +524,7 @@ test("next actions are bounded checked request-specific checks, not slot filling
     work.claimIds.push(claim.claimId);
     work.verificationClaimIds.push(claim.claimId);
   }
-  const build = (verdict: SupportVerdict) => buildCheckedAssessment(draft, new Map(draft.claims.map((claim) => [claim.claimId, claim.claimId.startsWith("check-") ? verdict : "supported"])), new Set(), corpus, new Map(), "cannot_be_established", emptyRequirementReview);
+  const build = (verdict: SupportVerdict) => buildCheckedAssessment(draft, new Map(draft.claims.map((claim) => [claim.claimId, claim.claimId.startsWith("check-") ? verdict : "supported"])), new Set(), corpus, artifactRoles(draft), "cannot_be_established", emptyRequirementReview);
   validateAssessmentDraft(draft, "current request", corpus);
   assert.deepEqual(build("supported").nextActions.map((action) => action.claimId), ["check-0", "check-1", "check-2"]);
   assert.deepEqual(build("uncertain").nextActions, []);
@@ -529,7 +534,7 @@ test("clarification changes compare two checked dispositions, never withheld rec
   const corpus = fixture();
   const draft = assessmentDraft(corpus);
   draft.leads = [{ caseId: "case-1", state: "useful", usefulArtifactIds: ["request"], reasonClaimIds: ["fact-0-0"] }];
-  const build = () => buildCheckedAssessment(draft, new Map(draft.claims.map((claim) => [claim.claimId, "supported"])), new Set(), corpus, new Map([["case-1/request", "supported"]]), "precedent_found", emptyRequirementReview);
+  const build = () => buildCheckedAssessment(draft, new Map(draft.claims.map((claim) => [claim.claimId, "supported"])), new Set(), corpus, artifactRoles(draft), "precedent_found", emptyRequirementReview);
   const before = structuredClone(build());
   draft.cases[0].artifactWork[0].disposition = "reuse";
   draft.claims.find((claim) => claim.claimId === "decision-0-0")!.text = "Reuse after the clarified target is established compatible.";
@@ -552,8 +557,8 @@ test("assessment passage labels never rebind after source availability changes",
 });
 
 test("a review with no nominated useful artifacts cannot force a precedent", () => {
-  const schema = reviewSchema({ claimIds: ["checked-claim"], leadArtifacts: [] });
-  const response = { requestConstraints: emptyRequirementReview.constraints, claimReviews: [{ claimId: "checked-claim", verdict: "supported" }], leadReviews: [], conclusion: "precedent_found" };
+  const schema = reviewSchema({ claimIds: ["checked-claim"], artifacts: [] });
+  const response = { requestConstraints: emptyRequirementReview.constraints, claimReviews: [{ claimId: "checked-claim", verdict: "supported" }], artifactReviews: [], conclusion: "precedent_found" };
   const validate = new Ajv({ strict: false }).compile(openRouterSchema("assessment_review", schema).json_schema.schema);
   assert.equal(validate(response), false);
   assert.equal(schema.safeParse(response).success, false);
@@ -598,8 +603,8 @@ test("attached dispositions are independently checked for lead and non-lead work
   const draft = parseAssessmentDraft(output, corpus);
   const invalid = validateAssessmentDraft(draft, "current request", corpus);
   const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
-  const leadVerdicts = new Map<string, SupportVerdict>([["case-1/request", "supported"], ["case-1/handover", "supported"]]);
-  const build = () => buildCheckedAssessment(draft, verdicts, invalid, corpus, leadVerdicts, "precedent_found", emptyRequirementReview);
+  const roles = artifactRoles(draft);
+  const build = () => buildCheckedAssessment(draft, verdicts, invalid, corpus, roles, "precedent_found", emptyRequirementReview);
   const selected = (caseId: string, artifactId: string) => {
     const source = corpus.manifest.cases.find((item) => item.caseId === caseId)!.artifacts.find((item) => item.artifactId === artifactId)!.versions[0];
     return [{ caseId, artifactId, versionId: source.versionId, passageIds: [source.passages[0].passageId] }];
@@ -671,13 +676,13 @@ test("independent request constraints block false absence even when every claim 
     };
     const draft = parseAssessmentDraft(output, corpus);
     const constraints = { ...emptyRequirementReview.constraints, [scenario.dimension]: scenario.constraint && (scenario.dimension === "identity_access" || !scenario.rejected) ? [scenario.constraint] : [] };
-    const review = assessmentReviewSchema.parse(reviewSchema({ claimIds: draft.claims.map((claim) => claim.claimId), leadArtifacts: [] }).parse({
-      requestConstraints: constraints, conclusion: "cannot_be_established", leadReviews: [],
+    const review = assessmentReviewSchema.parse(reviewSchema({ claimIds: draft.claims.map((claim) => claim.claimId), artifacts: draft.cases.flatMap((item) => item.artifactWork.map((work) => ({ caseId: item.caseId, artifactId: work.artifactId, proposedForLead: false }))) }).parse({
+      requestConstraints: constraints, conclusion: "cannot_be_established", artifactReviews: [...artifactRoles(draft)].map(([key, role]) => ({ caseId: key.split("/")[0], artifactId: key.split("/")[1], role })),
       claimReviews: draft.claims.map((claim) => ({ claimId: claim.claimId, verdict: "supported" })),
     }));
     const verdicts = validateSupportReview(draft.claims, review);
     const invalid = validateAssessmentDraft(draft, request, corpus);
-    const checked = buildCheckedAssessment(draft, verdicts, invalid, corpus, validateLeadReview(draft, review), review.conclusion, { request, constraints: review.requestConstraints });
+    const checked = buildCheckedAssessment(draft, verdicts, invalid, corpus, validateArtifactReview(draft, review), review.conclusion, { request, constraints: review.requestConstraints });
     assert.equal(checked.comparisons.some((row) => row.dimension === scenario.dimension), !scenario.rejected);
     assert.equal(checked.claims.some((claim) => claim.claimId === "downstream"), !scenario.rejected);
     assert.equal(checked.claims.some((claim) => claim.claimId === "comparison-0-implication"), !scenario.rejected);
@@ -690,14 +695,100 @@ test("independent request constraints block false absence even when every claim 
     }
     if (scenario.dimension === "environment" && scenario.rejected) {
       const invented = { ...constraints, environment: ["not present in the current request"] };
-      assert.throws(() => buildCheckedAssessment(draft, verdicts, invalid, corpus, new Map(), "cannot_be_established", { request, constraints: invented }),
+      assert.throws(() => buildCheckedAssessment(draft, verdicts, invalid, corpus, artifactRoles(draft), "cannot_be_established", { request, constraints: invented }),
         (error: unknown) => error instanceof GateFailure && error.code === "INVALID_REQUEST_CONSTRAINT_REVIEW");
       const { requestConstraints: _, ...oldReview } = review;
       assert.equal(assessmentReviewSchema.safeParse(oldReview).success, false);
       const legacy = { ...checked };
       delete (legacy as Partial<AssessmentResult>).requestConstraints;
       assert.throws(() => revalidateAssessment(legacy, request, corpus), EvidenceUnavailable);
-      assert.equal(buildCheckedAssessment(draft, verdicts, invalid, corpus, new Map(), "no_useful_precedent", { request, constraints }).conclusion, "cannot_be_established");
+      assert.equal(buildCheckedAssessment(draft, verdicts, invalid, corpus, artifactRoles(draft), "no_useful_precedent", { request, constraints }).conclusion, "cannot_be_established");
     }
   }
+});
+
+test("implementation roles preserve conditional starting work but block context-only Adapt", () => {
+  const corpus = fixture();
+  const draft = assessmentDraft(corpus);
+  draft.leads = [{ caseId: "case-1", state: "conditional", usefulArtifactIds: ["request", "handover"], reasonClaimIds: ["fact-0-1"] }];
+  const roles = artifactRoles(draft);
+  roles.set("case-1/request", "context_only");
+  const work = draft.cases[0].artifactWork[1];
+  const check: Claim = { ...draft.claims.find((claim) => claim.claimId === work.dispositionClaimId)!, claimId: "check-new-version", text: "Verify the new API version and account limits before adapting the recorded submit-and-poll procedure." };
+  draft.claims.push(check);
+  work.claimIds.push(check.claimId);
+  work.verificationClaimIds.push(check.claimId);
+  const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
+  const checked = buildCheckedAssessment(draft, verdicts, validateAssessmentDraft(draft, "current request", corpus), corpus, roles, "precedent_found", emptyRequirementReview);
+  assert.equal(checked.cases[0].artifactWork[0].disposition, null);
+  assert.equal(checked.cases[0].artifactWork[1].disposition, "adapt");
+  assert.deepEqual(checked.leads[0].usefulArtifactIds, ["handover"]);
+  assert.deepEqual(checked.nextActions, [{ caseId: "case-1", artifactId: "handover", claimId: check.claimId }]);
+  const selection = [{ caseId: "case-1", artifactId: "handover", versionId: "handover-v1-case-1", passageIds: ["p-handover-v1-case-1"] }];
+  assert.deepEqual(validateSelections(selection, checked, corpus), selection);
+  assert.equal(revalidateAssessment(checked, "current request", corpus).cases[0].artifactWork[1].disposition, "adapt");
+  roles.set("case-1/handover", "unresolved");
+  assert.deepEqual(buildCheckedAssessment(draft, verdicts, new Set(), corpus, roles, "cannot_be_established", emptyRequirementReview).leads, []);
+  roles.set("case-1/handover", "starting_point");
+  work.disposition = "reuse";
+  draft.claims.find((claim) => claim.claimId === `classification-${work.dispositionClaimId}`)!.text = "Artifact disposition: reuse.";
+  assert.equal(buildCheckedAssessment(draft, verdicts, new Set(), corpus, roles, "precedent_found", emptyRequirementReview).cases[0].artifactWork[1].disposition, null);
+});
+
+test("full negative artifact coverage establishes no precedent without inventing uncertain case outcomes", () => {
+  const corpus = fixture();
+  const draft = assessmentDraft(corpus);
+  const roles = artifactRoles(draft, "context_only");
+  const review = assessmentReviewSchema.parse({
+    requestConstraints: emptyRequirementReview.constraints, conclusion: "no_useful_precedent",
+    artifactReviews: [...roles].map(([key, role]) => ({ caseId: key.split("/")[0], artifactId: key.split("/")[1], role })),
+    claimReviews: draft.claims.map((claim) => ({ claimId: claim.claimId, verdict: claim.claimId === "fact-0-0" ? "uncertain" : "supported" })),
+  });
+  const checked = buildCheckedAssessment(draft, validateSupportReview(draft.claims, review), new Set(), corpus, validateArtifactReview(draft, review), review.conclusion, emptyRequirementReview);
+  assert.equal(checked.conclusion, "no_useful_precedent");
+  assert.ok(checked.cases.every((item) => item.outcome === "unknown" && item.artifactWork.every((work) => work.disposition === null)));
+  assert.equal(revalidateAssessment(checked, "current request", corpus).conclusion, "no_useful_precedent");
+  assert.throws(() => validateSelections([{ caseId: "case-1", artifactId: "request", versionId: "request-v1", passageIds: ["p-request-v1"] }], checked, corpus));
+  assert.throws(() => validateArtifactReview(draft, { ...review, artifactReviews: review.artifactReviews.slice(1) }),
+    (error: unknown) => error instanceof GateFailure && error.code === "INCOMPLETE_ARTIFACT_REVIEW");
+  const unresolved = { ...review, artifactReviews: review.artifactReviews.map((item, index) => ({ ...item, role: index === 0 ? "unresolved" as const : item.role })) };
+  assert.throws(() => validateArtifactReview(draft, unresolved),
+    (error: unknown) => error instanceof GateFailure && error.code === "CONFLICTING_ARTIFACT_REVIEW");
+  const legacy = { ...checked };
+  delete (legacy as Partial<AssessmentResult>).artifactReviews;
+  assert.throws(() => revalidateAssessment(legacy, "current request", corpus), EvidenceUnavailable);
+  const missing = structuredClone(checked);
+  missing.artifactReviews.pop();
+  assert.throws(() => revalidateAssessment(missing, "current request", corpus), EvidenceUnavailable);
+  const incomplete = structuredClone(draft);
+  incomplete.cases.pop();
+  const partialRoles = artifactRoles(incomplete, "context_only");
+  assert.equal(buildCheckedAssessment(incomplete, validateSupportReview(draft.claims, review), new Set(), corpus, partialRoles, "no_useful_precedent", emptyRequirementReview).conclusion, "cannot_be_established");
+  corpus.caseAvailability.set("case-2", "partial");
+  assert.equal(revalidateAssessment(checked, "current request", corpus).conclusion, "cannot_be_established");
+});
+
+test("explicit artifact exclusion is reviewed and explained without fabricating reusable work", () => {
+  const corpus = fixture();
+  const wireIds = assessmentPassageIds(corpus);
+  const output: AssessmentOutput = {
+    requestConstraints: emptyRequirementReview.constraints, leads: [], contrasts: [], clarifyingClaimIds: [], claims: [],
+    cases: corpus.manifest.cases.map((item) => ({
+      caseId: item.caseId, outcome: "unknown",
+      artifactWork: item.artifacts.map((artifact) => ({
+        artifactId: artifact.artifactId, disposition: null, usefulForLead: false,
+        recommendation: { text: "This record supplies background requirements, not an implementation procedure.", sourceRefs: [wireIds.get(artifact.versions[0].passages[0].passageId)!], requestQuotes: [], dependsOnClaimIds: [] },
+        supportingClaims: [], blockerClaims: [], verificationClaims: [],
+      })),
+    })),
+  };
+  const draft = parseAssessmentDraft(output, corpus);
+  const checked = buildCheckedAssessment(draft, new Map(draft.claims.map((claim) => [claim.claimId, "supported"])), validateAssessmentDraft(draft, "current request", corpus), corpus, artifactRoles(draft, "context_only"), "no_useful_precedent", emptyRequirementReview);
+  assert.equal(checked.conclusion, "no_useful_precedent");
+  assert.ok(checked.cases.every((item) => item.artifactWork.every((work) => work.disposition === null && work.dispositionClaimId === null && work.claimIds.length === 0)));
+  assert.ok(checked.cases.every((item) => item.claimIds.some((id) => checked.claims.find((claim) => claim.claimId === id)?.text.includes("not an implementation procedure"))));
+  assert.equal(revalidateAssessment(checked, "current request", corpus).conclusion, "no_useful_precedent");
+  const invalid = structuredClone(output);
+  invalid.cases[0].artifactWork[0].usefulForLead = true;
+  assert.equal(assessmentDraftSchema.safeParse(invalid).success, false);
 });

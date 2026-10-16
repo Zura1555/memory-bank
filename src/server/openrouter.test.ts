@@ -15,7 +15,7 @@ test("an interrupted provider body keeps its generation ID and cannot be treated
     await assert.rejects(
       callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_review", {
         instructions: "Review fictional evidence", untrustedData: {},
-        reviewTargets: { claimIds: ["claim-one"], leadArtifacts: [] },
+        reviewTargets: { claimIds: ["claim-one"], artifacts: [] },
       }),
       (error: unknown) => {
         assert.ok(error instanceof ModelCallError);

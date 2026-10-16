@@ -1,7 +1,7 @@
-import type { AssessmentConclusion, AssessmentResult, BriefResult, BriefDisposition, Claim, CaseAssessment, Lead, RequestConstraints, SupportVerdict } from "../shared/protocol.ts";
+import type { ArtifactRole, AssessmentConclusion, AssessmentResult, BriefResult, BriefDisposition, Claim, CaseAssessment, Lead, RequestConstraints, SupportVerdict } from "../shared/protocol.ts";
 import { EvidenceUnavailable, type CorpusSnapshot } from "./corpus.ts";
 import type { AssessmentDraft, AssessmentReview, BriefDraft, SupportReview } from "./schemas.ts";
-import { requestConstraintsSchema } from "./schemas.ts";
+import { artifactReviewsSchema, requestConstraintsSchema } from "./schemas.ts";
 
 export class GateFailure extends Error {
   readonly code: string;
@@ -90,8 +90,8 @@ function assertCaseReferences(draft: AssessmentDraft, corpus: CorpusSnapshot): v
         }
       }
       const dispositionClaim = claims.get(work.dispositionClaimId);
-      if (!work.claimIds.includes(work.dispositionClaimId) || dispositionClaim?.kind !== "recommendation" || dispositionClaimIds.has(work.dispositionClaimId)) {
-        throw new GateFailure("DISPOSITION_RECOMMENDATION_REQUIRED", "Each artifact disposition needs its own reviewed recommendation claim.");
+      if (!work.claimIds.includes(work.dispositionClaimId) || dispositionClaim?.kind !== (work.disposition === null ? "interpretation" : "recommendation") || dispositionClaimIds.has(work.dispositionClaimId)) {
+        throw new GateFailure("DISPOSITION_RECOMMENDATION_REQUIRED", "Each artifact needs its own reviewed recommendation or explicit exclusion interpretation.");
       }
       dispositionClaimIds.add(work.dispositionClaimId);
       if (work.blockerClaimIds.some((id) => !work.claimIds.includes(id)) || work.verificationClaimIds.some((id) => !work.claimIds.includes(id))) {
@@ -108,7 +108,7 @@ function assertCaseReferences(draft: AssessmentDraft, corpus: CorpusSnapshot): v
       throw new GateFailure("INCOMPLETE_ARTIFACT_WORK", "The assessment omits an artifact with verified usable source evidence.");
     }
     const lead = draft.leads.find((leadItem) => leadItem.caseId === item.caseId);
-    if (lead && lead.usefulArtifactIds.some((id) => !item.artifactWork.some((work) => work.artifactId === id && work.disposition !== "verify"))) {
+    if (lead && lead.usefulArtifactIds.some((id) => !item.artifactWork.some((work) => work.artifactId === id && (work.disposition === "reuse" || work.disposition === "adapt")))) {
       throw new GateFailure("LEAD_ARTIFACT_NOT_USABLE", "A lead includes work that was not checked as reusable or adaptable.");
     }
   }
@@ -223,17 +223,18 @@ export function validateSupportReview(claims: Claim[], review: SupportReview): M
   return verdicts;
 }
 
-export function validateLeadReview(draft: AssessmentDraft, review: AssessmentReview): Map<string, SupportVerdict> {
-  const expected = new Set(draft.leads.flatMap((lead) => lead.usefulArtifactIds.map((id) => `${lead.caseId}/${id}`)));
-  const verdicts = new Map(review.leadReviews.map((item) => [`${item.caseId}/${item.artifactId}`, item.verdict]));
-  if (verdicts.size !== review.leadReviews.length || verdicts.size !== expected.size || [...expected].some((id) => !verdicts.has(id))) {
-    throw new GateFailure("INCOMPLETE_LEAD_REVIEW", "Every proposed lead artifact needs exactly one compatibility review.");
+export function validateArtifactReview(draft: AssessmentDraft, review: AssessmentReview): Map<string, ArtifactRole> {
+  const expected = new Set(draft.cases.flatMap((item) => item.artifactWork.map((work) => `${item.caseId}/${work.artifactId}`)));
+  const roles = new Map(review.artifactReviews.map((item) => [`${item.caseId}/${item.artifactId}`, item.role]));
+  if (roles.size !== review.artifactReviews.length || roles.size !== expected.size || [...expected].some((id) => !roles.has(id))) {
+    throw new GateFailure("INCOMPLETE_ARTIFACT_REVIEW", "Every assessed artifact needs exactly one independent implementation-role review.");
   }
-  const supported = [...verdicts.values()].some((verdict) => verdict === "supported");
-  if ((review.conclusion === "precedent_found") !== supported) {
-    throw new GateFailure("CONFLICTING_LEAD_REVIEW", "The corpus conclusion conflicts with its useful-artifact reviews.");
+  const nominatedStartingPoint = draft.leads.some((lead) => lead.usefulArtifactIds.some((id) => roles.get(`${lead.caseId}/${id}`) === "starting_point"));
+  if ((review.conclusion === "precedent_found") !== nominatedStartingPoint
+    || (review.conclusion === "no_useful_precedent" && [...roles.values()].some((role) => role === "starting_point" || role === "unresolved"))) {
+    throw new GateFailure("CONFLICTING_ARTIFACT_REVIEW", "The corpus conclusion conflicts with its independently reviewed implementation roles.");
   }
-  return verdicts;
+  return roles;
 }
 
 function supportedClaims(claims: Claim[], verdicts: Map<string, SupportVerdict>, referenceInvalid: Set<string>) {
@@ -262,7 +263,7 @@ export function buildCheckedAssessment(
   verdicts: Map<string, SupportVerdict>,
   invalidRefs: Set<string>,
   corpus: CorpusSnapshot,
-  leadVerdicts: Map<string, SupportVerdict>,
+  artifactRoles: Map<string, ArtifactRole>,
   reviewedConclusion: AssessmentConclusion,
   requirementReview: { request: string; constraints: RequestConstraints },
 ): AssessmentResult {
@@ -273,6 +274,11 @@ export function buildCheckedAssessment(
     || Object.values(constraints.data).some((quotes) => quotes.some((quote) => !requirementReview.request.includes(quote)))
     || Object.values(draftConstraints.data).some((quotes) => quotes.some((quote) => !requirementReview.request.includes(quote)))) {
     throw new GateFailure("INVALID_REQUEST_CONSTRAINT_REVIEW", "Draft and independent review need every request-constraint dimension with exact request quotations.");
+  }
+  const knownArtifacts = new Set(corpus.manifest.cases.flatMap((item) => item.artifacts.map((artifact) => `${item.caseId}/${artifact.artifactId}`)));
+  if ([...artifactRoles.keys()].some((key) => !knownArtifacts.has(key))
+    || draft.cases.some((item) => item.artifactWork.some((work) => !artifactRoles.has(`${item.caseId}/${work.artifactId}`)))) {
+    throw new GateFailure("INCOMPLETE_ARTIFACT_REVIEW", "Missing or unknown artifact-role review.");
   }
   let requirementConflict = false;
   for (const row of draft.comparisons) {
@@ -288,16 +294,17 @@ export function buildCheckedAssessment(
       const classificationId = `classification-${work.dispositionClaimId}`;
       const classification = draftClaims.get(classificationId);
       if (classification?.kind !== "interpretation"
-        || classification.text !== `Artifact disposition: ${work.disposition}.`
+        || classification.text !== `Artifact disposition: ${work.disposition === null ? "excluded" : work.disposition}.`
         || !work.claimIds.includes(classificationId)
         || !classification.dependsOnClaimIds.includes(work.dispositionClaimId)
         || verdicts.get(classificationId) !== "supported"
         || invalidRefs.has(classificationId)) {
         rejected.add(work.dispositionClaimId);
       }
-      const compatibility = leadVerdicts.get(`${item.caseId}/${work.artifactId}`);
-      if ((compatibility !== undefined && compatibility !== "supported")
-        || (reviewedConclusion === "no_useful_precedent" && work.disposition !== "verify")) {
+      const role = artifactRoles.get(`${item.caseId}/${work.artifactId}`);
+      if (((work.disposition === "reuse" || work.disposition === "adapt") && role !== "starting_point")
+        || (work.disposition === "verify" && role === "not_relevant")
+        || (reviewedConclusion === "no_useful_precedent" && work.disposition !== null && work.disposition !== "verify")) {
         rejected.add(work.dispositionClaimId);
       }
     }
@@ -320,7 +327,7 @@ export function buildCheckedAssessment(
         return corpus.availableVersions.has(version.versionId) ? [] : ["Original unavailable or failed integrity verification."];
       }))];
       const work = workByArtifact.get(artifact.artifactId);
-      const accepted = work !== undefined && keepAll(work.claimIds, checked.accepted)
+      const accepted = work !== undefined && work.disposition !== null && keepAll(work.claimIds, checked.accepted)
         && !(work.disposition === "reuse" && (work.blockerClaimIds.length > 0 || work.verificationClaimIds.length > 0));
       return {
         artifactId: artifact.artifactId,
@@ -346,14 +353,15 @@ export function buildCheckedAssessment(
     if (!keepAll(lead.reasonClaimIds, checked.accepted)) return [];
     const caseResult = cases.find((item) => item.caseId === lead.caseId);
     const usableIds = new Set(caseResult?.artifactWork.filter((work) => work.disposition !== null && work.disposition !== "verify").map((work) => work.artifactId));
-    const usefulArtifactIds = lead.usefulArtifactIds.filter((id) => usableIds.has(id) && leadVerdicts.get(`${lead.caseId}/${id}`) === "supported");
+    const usefulArtifactIds = lead.usefulArtifactIds.filter((id) => usableIds.has(id) && artifactRoles.get(`${lead.caseId}/${id}`) === "starting_point");
     if (usefulArtifactIds.length === 0) return [];
     return [{ ...lead, usefulArtifactIds }];
   });
   const contrasts = draft.contrasts.filter((item) => keepAll(item.reasonClaimIds, checked.accepted));
   const complete = [...corpus.caseAvailability.values()].every((state) => state === "available");
   const noUsefulPrecedent = reviewedConclusion === "no_useful_precedent" && complete && invalidRefs.size === 0 && !requirementConflict
-    && ![...verdicts.values(), ...leadVerdicts.values()].includes("uncertain");
+    && artifactRoles.size === knownArtifacts.size
+    && [...artifactRoles.values()].every((role) => role === "context_only" || role === "not_relevant");
   const conclusion = leads.length > 0 ? "precedent_found" : noUsefulPrecedent ? "no_useful_precedent" : "cannot_be_established";
   const visibleCases = new Set([...leads, ...contrasts].map((item) => item.caseId));
   const comparisons = draft.comparisons.filter((row) => (visibleCases.has(row.caseId) || row.relation !== "match")
@@ -372,6 +380,10 @@ export function buildCheckedAssessment(
     clarifyingClaimIds: draft.clarifyingClaimIds.filter((id) => checked.accepted.has(id)),
     comparisons,
     requestConstraints: constraints.data,
+    artifactReviews: [...artifactRoles].map(([key, role]) => {
+      const [caseId, artifactId] = key.split("/");
+      return { caseId, artifactId, role };
+    }),
     nextActions,
     cases,
     leads: deterministicOrder(leads, cases),
@@ -408,6 +420,14 @@ export function buildCheckedBrief(draft: BriefDraft, verdicts: Map<string, Suppo
 }
 
 export function revalidateAssessment(result: AssessmentResult, request: string, corpus: CorpusSnapshot): AssessmentResult {
+  const reviewed = artifactReviewsSchema.safeParse(result.artifactReviews);
+  if (!reviewed.success || new Set(reviewed.data.map((item) => `${item.caseId}/${item.artifactId}`)).size !== reviewed.data.length) {
+    throw new EvidenceUnavailable("Required independent artifact-role review is unavailable; a new checked assessment is needed.");
+  }
+  const reviewedPairs = new Set(reviewed.data.map((item) => `${item.caseId}/${item.artifactId}`));
+  if (result.cases.some((item) => item.artifactWork.some((work) => work.availability !== "unavailable" && !reviewedPairs.has(`${item.caseId}/${work.artifactId}`)))) {
+    throw new EvidenceUnavailable("Required independent artifact-role review is incomplete.");
+  }
   const draft: AssessmentDraft = {
     ...result,
     cases: result.cases.map((item) => ({
@@ -418,14 +438,14 @@ export function revalidateAssessment(result: AssessmentResult, request: string, 
     })),
   };
   const verdicts = new Map(result.claims.map((claim) => [claim.claimId, "supported" as const]));
-  const leadVerdicts = new Map(result.leads.flatMap((lead) => lead.usefulArtifactIds.map((id) => [`${lead.caseId}/${id}`, "supported" as const])));
+  const artifactRoles = new Map(reviewed.data.map((item) => [`${item.caseId}/${item.artifactId}`, item.role]));
   try {
-    const checked = buildCheckedAssessment(draft, verdicts, validClaimReferences(result.claims, request, corpus), corpus, leadVerdicts, result.conclusion, { request, constraints: result.requestConstraints });
+    const checked = buildCheckedAssessment(draft, verdicts, validClaimReferences(result.claims, request, corpus), corpus, artifactRoles, result.conclusion, { request, constraints: result.requestConstraints });
     checked.withheldClaimCount += result.withheldClaimCount;
     return checked;
   } catch (error) {
-    if (error instanceof GateFailure && error.code === "INVALID_REQUEST_CONSTRAINT_REVIEW") {
-      throw new EvidenceUnavailable("Required independent request-constraint review is unavailable; a new checked assessment is needed.");
+    if (error instanceof GateFailure && (error.code === "INVALID_REQUEST_CONSTRAINT_REVIEW" || error.code === "INCOMPLETE_ARTIFACT_REVIEW")) {
+      throw new EvidenceUnavailable("Required independent request/implementation review is unavailable; a new checked assessment is needed.");
     }
     throw error;
   }

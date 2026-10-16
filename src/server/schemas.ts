@@ -32,6 +32,7 @@ const artifactWork = z.union([
   z.strictObject({ ...artifactWorkFields, disposition: z.literal("reuse"), blockerClaims: z.array(artifactClaim).max(0), verificationClaims: z.array(artifactClaim).max(0) }),
   z.strictObject({ ...artifactWorkFields, disposition: z.literal("adapt") }),
   z.strictObject({ ...artifactWorkFields, disposition: z.literal("verify"), usefulForLead: z.literal(false), verificationClaims: z.array(artifactClaim.extend({ kind: z.literal("recommendation") })).min(1).max(16) }),
+  z.strictObject({ ...artifactWorkFields, disposition: z.null(), usefulForLead: z.literal(false), supportingClaims: z.array(artifactClaim).max(0), blockerClaims: z.array(artifactClaim).max(0), verificationClaims: z.array(artifactClaim).max(0) }),
 ]);
 const caseDraft = z.strictObject({
   caseId: id,
@@ -107,19 +108,20 @@ export const supportReviewSchema = z.strictObject({
     verdict: z.enum(["supported", "unsupported", "uncertain"]),
   })).max(400),
 });
+export const artifactReviewsSchema = z.array(z.strictObject({
+  caseId: id,
+  artifactId: id,
+  role: z.enum(["starting_point", "context_only", "not_relevant", "unresolved"]),
+})).max(256);
 export const assessmentReviewSchema = supportReviewSchema.extend({
   requestConstraints: requestConstraintsSchema,
   conclusion: z.enum(["precedent_found", "no_useful_precedent", "cannot_be_established"]),
-  leadReviews: z.array(z.strictObject({
-    caseId: id,
-    artifactId: id,
-    verdict: z.enum(["supported", "unsupported", "uncertain"]),
-  })).max(96),
+  artifactReviews: artifactReviewsSchema,
 });
 
 export interface ReviewTargets {
   claimIds: string[];
-  leadArtifacts?: { caseId: string; artifactId: string }[];
+  artifacts?: { caseId: string; artifactId: string; proposedForLead: boolean }[];
 }
 
 export function reviewSchema(targets: ReviewTargets) {
@@ -127,20 +129,20 @@ export function reviewSchema(targets: ReviewTargets) {
     claimId: targets.claimIds.length ? z.enum(targets.claimIds) : id,
     verdict: z.enum(["supported", "unsupported", "uncertain"]),
   })).length(targets.claimIds.length);
-  if (!targets.leadArtifacts) return supportReviewSchema.extend({ claimReviews });
+  if (!targets.artifacts) return supportReviewSchema.extend({ claimReviews });
   return assessmentReviewSchema.extend({
     claimReviews,
-    conclusion: targets.leadArtifacts.length === 0
-      ? z.enum(["no_useful_precedent", "cannot_be_established"])
-      : assessmentReviewSchema.shape.conclusion,
-    leadReviews: assessmentReviewSchema.shape.leadReviews.length(targets.leadArtifacts.length),
+    conclusion: targets.artifacts.some((item) => item.proposedForLead)
+      ? assessmentReviewSchema.shape.conclusion
+      : z.enum(["no_useful_precedent", "cannot_be_established"]),
+    artifactReviews: artifactReviewsSchema.length(targets.artifacts.length),
   });
 }
 
 export type AssessmentOutput = z.infer<typeof assessmentDraftSchema>;
 type ArtifactWork = {
   artifactId: string;
-  disposition: "reuse" | "adapt" | "verify";
+  disposition: "reuse" | "adapt" | "verify" | null;
   dispositionClaimId: string;
   claimIds: string[];
   blockerClaimIds: string[];
@@ -210,11 +212,14 @@ export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): As
   }
   const cases = output.cases.map((item, caseIndex) => ({
     ...item,
-    claimIds: output.claims.filter((claim) => claim.caseId === item.caseId).map((claim) => claim.claimId),
+    claimIds: [
+      ...output.claims.filter((claim) => claim.caseId === item.caseId).map((claim) => claim.claimId),
+      ...item.artifactWork.flatMap((work, workIndex) => work.disposition === null ? [`disposition-${caseIndex}-${workIndex}`] : []),
+    ],
     outcomeClaimIds: outcomeClaimIdsByCase.get(item.caseId)!,
     artifactWork: item.artifactWork.map((work, workIndex) => {
       const dispositionClaimId = `disposition-${caseIndex}-${workIndex}`;
-      claims.push({ ...work.recommendation, sourceRefs: resolveRefs(work.recommendation.sourceRefs), claimId: dispositionClaimId, kind: "recommendation" });
+      claims.push({ ...work.recommendation, sourceRefs: resolveRefs(work.recommendation.sourceRefs), claimId: dispositionClaimId, kind: work.disposition === null ? "interpretation" : "recommendation" });
       const addClaims = (role: string, items: z.infer<typeof artifactClaim>[]): string[] => items.map((claim, index) => {
         const claimId = `artifact-${caseIndex}-${workIndex}-${role}-${index}`;
         claims.push({ ...claim, sourceRefs: resolveRefs(claim.sourceRefs), claimId });
@@ -227,7 +232,7 @@ export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): As
       const claimIds = [dispositionClaimId, ...supportingClaimIds, ...blockerClaimIds, ...verificationClaimIds];
       claims.push({
         claimId: classificationId,
-        text: `Artifact disposition: ${work.disposition}.`,
+        text: `Artifact disposition: ${work.disposition === null ? "excluded" : work.disposition}.`,
         kind: "interpretation",
         sourceRefs: resolveRefs(work.recommendation.sourceRefs),
         requestQuotes: work.recommendation.requestQuotes,
