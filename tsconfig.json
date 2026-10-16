@@ -11,5 +11,5 @@
     "types": ["@cloudflare/workers-types", "vite/client"],
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "web/**/*.ts", "web/**/*.tsx", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "web/**/*.ts", "web/**/*.tsx", "vite.config.ts", "cloudflare.config.ts"]
 }

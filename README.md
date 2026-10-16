@@ -1,10 +1,10 @@
 # Memory Bank
 
-An English, evidence-backed reuse guide built from explicitly fictional client-onboarding work. The delivery lead reviews every checked comparison and remains the decision-maker. The dedicated `Zura1555/memory-bank` repository is private during implementation; this repository excludes the planning workspace and `.scratch` files. Production deployment and public release still require the planned review and separate approval.
+An English, evidence-backed reuse guide built from explicitly fictional client-onboarding work. The delivery lead reviews every checked comparison and remains the decision-maker. The dedicated `Zura1555/memory-bank` repository remains private; this repository excludes the planning workspace and `.scratch` files. Production infrastructure is deployed with paid admission disabled; model qualification and public repository release remain separate gates.
 
 ## Local setup
 
-1. Install Node.js 22+, Python 3.12+, and Docker Compose. Run `npm ci`.
+1. Install Node.js 22.18+ (verified with 24.19), Python 3.12+, and Docker Compose. Run `npm ci`.
 2. Create a Python environment and install the offline parsers:
 
    ```sh
@@ -15,12 +15,12 @@ An English, evidence-backed reuse guide built from explicitly fictional client-o
 
 3. Copy `.dev.vars.example` to `.dev.vars`. Set `OPERATOR_TOKEN` to `openssl rand -hex 32`. Set `OPENROUTER_API_KEY` only when you are ready to make the approved paid model calls. Never commit `.dev.vars`.
 4. Start local PostgreSQL: `docker compose up -d --wait postgres`. First initialization applies the SQL files in `migrations/` in filename order. The database is loopback-only on port 5433; the project-scoped `postgres_data` Docker volume preserves accounting and admission state across restarts and container recreation. Keep the same Compose project name/directory when returning to a campaign; another worktree/project gets a different volume, not the original ledger.
-5. Build the curator manifest and audit: `npm run ingest`. Publish only to Wrangler local R2: `npm run publish:corpus`.
-6. Run `npm run dev`, then open `http://127.0.0.1:8787`. The Worker builds the static UI before starting.
+5. Build the curator manifest and audit: `npm run ingest`. Publish only to cf local R2: `npm run publish:corpus`.
+6. Run `npm run dev`, then open `http://127.0.0.1:8787`. This builds with `cf` and serves the bundled Worker using Vite preview in development mode. Restart after edits; there is no hot reload. Bundling preserves startup-time AJV schema compilation, which the Vite development module runner rejects as dynamic code generation.
 
 Admission is disabled by default. Before enabling it, verify the initial remaining OpenRouter credit and route pricing in the provider dashboard or read-only provider API (`GET /api/v1/credits` and `GET /api/v1/models`); round remaining credit down to integer microUSD. `/api/operator/budget` records that campaign balance (1 USD = 1,000,000 microUSD). Metadata checks do not qualify the model route or full workflow. The $5 maximum caps admission, not provider invoices. The $0.30-per-call and $0.60-per-phase values are holds, not hard charge limits. Reconcile every terminal phase—including successful ones—against actual provider usage before further admission; the hold remains until reconciled, and an overage blocks later admissions but cannot prevent the provider charge. Do not reset the balance to the post-spend dashboard remainder because the ledger also subtracts reconciled spend. Disable admission if external activity changes the balance. This endpoint cannot query, add, or top up credit.
 
-The app has no fake AI fallback. Without a valid key and enabled ledger, paid jobs fail closed. Local queues, Workflows, and R2 use Wrangler's local platform implementation. Remote resources, secrets, provider qualification, public release, and deployment are not configured or performed by local setup.
+The app has no fake AI fallback. Without a valid key and enabled ledger, paid jobs fail closed. Local queues, Workflows, and R2 use the cf local platform simulation, persisted under the project's `.cloudflare/state`; the corpus publisher explicitly selects the same store as Vite. Local setup never provisions or deploys remote infrastructure. Production uses the separate resources below; no Wrangler dependency or configuration is used.
 
 ## Operator-only local operations
 
@@ -73,7 +73,7 @@ Observed local verification (2026-10-16): the smoke failed against tmpfs after r
 
 - The runtime reads the published eight-case manifest and exact originals from R2; it verifies SHA-256 before using a source or serving a download.
 - `ingestion/` is offline curator tooling. It supports native text/CSV and format-aware Office/PDF/image paths; scans and visual observations require a hash-bound human-audited sidecar. Missing or incomplete extraction is excluded, never guessed.
-- `evaluation/keys.json` is offline-only and is not copied into `dist/`, R2, prompts, or application routes. Do not use evaluation keys for prompt tuning.
+- `evaluation/keys.json` is offline-only and is not copied into `.cloudflare/output/`, R2, prompts, or application routes. Do not use evaluation keys for prompt tuning.
 - Anonymous job capabilities protect status/results. Application request/results expire after seven days; minimal accounting/idempotency records remain for operator reconciliation. Workflow checkpoint retention is configured for seven days; provider/platform/backup retention is separate and is not promised to be zero.
 - Queue/Workflow duplicates use stable IDs. Paid model calls have no automatic retries or fallback; uncertain dispatch requires operator reconciliation.
 - Human-reviewed decision and lesson cards live in the versioned curator corpus, not expiring jobs. Browse `/?knowledge`, address a record with `/?knowledge=<recordId>`, or inspect it in case details. Cards link exact supporting passages/originals and mark superseded advice as history. Applying a lesson still requires the existing checked, request-specific recommendation pipeline; no new paid stage is added. See [curator authoring and review](ingestion/README.md#decision-and-lesson-records).
@@ -124,10 +124,37 @@ The existing shared CSS roles now use Anduin's observed public blue `#0158AE`, n
 
 See the [source selectors, explicit application/dark-mode derivations, measured contrast pairs, and browser screenshot record](docs/anduin-palette-2026-10-15.md). This is website-matched branding, not a claim of access to private product tokens. Browser replay proof is separate from paid workflow qualification.
 
+## Production deployment
+
+Live URL: **https://memory-bank.zura-tran.workers.dev**. The owner authorized infrastructure deployment on 2026-10-16 and selected the `Zura.tran@gmail.com` Cloudflare account. This is a live corpus/UI deployment with **paid assessment and brief admission disabled**, not successful model qualification.
+
+| Resource | Production identity |
+| --- | --- |
+| Cloudflare account / Worker | `6d5eb3fa868f53e83e13401577cdfc01` / `memory-bank` |
+| Neon | `memory-bank-production` (`hidden-dream-29034304`), PostgreSQL 17, Singapore `aws-ap-southeast-1`, 0.25 CU on the existing free organization |
+| Hyperdrive | `0880749f093c4bdaab7dd377c76f68b4`; query caching disabled so admission/accounting reads are not cached |
+| R2 | Private bucket `memory-bank-originals`; 24 exact fictional originals and the `fictional-onboarding-v2` manifest |
+| Queue / Workflow / cron | `memory-bank-jobs`, `memory-bank-jobs-dead`, `memory-bank-workflow`, every-minute outbox/retention handler |
+
+`cloudflare.config.ts` is the single binding/trigger configuration. The pinned `cf` CLI and Cloudflare Vite plugin beta build both Worker and browser assets into `.cloudflare/output/v0/`; `index.html` is at the repository root. Production always sets `APP_ENV=production` and uses Hyperdrive, never `LOCAL_DATABASE_URL`. `npm run dev` explicitly selects development mode.
+
+The new Neon database `memory_bank` has both existing migrations applied atomically. It is a separate, initially empty ledger: no historical local reservations, lost rows, or charges were reconstructed. Admission is false, available credit is null, and holds are zero. Do not rerun the initial CREATE TABLE migration against this initialized database.
+
+Production secrets are Cloudflare `secret_text` bindings: `OPERATOR_TOKEN` (freshly generated, separate from local) and `OPENROUTER_API_KEY`. Their local deployment copy is `.dev.vars.production`; the direct Neon `DATABASE_URL` is in `.env.production`. Both files are Git-ignored and mode 0600. Keep these files private and back them up in a password manager; never paste them into an issue or commit. Do not upload `.env.production` as Worker secrets or copy local development variables into production.
+
+To update this deployment from an authenticated checkout:
+
+1. Run `npm ci`, `npm run typecheck`, and `npm test`.
+2. For an approved corpus edition change only, run `npm run ingest` and `npm run publish:corpus:production`. The default `npm run publish:corpus` stays local.
+3. Run `npm run deploy:check`, then `npm run deploy`. The first builds/validates without API writes; the second builds and deploys with `.dev.vars.production`. No dashboard build command or Wrangler is required.
+4. With admission still disabled, run `npm run smoke:production`. It checks health/static assets, operator access control, every complete original's SHA-256, rejected paid admission, and unchanged accounting. Its two-second address-attempt timeout avoids Node's too-short default on this WSL network; it does not retry requests or enable admission.
+
+Observed deployment verification: `cf deploy` installed the Worker, Queue consumer/producer, Workflow, and cron. Live authenticated status proved the Worker→Hyperdrive→Neon connection and closed empty ledger; all 24 original downloads matched manifest SHA-256 values. Chromium rendered the app and three reviewed knowledge records, opened exact passage evidence, and displayed HTTP 503 on a denied assessment request. No paid call or credit purchase was made. The existing 25 TypeScript tests and one Python test passed. This does not establish paid workflow execution, model quality/latency, or production recovery qualification.
+
 ## Verification and release gates
 
 Run `npm run typecheck`, `npm test`, `npm run build`, and `npm run ingest`. Then exercise the local Worker and verify source downloads, capability ownership, budget-denied admission, queue/outbox recovery, workflow state transitions, and retention cleanup. Paid qualification requires the approved existing credit, a valid key, and measured full P1–P4 runs; freeze configuration before H1–H4. Record real model usage/cost, queue wait, phase processing time, full-context fit, extraction fidelity, memory, replay behavior, and source/version access. Do not claim these results from fictional fixtures or code inspection.
 
 The [2026-10-15 qualification report](docs/qualification-2026-10-15.md) preserves the earlier reconciled P1 assessment-to-brief baseline and its quality defects. Independent disposition classification is locally checked, including non-lead withholding and preserved supported Adapt selection. The latest paid P1 dispatch ended `MODEL_DISPATCH_UNCERTAIN`; provider evidence now confirms completion and an exact USD 0.006004152 charge (6,005 microUSD rounded up). The owner explicitly approved documenting that historical charge through a lost-ledger exception. The original reservation remains unreconciled and unrecoverable from available records; its last observed 600,000-microUSD hold is not claimed released. This resolves the historical accounting decision, not the unavailable runtime or qualification gate. Paid admission must stay closed until valid accounting and budget state are established for a separately authorized run. P2–P4 and held-out evaluation remain incomplete. No paid retry, ledger reconstruction, admission enablement, or runtime fix was performed; the candidate is not qualified for release.
 
-Remote deployment requires separately approved Cloudflare/Neon resources and credentials, including Hyperdrive, Queue/dead-letter queue, Workflow, R2, and the deployed static asset binding. Keep the repository private until the source/secrets review is complete; make it public only under the approved submission plan.
+Infrastructure deployment is now authorized and performed as described above; that authorization did not enable paid admission or change repository visibility. Keep the repository private until the source/secrets review is complete; make it public only under the approved submission plan.
