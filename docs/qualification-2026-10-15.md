@@ -2,11 +2,11 @@
 
 Related: [issue #2](https://github.com/Zura1555/memory-bank/issues/2), [issue #3](https://github.com/Zura1555/memory-bank/issues/3).
 
-## Current gate: P2/P4 resolved; visible central checks passed; held-out and memory gates open
+## Current gate: H1–H4 held-out qualification failed; release remains blocked
 
 The original candidate `569a793` accepted a false claim that the explicitly requested sandbox scope was unstated. The captured draft and supported review remain immutable. The replacement contract requires separate request-constraint inventories in drafting and independent review, and withholds a comparison's assessment and dependents when either inventory conflicts with its stated/absent requirement. Exact quotations, original references, eight-case coverage, independent outcome/disposition review, and the four-call assessment/brief workflow remain required.
 
-The owner authorized resolving P2/P4 in the existing worktree and committing the verified changes, without restarting billing monitoring. The artifact-role correction below preserves relevant conditional starting material while explicitly excluding context-only work. Fresh P1–P3 reached checked briefs with their central source facts and limits intact; P4 established bounded no-useful-precedent without selectable work. The candidate is not release-qualified: held-out requests remain unopened and total isolate/RSS memory is not qualified. Earlier failures and the unreconciled lost-ledger reservation below remain historical evidence, not erased by these bounded passes.
+After the visible P2/P4 correction and fresh P1–P4 central checks, the owner requested H1–H4 evaluation. Candidate `b37326fe8aaef248cd651f003e7a836b4ce72f73` and its corpus/key hashes were frozen before opening held-out content. All four real runs failed closed at structural validation; no checked assessment or brief was produced. No application/prompt/schema/model/configuration change, paid retry, output repair, or relabeling was used. These failures block a release claim, and the exposed requests cannot qualify a later tuned candidate as held out. Total isolate/RSS memory also remains unqualified. Historical visible successes, failures, and older unresolved reservations below retain their original limits.
 
 ## Configuration and provenance
 
@@ -498,3 +498,34 @@ The same updated drafting/review contract, provider/model configuration, 16,384-
 Local admission was disabled after terminal phases; a real POST returned 503 `ADMISSION_NOT_ENABLED` without changing job/reservation/attempt counts. There was no active Workflow. New completed-phase holds were settled only from actual stored terminal provider-response usage. No billing monitor, credit purchase, abandoned-dispatch release, old-ledger reconstruction, production admission change, merge, or deployment occurred. The durable campaign and immutable private captures/backups remain outside Git.
 
 **Remaining gates:** H1–H4 are still unopened/unrun; total-isolate/RSS memory and the separately recorded release gates remain unqualified. These visible central checks resolve P2/P4, not production reliability, held-out qualification, deployment approval, or public release. Prior recovery/replay/heap measurements above retain their stated historical boundaries; they were not reclassified as fresh measurements of this candidate.
+
+## First frozen held-out evaluation — 2026-10-16
+
+### Freeze and protocol
+
+The owner explicitly requested H1–H4 after visible P1–P4 central checks passed. Before opening the keys, the clean existing task worktree was frozen at `b37326fe8aaef248cd651f003e7a836b4ce72f73`, tree `dcb22e2bd164ef994fdf00a82fe7c30f5749cf51`. Evaluation-key SHA-256 was `59875e3e5d4cfd33a6cd2958bef4b1ac7e993224971e0ec50bedac127cb73305`; corpus SHA-256 remained `fbc1d4ae92275efafb23b660446ac78a4b6c624e4ce603d67d2d320e142b63ca`. After all four runs, HEAD, the clean working tree, and both file hashes were unchanged. This report update occurred afterward and changes no application behavior.
+
+Only each held-out request text was submitted to the actual Chromium intake. Expected evidence, decisive constraints, acceptable uncertainty, and prohibited recommendations stayed offline and were not added to model context. The existing local Worker/Queue/Workflow/PostgreSQL/R2, production-authorized model credential, OpenRouter/OpenAI `openai/gpt-6-luna`, output bound, deadlines, and no-retry/fallback policy were retained. No production admission or deployment changed. Each request was admitted once; there was no paid rerun or tuning between requests.
+
+### Observed results
+
+| Request / job | Assessment processing (s) | Queue wait (s) | Actual provider calls | Result and reproduced rejection |
+| --- | ---: | ---: | ---: | --- |
+| H1 / `70a2ff53-d818-4444-92a2-af875d5dfb8f` | 58.844 | 11.864 | 2 | Failed: `INVALID_REQUEST_CONSTRAINT_REVIEW` in checked-result construction. Draft and review constraint inventories quoted historical Ibis text rather than the current request, including “in the test environment.” No checked handover distinction or brief was delivered. |
+| H2 / `2baa26ce-210e-48cc-a288-3f4438d7c0e4` | 103.085 | 10.760 | 2 | Failed: `CONFLICTING_ARTIFACT_REVIEW`. The reviewer concluded `no_useful_precedent` while assigning `starting_point` to Cedar mapping, Ash reconciliation draft, Ibis runbook, and Kestrel operations draft; no lead was nominated. Processing also exceeded the 90 s target. |
+| H3 / `9545e208-4b64-4e3a-ac09-bc996709e842` | 61.586 | 11.187 | 1 | Failed: `CLAIM_CASE_SCOPE` during draft reference/ownership validation: a case claim lacked evidence from its own case. Independent review was never dispatched. No checked correction/compatibility result or brief was delivered. |
+| H4 / `91ed0c29-e6e7-4f1a-ac4d-6d3589cc008e` | 83.059 | 10.462 | 2 | Failed: `INVALID_REQUEST_CONSTRAINT_REVIEW`. Inventories included source-only constraints absent from the current request, such as “two operators” and the historical network-route restriction. No checked bounded no-precedent result was delivered. |
+
+Every owned API result was `assessmentState: failed` with safe `STRUCTURAL_CHECK_FAILED` disclosure. Actual Chromium displayed the differentiated failure panel and no unchecked generated result. Briefs were not admitted because no assessment became ready. Safe withholding is observed; it is **not** a useful-result pass, proof that the rejected prose was semantically correct, or a substitute for any expected source-backed behavior.
+
+Each failure was reproduced offline with `node --experimental-transform-types` and a private unchanged-capture replay using the actual frozen parser/gates, authentic model outputs, and all 24 SHA-verified originals. All four exited 1 at the stages/codes above. No verdict, quotation, citation, role, conclusion, or generated output was repaired. Raw captures, capabilities, replay inputs, and database backups remain private outside Git.
+
+### Usage, accounting, and shutdown
+
+All seven dispatched provider attempts completed and reported usage: requested/returned model `openai/gpt-6-luna`, provider OpenAI. Every raw draft included all eight cases. Prompt sizes were 17,165–40,639 tokens; completions were 2,009–5,556, within the unchanged 16,384-token bound. This proves observed workload fit, not acceptance or broad context capacity. There were no ready assessments, briefs, selections, or export packs to qualify.
+
+Stored terminal provider-response usage totaled USD **0.03374686755**. Per-phase upward rounding produced **33,749 microUSD** reconciled across the four new reservations (H1 9,268; H2 10,509; H3 3,993; H4 9,979). This is application accounting from actual response metadata, not independent invoice/credit monitoring. The two-call settlement helper initially skipped H3's one-call terminal phase, leaving its hold intact during H4. After all runs ended, the failed H3 job, its sole completed draft, and absence of a dispatched review were verified before settling only that actual usage. No uncertain/abandoned charge or older reservation was released or reconstructed.
+
+Local admission ended disabled with no active Workflow. A real subsequent POST returned 503 `ADMISSION_NOT_ENABLED` without changing job/reservation/attempt counts. All four new phase reservations were verified reconciled. A final private durable-database dump and immutable captures were saved; task Worker/browser were stopped and task-created secret configuration removed. No purchase, billing monitor, main push, merge, deployment, or public release occurred. No new application tests/build were required for this evaluation-only, documentation-only change; the earlier visible-candidate static checks are historical, not new held-out evidence.
+
+**Gate verdict: failed.** Do not average these cases away or describe a safely withheld result as qualified. H1–H4 are now exposed evaluation material. A subsequent fix may use them as regression cases, but a new held-out claim requires fresh, untouched requests fixed before that change. Total-isolate/RSS memory, production behavior, and the other release gates remain separately unqualified.
