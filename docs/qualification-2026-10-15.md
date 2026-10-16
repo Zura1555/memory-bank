@@ -4,7 +4,7 @@ Related: [issue #2](https://github.com/Zura1555/memory-bank/issues/2), [issue #3
 
 ## Current gate: disposition implementation checked locally; paid qualification blocked
 
-The latest disposition-classification candidate failed its first visible P1 dispatch with `MODEL_DISPATCH_UNCERTAIN`. No assessment or brief was published. Its provider generation lookup returns 404, so admission is disabled and the 600,000-microUSD hold remains unresolved. P2–P4 and held-out evaluation cannot proceed under the existing reconciliation policy. See the final section for exact identities, timing, local recovery/retention evidence, and the frozen candidate configuration.
+The latest disposition-classification candidate failed its first visible P1 dispatch with `MODEL_DISPATCH_UNCERTAIN`. No assessment or brief was published. A read-only provider lookup on 2026-10-16 confirms terminal completion and an exact USD 0.006004152 charge, recorded as 6,005 microUSD under the existing upward-rounding policy. The owner explicitly approved documenting the historical charge through a lost-ledger exception. The original local PostgreSQL service is stopped, its data was on tmpfs, and the recorded temporary backups are missing; the original reservation remains unreconciled and unrecoverable from available records, not successfully released. The historical accounting decision is resolved, but paid admission must stay closed until valid accounting and budget state exist for a separately authorized run. P2–P4 and held-out evaluation remain incomplete. The final section records the evidence and exact approval scope.
 
 Earlier successful P1 flows, quality defects, reconciled campaigns, and failures below remain historical evidence, not qualification of this candidate. The earlier interrupted dispatch has terminal provider evidence but its ephemeral ledger was lost before reconciliation; those historical rows were not reconstructed. The new unresolved reservation is separate. Neither local deterministic checks nor prior paid success establish semantic reliability, latency qualification, or deployment readiness.
 
@@ -317,7 +317,7 @@ P1 was submitted once through Chromium at `http://127.0.0.1:8794`. Admission was
 
 The UI displayed **“Evidence reconciliation is required. Results are withheld until the checked evidence can be reconciled.”** The stored error is `MODEL_DISPATCH_UNCERTAIN`. No draft result, review call, assessment, or brief was accepted. Processing exceeded the 90-second target; this failed dispatch does not qualify successful-assessment latency, brief latency, token/context fit, or percentiles.
 
-Repeated read-only `GET /api/v1/generation?id=...` calls returned **404**, including the final check. Provider total usage remained USD **0.674417648**, but unchanged balance and a missing generation record do **not** prove terminality or zero charge. No exact cost, token count, returned model, or provider completion state is available for this attempt. No reconciliation was posted. The **600,000-microUSD hold remains held**, admission is disabled, and the active-reservation lock remains. P2–P4 were **not admitted**, rather than violating the unresolved-charge gate. There was no paid retry. Two browser waits missed the actual reconciliation wording; neither caused another submission.
+At the 2026-10-15 checkpoint, repeated read-only `GET /api/v1/generation?id=...` calls returned **404**, including that checkpoint's final check. Provider total usage remained USD **0.674417648**, but unchanged balance and a missing generation record did **not** prove terminality or zero charge. No exact cost, token count, returned model, or provider completion state was available then. No reconciliation was posted; the **600,000-microUSD hold**, disabled admission, and active-reservation lock were still present. P2–P4 were **not admitted**, rather than violating the unresolved-charge gate. There was no paid retry. Two browser waits missed the actual reconciliation wording; neither caused another submission. The 2026-10-16 follow-up below supersedes this checkpoint's provider-availability and ledger-preservation status, not its failed application result.
 
 ### Exercised failure-recovery, ownership, and retention checks
 
@@ -334,7 +334,7 @@ Repeated read-only `GET /api/v1/generation?id=...` calls returned **404**, inclu
 | Workflow replay | `wrangler workflows instances restart memory-bank-workflow 2a5f2f67-627a-4ec6-a83b-e11888a820a0-assessment-1 --local --port 8794 --json` followed by `describe ... --local --port 8794 --json` completed with **zero steps**. The job's reconciliation-required guard prevented a new paid call; the attempt and hold were unchanged. |
 | Seven-day application expiry | Synthetic expired job returned **410 `JOB_EXPIRED`** with a valid 43-character capability before cleanup. Real scheduled cleanup nulled capability, request, assessment, brief, selections, and model result JSON. Reservation/attempt identities and minimal usage accounting survived. Both smoke jobs' content was cleared afterward. |
 
-These are bounded local checks, not Cloudflare/Neon deployment, upstream deletion, peak-isolate-memory qualification, or successful four-call model execution. The task-owned Worker/browser were stopped after evidence capture. PostgreSQL accounting and the unresolved hold remain intact; local SQL backups and private runtime evidence are retained outside Git.
+These are bounded local checks, not Cloudflare/Neon deployment, upstream deletion, peak-isolate-memory qualification, or successful four-call model execution. The task-owned Worker/browser were stopped after evidence capture. At that checkpoint, PostgreSQL accounting and the unresolved hold were intact, with local SQL backups and private runtime evidence outside Git. Their later availability is recorded in the 2026-10-16 follow-up below.
 
 ### Frozen candidate; evaluation and deployment gates remain closed
 
@@ -356,3 +356,41 @@ SHA-256 freeze inventory:
 | `package-lock.json` | `2d1acd60173a7bf4286b125dd7d26c1927ef295f0c1fa6ecd9e984e21d9cf052` |
 
 This freezes the **candidate**, not a qualification-ready release. H1–H4 have not been evaluated or used to tune this change. Terminal provider evidence/reconciliation and successful visible P1–P4 qualification are prerequisites to held-out evaluation. Any subsequent configuration change creates a new candidate requiring its own visible qualification before held-out evaluation. Independent classification review closes the unreviewed-label path but can still make semantic errors. Deployment/public release remain separately gated. Initial publication was paused after the qualification failure; the owner subsequently explicitly requested a PR with these blockers preserved. PR publication does not qualify the failed campaign, release the hold, reopen paid admission, or authorize merge/deployment.
+
+## Terminal provider billing follow-up — 2026-10-16
+
+After merged PR #20, `main` was fast-forwarded from `50303f3` to `1f55420`. Authenticated, read-only `GET /api/v1/generation?id=gen-1792078484-aIZPi2qwmCiY90vXXm6Q` returned **200** at `2026-10-16T02:55:25Z`. The generation ID is exact and its creation timestamp matches the original dispatch; no replacement identity or new model call was used.
+
+| Provider evidence | Observed value |
+| --- | --- |
+| Generation created, UTC | `2026-10-15T15:34:44.195Z` |
+| Returned model/provider | `openai/gpt-6-luna-20260922`, OpenAI, provider response status 200 |
+| Terminal state | `finish_reason: stop`, `native_finish_reason: completed`, `cancelled: false` |
+| Exact `total_cost` and `usage`, USD | **0.006004152** |
+| Reconciliation amount, microUSD | **6,005**, rounded up; not the 600,000-microUSD reservation |
+| Reported tokens | 15,258 prompt / 8,962 completion; native 16,087 prompt / 8,108 completion |
+| Provider timing | 159,392 ms generation time; 6,573 ms latency |
+
+The read-only credits endpoint returned USD **5** total credits and USD **0.6804218** total usage, leaving USD **4.3195782**. The usage delta from the previous checkpoint is exactly USD **0.006004152**, corroborating the terminal generation record; the balance is not the sole billing evidence.
+
+Provider completion does **not** mean the app received or accepted the output. The app failed after 109.131730 s, before the reported provider generation duration. The provider reports `streamed: true` while the application configuration sends `stream: false`; that metadata discrepancy is not a diagnosed cause. The existing provider-call path preserves `x-generation-id` when response-body reading fails. No captured transport cause establishes why this historical body read failed, and these observations do not prove the 120-second application deadline fired. No response recovery, support review, brief, or new qualification result is claimed.
+
+### Reconciliation blocked by unavailable original ledger
+
+Calling the actual `operatorStatus` implementation against the configured local database returned **`ECONNREFUSED`**. Docker reported the original PostgreSQL container stopped at `2026-10-16T01:23:17.17514166Z`, exit 255, not OOM-killed. Both its inspected configuration and `compose.yaml` place PostgreSQL data on tmpfs; it was not started or recreated.
+
+The recorded temporary SQL backups and private runtime/preflight files are absent. No SQL, compressed-SQL, or dump backup was found at the checked task-worktree or feature-planning directory roots. An external backup may still exist; this check does not establish permanent loss. The original reservation `791dbc69-ce9d-4a93-8a23-31df1b5c43af`, its 600,000-microUSD hold, active lock, and persisted admission state cannot currently be inspected. None was reconstructed or described as successfully released.
+
+Authenticated provider responses and the computed amount were saved privately outside Git with permissions 0600. This report publishes only the sanitized findings, not credentials, capability receipts, raw private responses, SQL dumps, or local planning files.
+
+**Original-ledger reconciliation:** reconciling the original reservation through the operator endpoint still requires an authentic ledger backup. The owner-approved exception below documents the historical charge instead; it does not reconstruct rows, post that reconciliation, or release a fictitious hold.
+
+### Owner-approved lost-ledger exception
+
+On 2026-10-16, the owner explicitly selected **“Approve lost-ledger exception”** after being told that this records the confirmed charge without falsely marking the missing reservation reconciled. The approved scope was to record the approval and exact charge, mark the original reservation unrecoverable from available records, and update PR #21, with **no database reconstruction, paid calls, or admission enablement**.
+
+- The historical charge is documented by this exception using the terminal provider evidence above, not an assumed zero charge or the phase reservation amount. The private decision receipt links the same generation, reservation, exact charge, rounded amount, and approval scope to the saved provider evidence.
+- The original reservation remains **unreconciled**. Its historical hold and active lock cannot be verified and are not claimed released. If an authentic backup later appears, inspect it and this exception together to avoid accounting for the same charge twice.
+- The previous requirement for an owner accounting decision is satisfied for this historical dispatch. This is a documented accounting exception, not a successful operator transaction or a claim that the unavailable runtime now works.
+- Before another paid admission, establish valid accounting and budget state without inventing old rows and obtain authorization for the next run. No replacement campaign was initialized or authorized by this exception.
+- Visible qualification, held-out prerequisites, the unresolved historical transport cause, and separate deployment/public-release gates are unchanged. PR publication does not authorize merge.
