@@ -75,6 +75,10 @@ function assessmentDraft(corpus: CorpusSnapshot): AssessmentDraft {
       { claimId: `decision-${suffix}`, text: "Adapt the recorded work after checking the client's capabilities.", kind: "recommendation", sourceRefs, requestQuotes: ["current request"], dependsOnClaimIds: [`fact-${suffix}`] },
     ];
   }));
+  claims.push(...claims.filter((claim) => claim.kind === "recommendation").map((claim): Claim => ({
+    ...claim, claimId: `classification-${claim.claimId}`, kind: "interpretation",
+    text: "Artifact disposition: adapt.", dependsOnClaimIds: [claim.claimId],
+  })));
   return {
     cases: corpus.manifest.cases.map((pastCase, caseIndex) => ({
       caseId: pastCase.caseId,
@@ -85,7 +89,7 @@ function assessmentDraft(corpus: CorpusSnapshot): AssessmentDraft {
         artifactId: artifact.artifactId,
         disposition: "adapt",
         dispositionClaimId: `decision-${caseIndex}-${artifactIndex}`,
-        claimIds: [`fact-${caseIndex}-${artifactIndex}`, `decision-${caseIndex}-${artifactIndex}`],
+        claimIds: [`fact-${caseIndex}-${artifactIndex}`, `decision-${caseIndex}-${artifactIndex}`, `classification-decision-${caseIndex}-${artifactIndex}`],
         blockerClaimIds: [],
         verificationClaimIds: [],
       })),
@@ -260,14 +264,14 @@ test("artifact recommendations and role claims remain independently reviewable",
   const output: AssessmentOutput = {
     ...draft,
     comparisons: [],
-    claims: draft.claims.filter((claim) => claim.kind !== "recommendation").map((claim) => ({ ...claim, sourceRefs: claim.sourceRefs.map((ref) => wireIds.get(ref.passageId)!), caseId: claim.sourceRefs[0].caseId, outcomeEvidence: false as const })),
+    claims: draft.claims.filter((claim) => claim.kind === "source_fact").map((claim) => ({ ...claim, sourceRefs: claim.sourceRefs.map((ref) => wireIds.get(ref.passageId)!), caseId: claim.sourceRefs[0].caseId, outcomeEvidence: false as const })),
     cases: draft.cases.map(({ claimIds: _, outcomeClaimIds: __, ...item }) => ({
       ...item,
       artifactWork: item.artifactWork.map((work) => {
         const { claimId: _, kind: __, ...recommendation } = byId.get(work.dispositionClaimId)!;
         return {
           artifactId: work.artifactId, disposition: "adapt", usefulForLead: false, recommendation: { ...recommendation, sourceRefs: recommendation.sourceRefs.map((ref) => wireIds.get(ref.passageId)!) },
-          supportingClaims: work.claimIds.filter((id) => id !== work.dispositionClaimId).map((id) => {
+          supportingClaims: work.claimIds.filter((id) => id !== work.dispositionClaimId && !id.startsWith("classification-")).map((id) => {
             const { claimId: _, ...claim } = byId.get(id)!;
             return { ...claim, sourceRefs: claim.sourceRefs.map((ref) => wireIds.get(ref.passageId)!) };
           }),
@@ -340,7 +344,7 @@ test("generation contract excludes verify work from explicit useful lead choices
   const output: AssessmentOutput = {
     ...draft,
     comparisons: [],
-    claims: draft.claims.filter((claim) => claim.kind !== "recommendation").map((claim) => ({ ...claim, sourceRefs: claim.sourceRefs.map((ref) => wireIds.get(ref.passageId)!), caseId: claim.sourceRefs[0].caseId, outcomeEvidence: false as const })),
+    claims: draft.claims.filter((claim) => claim.kind === "source_fact").map((claim) => ({ ...claim, sourceRefs: claim.sourceRefs.map((ref) => wireIds.get(ref.passageId)!), caseId: claim.sourceRefs[0].caseId, outcomeEvidence: false as const })),
     leads: [{ caseId: "case-1", state: "conditional", reasonClaimIds: ["fact-0-1"] }],
     cases: draft.cases.map(({ claimIds: _, outcomeClaimIds: __, ...item }) => ({
       ...item,
@@ -510,6 +514,7 @@ test("clarification changes compare two checked dispositions, never withheld rec
   const before = structuredClone(build());
   draft.cases[0].artifactWork[0].disposition = "reuse";
   draft.claims.find((claim) => claim.claimId === "decision-0-0")!.text = "Reuse after the clarified target is established compatible.";
+  draft.claims.find((claim) => claim.claimId === "classification-decision-0-0")!.text = "Artifact disposition: reuse.";
   const after = build();
   const changes = dispositionChanges(before, after);
   assert.equal(changes.length, 1);
@@ -536,4 +541,76 @@ test("a review with no nominated useful artifacts cannot force a precedent", () 
   response.conclusion = "cannot_be_established";
   assert.equal(validate(response), true);
   assert.deepEqual(schema.parse(response), response);
+});
+
+test("attached dispositions are independently checked for lead and non-lead work", () => {
+  const corpus = fixture();
+  const wireIds = assessmentPassageIds(corpus);
+  const output: AssessmentOutput = {
+    cases: corpus.manifest.cases.map((pastCase) => ({
+      caseId: pastCase.caseId, outcome: "unknown",
+      artifactWork: pastCase.artifacts.map((artifact) => ({
+        artifactId: artifact.artifactId, disposition: "adapt", usefulForLead: pastCase.caseId === "case-1",
+        recommendation: {
+          text: artifact.artifactId === "handover"
+            ? "Adapt the handover checklist, checking target compatibility before use."
+            : "Do not use this as starting material for the current request.",
+          sourceRefs: [wireIds.get(artifact.versions[0].passages[0].passageId)!],
+          requestQuotes: ["current request"], dependsOnClaimIds: [],
+        },
+        supportingClaims: [], blockerClaims: [],
+        verificationClaims: [{
+          text: "Check target compatibility because it determines whether the recorded work is usable.",
+          kind: "recommendation",
+          sourceRefs: [wireIds.get(artifact.versions[0].passages[0].passageId)!],
+          requestQuotes: ["current request"], dependsOnClaimIds: [],
+        }],
+      })),
+    })),
+    claims: [{
+      claimId: "lead-reason", caseId: "case-1", outcomeEvidence: false, kind: "source_fact",
+      text: "The case records handover work.", requestQuotes: [], dependsOnClaimIds: [],
+      sourceRefs: [wireIds.get("p-handover-v1-case-1")!],
+    }],
+    leads: [{ caseId: "case-1", state: "conditional", reasonClaimIds: ["lead-reason"] }],
+    contrasts: [], comparisons: [], clarifyingClaimIds: [],
+  };
+  const draft = parseAssessmentDraft(output, corpus);
+  const invalid = validateAssessmentDraft(draft, "current request", corpus);
+  const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
+  const leadVerdicts = new Map<string, SupportVerdict>([["case-1/request", "supported"], ["case-1/handover", "supported"]]);
+  const build = () => buildCheckedAssessment(draft, verdicts, invalid, corpus, leadVerdicts, "precedent_found");
+  const selected = (caseId: string, artifactId: string) => {
+    const source = corpus.manifest.cases.find((item) => item.caseId === caseId)!.artifacts.find((item) => item.artifactId === artifactId)!.versions[0];
+    return [{ caseId, artifactId, versionId: source.versionId, passageIds: [source.passages[0].passageId] }];
+  };
+  for (const rejection of ["unsupported", "uncertain", undefined] as const) {
+    for (const item of draft.cases) for (const work of item.artifactWork) {
+      if (work.artifactId === "handover") continue;
+      const classificationId = `classification-${work.dispositionClaimId}`;
+      if (rejection === undefined) verdicts.delete(classificationId);
+      else verdicts.set(classificationId, rejection);
+    }
+    const checked = build();
+    assert.equal(checked.cases[0].artifactWork[0].disposition, null);
+    assert.equal(checked.cases[1].artifactWork[0].disposition, null);
+    assert.equal(checked.cases[0].artifactWork[1].disposition, "adapt");
+    assert.deepEqual(checked.leads[0].usefulArtifactIds, ["handover"]);
+    assert.deepEqual(checked.nextActions.map((action) => action.artifactId), ["handover"]);
+    assert.throws(() => validateSelections(selected("case-1", "request"), checked, corpus));
+    assert.throws(() => validateSelections(selected("case-2", "request"), checked, corpus));
+    assert.deepEqual(validateSelections(selected("case-1", "handover"), checked, corpus), selected("case-1", "handover"));
+    assert.equal(revalidateAssessment(checked, "current request", corpus).cases[0].artifactWork[1].disposition, "adapt");
+  }
+  const checked = build();
+  const legacy = structuredClone(checked);
+  legacy.claims = legacy.claims.filter((claim) => !claim.claimId.startsWith("classification-"));
+  assert.equal(revalidateAssessment(legacy, "current request", corpus).cases[0].artifactWork[1].disposition, null);
+  const changedLabel = structuredClone(checked);
+  changedLabel.cases[0].artifactWork[1].disposition = "reuse";
+  assert.equal(revalidateAssessment(changedLabel, "current request", corpus).cases[0].artifactWork[1].disposition, null);
+  const handover = draft.cases[0].artifactWork[1];
+  verdicts.set(handover.verificationClaimIds[0], "unsupported");
+  assert.deepEqual(build().leads, []);
+  assert.deepEqual(build().nextActions, []);
 });
