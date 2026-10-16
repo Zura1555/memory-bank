@@ -74,7 +74,6 @@ export const requestConstraintsSchema = z.strictObject({
   recovery_operations: claim.shape.requestQuotes,
 });
 const comparisonFields = {
-  caseId: id,
   dimension: z.enum(["product_version", "environment", "scale", "identity_access", "recovery_operations"]),
   evidence: assessmentClaim.omit({ claimId: true, kind: true, dependsOnClaimIds: true }),
   assessment: assessmentClaim.omit({ claimId: true, kind: true, dependsOnClaimIds: true }),
@@ -88,10 +87,9 @@ const comparison = z.union([
 export const assessmentDraftSchema = z.strictObject({
   requestConstraints: requestConstraintsSchema,
   cases: z.array(caseDraft).length(8),
-  leads: z.array(lead.omit({ usefulArtifactIds: true })).max(3),
-  contrasts: z.array(lead).max(8),
+  leads: z.array(lead.omit({ usefulArtifactIds: true }).extend({ comparisons: z.array(comparison).max(24) })).max(3),
+  contrasts: z.array(lead.extend({ comparisons: z.array(comparison).max(24) })).max(8),
   clarifyingClaimIds: z.array(id).max(8),
-  comparisons: z.array(comparison).max(24),
   claims: z.array(z.union([
     assessmentClaim.extend({ caseId: id, outcomeEvidence: z.literal(false) }),
     assessmentClaim.extend({ caseId: id, outcomeEvidence: z.literal(true), kind: z.literal("source_fact") }),
@@ -148,10 +146,11 @@ type ArtifactWork = {
   blockerClaimIds: string[];
   verificationClaimIds: string[];
 };
-export type AssessmentDraft = Omit<AssessmentOutput, "cases" | "leads" | "comparisons" | "claims"> & {
+export type AssessmentDraft = Omit<AssessmentOutput, "cases" | "leads" | "contrasts" | "claims"> & {
   cases: (Omit<AssessmentOutput["cases"][number], "artifactWork"> & { claimIds: string[]; outcomeClaimIds: string[]; artifactWork: ArtifactWork[] })[];
   claims: z.infer<typeof claim>[];
   leads: z.infer<typeof lead>[];
+  contrasts: z.infer<typeof lead>[];
   comparisons: ComparisonRow[];
 };
 export type BriefDraft = z.infer<typeof briefDraftSchema>;
@@ -170,7 +169,9 @@ export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): As
     return { caseId: passage.caseId, artifactId: passage.artifactId, versionId: passage.versionId, passageId: passage.passageId };
   });
   const claims: z.infer<typeof claim>[] = output.claims.map(({ caseId: _, outcomeEvidence: __, ...item }) => ({ ...item, sourceRefs: resolveRefs(item.sourceRefs) }));
-  const comparisons: ComparisonRow[] = output.comparisons.map(({ requirementQuote, evidence, assessment, implication, ...row }, index) => {
+  const ownedComparisons = [...output.leads, ...output.contrasts].flatMap(({ caseId, comparisons }) => comparisons.map((row) => ({ ...row, caseId })));
+  if (ownedComparisons.length > 24) throw new z.ZodError([{ code: "custom", path: ["comparisons"], message: "At most 24 decisive comparisons are allowed across all leads and contrasts." }]);
+  const comparisons: ComparisonRow[] = ownedComparisons.map(({ requirementQuote, evidence, assessment, implication, ...row }, index) => {
     const evidenceClaimId = `comparison-${index}-evidence`;
     claims.push({ ...evidence, sourceRefs: resolveRefs(evidence.sourceRefs), claimId: evidenceClaimId, kind: "source_fact", dependsOnClaimIds: [] });
     const assessmentRefs = resolveRefs(assessment.sourceRefs);
@@ -242,12 +243,13 @@ export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): As
       };
     }),
   }));
-  const leads = output.leads.map((lead) => ({
+  const leads = output.leads.map(({ comparisons: _, ...lead }) => ({
     ...lead,
     usefulArtifactIds: output.cases.find((item) => item.caseId === lead.caseId)?.artifactWork
       .filter((work) => work.usefulForLead).map((work) => work.artifactId) ?? [],
   }));
-  return { ...output, cases, leads, comparisons, claims };
+  const contrasts = output.contrasts.map(({ comparisons: _, ...contrast }) => contrast);
+  return { ...output, cases, leads, contrasts, comparisons, claims };
 }
 
 export function openRouterSchema(name: string, schema: z.ZodType): {
