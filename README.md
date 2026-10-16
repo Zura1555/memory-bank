@@ -126,7 +126,7 @@ See the [source selectors, explicit application/dark-mode derivations, measured 
 
 ## Production deployment
 
-Live URL: **https://memory-bank.zura-tran.workers.dev**. The owner authorized infrastructure deployment on 2026-10-16 and selected the `Zura.tran@gmail.com` Cloudflare account. This is a live corpus/UI deployment with **paid assessment and brief admission disabled**, not successful model qualification.
+Live URL: **<https://memory-bank.zura-tran.workers.dev>**. The owner authorized infrastructure deployment on 2026-10-16 and selected the `Zura.tran@gmail.com` Cloudflare account. This is a live corpus/UI deployment with **paid assessment and brief admission disabled**, not successful model qualification.
 
 | Resource | Production identity |
 | --- | --- |
@@ -150,6 +150,22 @@ To update this deployment from an authenticated checkout:
 4. With admission still disabled, run `npm run smoke:production`. It checks health/static assets, operator access control, every complete original's SHA-256, rejected paid admission, and unchanged accounting. Its two-second address-attempt timeout avoids Node's too-short default on this WSL network; it does not retry requests or enable admission.
 
 Observed deployment verification: `cf deploy` installed the Worker, Queue consumer/producer, Workflow, and cron. Live authenticated status proved the Worker→Hyperdrive→Neon connection and closed empty ledger; all 24 original downloads matched manifest SHA-256 values. Chromium rendered the app and three reviewed knowledge records, opened exact passage evidence, and displayed HTTP 503 on a denied assessment request. No paid call or credit purchase was made. The existing 25 TypeScript tests and one Python test passed. This does not establish paid workflow execution, model quality/latency, or production recovery qualification.
+
+### GitHub automatic deployment
+
+Cloudflare Workers Builds is connected to the private `Zura1555/memory-bank` GitHub repository. Pushes to **`main`** automatically build and deploy the existing production Worker. Preview builds are disabled; feature branches do not deploy against the production database. There is no second GitHub Actions deployment pipeline.
+
+| Setting | Value |
+| --- | --- |
+| Build / deploy commands | `npm run typecheck && npm run build` / `npx cf deploy --prebuilt --mode production` |
+| Branch / root directory | `main` / `/` |
+| Build runtime | Node.js `24.19.0`, pinned npm dependencies, build cache enabled |
+| Repository connection / production trigger | `ae220010-2dd7-4a19-8916-4588943ac989` / `f026b4df-6f19-4b70-b258-8cee7930a1e0` |
+| Deployment credentials | Dedicated `memory-bank production` build token, scoped to the selected Cloudflare account |
+
+The hosted deploy command intentionally differs from `npm run deploy`: it deploys the build once and preserves existing Worker runtime secrets without requiring the private `.dev.vars.production` file in GitHub or the build environment. The build token has account-read, Worker-write, R2-read, Queue-write, and Hyperdrive-read permissions; no Neon or OpenRouter credentials were added to GitHub. Corpus publishing and database migrations remain explicit operator actions, not automatic push side effects. Git deployment does not enable paid admission.
+
+Inspect builds under [Memory Bank → Settings → Builds](https://dash.cloudflare.com/6d5eb3fa868f53e83e13401577cdfc01/workers/services/view/memory-bank/production/settings/builds), or run `npx cf builds triggers list --external-script-id b1adf51e4e0144388cfc1166d609a5cf`.
 
 ## Verification and release gates
 
