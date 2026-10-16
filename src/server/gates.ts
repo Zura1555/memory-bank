@@ -265,8 +265,19 @@ export function buildCheckedAssessment(
   reviewedConclusion: AssessmentConclusion,
 ): AssessmentResult {
   const rejected = new Set(invalidRefs);
+  const draftClaims = new Map(draft.claims.map((claim) => [claim.claimId, claim]));
   for (const item of draft.cases) {
     for (const work of item.artifactWork) {
+      const classificationId = `classification-${work.dispositionClaimId}`;
+      const classification = draftClaims.get(classificationId);
+      if (classification?.kind !== "interpretation"
+        || classification.text !== `Artifact disposition: ${work.disposition}.`
+        || !work.claimIds.includes(classificationId)
+        || !classification.dependsOnClaimIds.includes(work.dispositionClaimId)
+        || verdicts.get(classificationId) !== "supported"
+        || invalidRefs.has(classificationId)) {
+        rejected.add(work.dispositionClaimId);
+      }
       const compatibility = leadVerdicts.get(`${item.caseId}/${work.artifactId}`);
       if ((compatibility !== undefined && compatibility !== "supported")
         || (reviewedConclusion === "no_useful_precedent" && work.disposition !== "verify")) {

@@ -2,11 +2,11 @@
 
 Related: [issue #2](https://github.com/Zura1555/memory-bank/issues/2), [issue #3](https://github.com/Zura1555/memory-bank/issues/3).
 
-## Gate result: bounded P1 UI baseline passed on the consistency fix; quality defects remain
+## Current gate: disposition implementation checked locally; paid qualification blocked
 
-The latest separately approved run reached **ready assessment → exact passage inspection → retained version/passage selection → ready brief** in the actual development UI. The artifact-local generation contract prevents verify work from being nominated as useful lead work. This qualifies the exercised P1 flow, not semantic perfection, held-out evaluation, production, or latency percentiles. See the final section for this run's revision, quality findings, timings, and exact reconciled charges.
+The latest disposition-classification candidate failed its first visible P1 dispatch with `MODEL_DISPATCH_UNCERTAIN`. No assessment or brief was published. Its provider generation lookup returns 404, so admission is disabled and the 600,000-microUSD hold remains unresolved. P2–P4 and held-out evaluation cannot proceed under the existing reconciliation policy. See the final section for exact identities, timing, local recovery/retention evidence, and the frozen candidate configuration.
 
-Earlier runs and failures below remain historical evidence. The previously interrupted dispatch has independently verified terminal provider evidence, but its ephemeral ledger was lost before reconciliation; those historical rows were not reconstructed. Every attempt in the fresh campaign is now reconciled. Final admission is disabled, with zero holds, no active attempt, and no pending job. Broader delivery decisions must retain the recorded quality defects and unverified boundaries.
+Earlier successful P1 flows, quality defects, reconciled campaigns, and failures below remain historical evidence, not qualification of this candidate. The earlier interrupted dispatch has terminal provider evidence but its ephemeral ledger was lost before reconciliation; those historical rows were not reconstructed. The new unresolved reservation is separate. Neither local deterministic checks nor prior paid success establish semantic reliability, latency qualification, or deployment readiness.
 
 ## Configuration and provenance
 
@@ -281,3 +281,78 @@ Verification:
 - `npm run typecheck`, `npm test` (18 TypeScript tests and one Python test), `npm run build`, and `npm run ingest` passed. Ingestion's timestamp-only manifest changes were discarded.
 
 This is a deterministic gate/regression check, not a paid model qualification. No live reviewer or P1–P4 rerun, held-out evaluation, failure-recovery/retention campaign, latency/cost qualification, deployment, or change to repository visibility was performed. The separate disposition-versus-recommendation defect remains open. A reviewer can still make a semantic error; requiring an explicit classification verdict closes the unreviewed-label path, not broad reliability.
+
+## Independently checked artifact-disposition classifications
+
+### Implementation and local proof
+
+Based on pulled `main` `50303f3`, branch `fix/independent-artifact-dispositions`. Normalization creates a distinct `classification-disposition-N-M` interpretation for **every available artifact**, including non-lead/contrast artifacts. It states the exact attached disposition and depends on the artifact's recommendation and all local supporting/blocker/verification claims. The existing support-review inventory requires its own verdict; no paid stage, model setting, API field, citation repair, or replacement label is added.
+
+The reviewer must establish unchanged use without a decisive blocker/unresolved check for Reuse; usable starting material plus concrete changes/checks for Adapt; and a concrete decision-critical check for Verify. Factually supported “do not use as starting material” prose cannot support an Adapt classification. Rejected, uncertain, missing, mismatched, or dependency-withheld classifications withhold the work. The gate removes its useful-lead membership and work claim inventories, preventing passage selection and next actions. Independently supported Adapt work remains available. Read-time revalidation also withholds legacy dispositions lacking the classification rather than treating old results as newly reviewed.
+
+- Before: `node --experimental-strip-types --test --test-name-pattern='attached dispositions' src/server/gates.test.ts` failed with `'adapt' !== null` when the attached classification was rejected.
+- After: `npm run typecheck`, `npm test` (**25 TypeScript tests and one Python test**), and `npm run build` passed. The regression covers lead and non-lead rejection/uncertainty/missing verdicts, supported Adapt, selections, next actions, legacy reads, mismatched labels, and rejected role dependencies.
+- `npm run ingest -- --root <temporary corpus/contracts copy>` passed without rewriting the pinned manifest. `npm run publish:corpus` published all 24 exact originals and the unchanged manifest to this task's local R2.
+- A throwaway Bun/Eval runtime smoke used the actual parser, reference/dependency gate, checked-result builder, live Worker/PostgreSQL/R2, and real Chromium UI. **Synthetic manual verdicts, not model qualification:** 23 contradictory artifacts were visibly withheld and disabled; Cedar mapping remained Adapt/selectable, was the only useful lead artifact, and supplied the only next action. Direct brief admission for withheld request work returned **422 `INVALID_SELECTION_PASSAGE`**, without a model reservation. Legacy-result replay removed the lead and mapping disposition.
+- The browser replay intercepted only the create-job receipt for the synthetic checked job; status, revalidation, and evidence used the live Worker. No synthetic result was submitted to the provider. Synthetic application content was subsequently expired and cleared by the real scheduled handler.
+
+### Paid visible qualification: failed first dispatch, unresolved billing
+
+The requested P1–P4 campaign used existing approved credit; no purchase, upgrade, fallback, retry, or model/profile change occurred. Preflight provider credit was USD 5 total and USD **0.674417648** used; the new empty local ledger recorded **4,325,582 microUSD** available, rounded down. Before admission it had zero holds, no active reservation, and no jobs. Its ephemeral PostgreSQL state was backed up locally before and after this campaign; this was not reconstruction of an older lost ledger.
+
+P1 was submitted once through Chromium at `http://127.0.0.1:8794`. Admission was immediately disabled after acceptance.
+
+| Item | Observed value |
+| --- | --- |
+| Job | `2a5f2f67-627a-4ec6-a83b-e11888a820a0` |
+| Reservation | `791dbc69-ce9d-4a93-8a23-31df1b5c43af` |
+| Model attempt | `de6faa33-2327-402e-b541-93a41439c8ae`, call index 1 |
+| Provider generation header | `gen-1792078484-aIZPi2qwmCiY90vXXm6Q` |
+| Queued, UTC | `2026-10-15T15:34:43.679Z` |
+| Processing started, UTC | `2026-10-15T15:34:43.802Z` |
+| Terminal application state, UTC | `2026-10-15T15:36:32.934Z`, `reconciliation_required` |
+| Queue wait | **0.123537 s** |
+| Processing | **109.131730 s** |
+| Queued-to-terminal | **109.255267 s** |
+
+The UI displayed **“Evidence reconciliation is required. Results are withheld until the checked evidence can be reconciled.”** The stored error is `MODEL_DISPATCH_UNCERTAIN`. No draft result, review call, assessment, or brief was accepted. Processing exceeded the 90-second target; this failed dispatch does not qualify successful-assessment latency, brief latency, token/context fit, or percentiles.
+
+Repeated read-only `GET /api/v1/generation?id=...` calls returned **404**, including the final check. Provider total usage remained USD **0.674417648**, but unchanged balance and a missing generation record do **not** prove terminality or zero charge. No exact cost, token count, returned model, or provider completion state is available for this attempt. No reconciliation was posted. The **600,000-microUSD hold remains held**, admission is disabled, and the active-reservation lock remains. P2–P4 were **not admitted**, rather than violating the unresolved-charge gate. There was no paid retry. Two browser waits missed the actual reconciliation wording; neither caused another submission.
+
+### Exercised failure-recovery, ownership, and retention checks
+
+| Check | Actual result and boundary |
+| --- | --- |
+| Admission disabled | Live `POST /api/jobs` returned **503 `ADMISSION_NOT_ENABLED`** before paid qualification. |
+| Job ownership | Missing and wrong Bearer capabilities returned **404**; three concurrent authenticated operator reads returned **200**. |
+| Exact originals | Task-owned original endpoint returned **200** with the manifest SHA-256. The existing `evidence.smoke.ts` also passed, but hardcodes port 8787; only the separate direct 8794 fetch proves this task-owned endpoint. |
+| Missing/corrupt essential correction | In task-local R2, corrupted Grove `notes-2025-01-22` returned **503**; a synthetic recommendation depending on that correction lost its lead and disposition, with `cannot_be_established`, not no useful precedent. |
+| Exact restoration | Re-uploaded original returned **200**, SHA-256 `b1c784ecf2e3dad6185f4c372b6e1e3ecaf11fc886a9efb62a24741ac7a769e8`; the original checked lead returned without a model call. |
+| Incomplete extraction | Actual corpus loader with a synthetic incomplete-extraction manifest excluded the mapping and all its passages, reporting Cedar **partial**. The published manifest was not changed. |
+| Database failure/recovery | Actual Hono operator handler with an unreachable PostgreSQL address returned **500 `INTERNAL_ERROR`**; the real local database address returned **200**. The shared PostgreSQL service was not stopped; this is connection-failure proof, not an infrastructure-restart test. |
+| Outbox/duplicate delivery | Cleared only this task's outbox publication marker, then invoked `/cdn-cgi/handler/scheduled`. Publication recovered; duplicate queue delivery retained exactly the same single uncertain model attempt/generation. |
+| Workflow replay | `wrangler workflows instances restart memory-bank-workflow 2a5f2f67-627a-4ec6-a83b-e11888a820a0-assessment-1 --local --port 8794 --json` followed by `describe ... --local --port 8794 --json` completed with **zero steps**. The job's reconciliation-required guard prevented a new paid call; the attempt and hold were unchanged. |
+| Seven-day application expiry | Synthetic expired job returned **410 `JOB_EXPIRED`** with a valid 43-character capability before cleanup. Real scheduled cleanup nulled capability, request, assessment, brief, selections, and model result JSON. Reservation/attempt identities and minimal usage accounting survived. Both smoke jobs' content was cleared afterward. |
+
+These are bounded local checks, not Cloudflare/Neon deployment, upstream deletion, peak-isolate-memory qualification, or successful four-call model execution. The task-owned Worker/browser were stopped after evidence capture. PostgreSQL accounting and the unresolved hold remain intact; local SQL backups and private runtime evidence are retained outside Git.
+
+### Frozen candidate; evaluation and deployment gates remain closed
+
+The executed candidate was snapshotted before the paid run and verified unchanged afterward. Node `24.19.0`, pinned Wrangler `4.151.0`, corpus `fictional-onboarding-v2`; `openai/gpt-6-luna`, OpenAI-only/no fallback/strict parameters, `stream: false`, default tier, reasoning none, strict JSON Schema, 16,384-token ceiling, 120-second request and 135-second Workflow-step deadlines. No prompt/schema/runtime writes or builds occurred during the paid dispatch.
+
+SHA-256 freeze inventory:
+
+| Path | SHA-256 |
+| --- | --- |
+| `src/server/schemas.ts` | `28908cb29aec609bdf6e2d36fc409a3db8e1bd9db6078beddc61f5691fdf3139` |
+| `src/server/gates.ts` | `b7de6beb5f01b477e9c98873681373fb0f84e2617d76dbe9f86769c5df8340e7` |
+| `src/server/prompts.ts` | `74a17e8d07a0c359110ea4d985cbb803e12bb26fbd6181dd6a4528597a53a494` |
+| `src/server/openrouter.ts` | `211c57f750e2bae86426bf63da508ba921b33d845b4c7c7652c990835471a372` |
+| `src/server/workflow.ts` | `b5bde6562f93bf9667fd85fdff8f1505c54c5fede4c7ed008b626b8ba1193bdf` |
+| `wrangler.jsonc` | `c5d63c30e22f2237e33a230c263694616580f8cfc43a3b66bc68889a39bb6cf9` |
+| `corpus/manifest.json` | `fbc1d4ae92275efafb23b660446ac78a4b6c624e4ce603d67d2d320e142b63ca` |
+| `corpus/catalog.json` | `62a076d1b8781fcae00c54be1e97c5cfcd678ae18cc5dd7a895a849e6727a2a7` |
+| `web/main.tsx` | `294f3b803962258d787029650963b0500edd070a1f060b918d564c10d1726fe7` |
+| `package-lock.json` | `2d1acd60173a7bf4286b125dd7d26c1927ef295f0c1fa6ecd9e984e21d9cf052` |
+
+This freezes the **candidate**, not a qualification-ready release. H1–H4 have not been evaluated or used to tune this change. Terminal provider evidence/reconciliation and successful visible P1–P4 qualification are prerequisites to held-out evaluation. Any subsequent configuration change creates a new candidate requiring its own visible qualification before held-out evaluation. Independent classification review closes the unreviewed-label path but can still make semantic errors. Deployment/public release remain separately gated. Initial publication was paused after the qualification failure; the owner subsequently explicitly requested a PR with these blockers preserved. PR publication does not qualify the failed campaign, release the hold, reopen paid admission, or authorize merge/deployment.

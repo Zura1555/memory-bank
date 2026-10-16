@@ -213,11 +213,21 @@ export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): As
       const supportingClaimIds = addClaims("support", work.supportingClaims);
       const blockerClaimIds = addClaims("blocker", work.blockerClaims);
       const verificationClaimIds = addClaims("verify", work.verificationClaims);
+      const classificationId = `classification-${dispositionClaimId}`;
+      const claimIds = [dispositionClaimId, ...supportingClaimIds, ...blockerClaimIds, ...verificationClaimIds];
+      claims.push({
+        claimId: classificationId,
+        text: `Artifact disposition: ${work.disposition}.`,
+        kind: "interpretation",
+        sourceRefs: resolveRefs(work.recommendation.sourceRefs),
+        requestQuotes: work.recommendation.requestQuotes,
+        dependsOnClaimIds: claimIds,
+      });
       return {
         artifactId: work.artifactId,
         disposition: work.disposition,
         dispositionClaimId,
-        claimIds: [dispositionClaimId, ...supportingClaimIds, ...blockerClaimIds, ...verificationClaimIds],
+        claimIds: [...claimIds, classificationId],
         blockerClaimIds,
         verificationClaimIds,
       };

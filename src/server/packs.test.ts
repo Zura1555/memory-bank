@@ -32,9 +32,18 @@ async function fixture() {
   const items: BriefItem[] = selections.map((selection, index) => ({ ...selection, disposition: index === 0 ? "reuse" : index === 1 ? "adapt" : "verify", dispositionClaimId: `check-${index}`, claimIds: [`fact-${index}`, `check-${index}`] }));
   const brief: BriefResult = { reuse: items.filter((item) => item.disposition === "reuse"), adapt: items.filter((item) => item.disposition === "adapt"), verify: items.filter((item) => item.disposition === "verify"), claims, withheldClaimCount: 2 };
   const assessment: AssessmentResult = {
-    conclusion: "cannot_be_established", clarifyingClaimIds: [], comparisons: [], nextActions: [], leads: [], contrasts: [], claims, withheldClaimCount: 0,
+    conclusion: "cannot_be_established", clarifyingClaimIds: [], comparisons: [], nextActions: [], leads: [], contrasts: [], claims: [...claims], withheldClaimCount: 0,
     cases: [{ caseId: pastCase.caseId, availability: "available", outcome: "unknown", outcomeClaimIds: [], claimIds: claims.map((claim) => claim.claimId), artifactWork: items.map((item) => ({ artifactId: item.artifactId, availability: "available", exclusionReasons: [], disposition: item.disposition, dispositionClaimId: item.dispositionClaimId, claimIds: item.claimIds, blockerClaimIds: [], verificationClaimIds: item.disposition === "verify" ? [item.dispositionClaimId] : [] })) }],
   };
+  for (const work of assessment.cases[0].artifactWork) {
+    const recommendation = claims.find((claim) => claim.claimId === work.dispositionClaimId)!;
+    const classificationId = `classification-${work.dispositionClaimId}`;
+    assessment.claims.push({
+      ...recommendation, claimId: classificationId, kind: "interpretation",
+      text: `Artifact disposition: ${work.disposition}.`, dependsOnClaimIds: [...work.claimIds],
+    });
+    work.claimIds = [...work.claimIds, classificationId];
+  }
   const job: JobRecord = {
     id: "00000000-0000-4000-8000-000000000005", request_text: "Check client scope", corpus_version: manifest.corpusVersion, corpus_sha256: corpus.manifestSha256,
     stage: "ready", assessment_state: "ready", brief_state: "ready", assessment_result: assessment, brief_result: brief, brief_selections: selections, error_code: null,
