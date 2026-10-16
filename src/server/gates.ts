@@ -1,4 +1,4 @@
-import type { ArtifactRole, AssessmentConclusion, AssessmentResult, BriefResult, BriefDisposition, Claim, CaseAssessment, Lead, RequestConstraints, SupportVerdict } from "../shared/protocol.ts";
+import type { ArtifactRole, AssessmentResult, BriefResult, BriefDisposition, Claim, CaseAssessment, Lead, RequestConstraints, SupportVerdict } from "../shared/protocol.ts";
 import { EvidenceUnavailable, type CorpusSnapshot } from "./corpus.ts";
 import type { AssessmentDraft, AssessmentReview, BriefDraft, SupportReview } from "./schemas.ts";
 import { artifactReviewsSchema, requestConstraintsSchema } from "./schemas.ts";
@@ -229,11 +229,6 @@ export function validateArtifactReview(draft: AssessmentDraft, review: Assessmen
   if (roles.size !== review.artifactReviews.length || roles.size !== expected.size || [...expected].some((id) => !roles.has(id))) {
     throw new GateFailure("INCOMPLETE_ARTIFACT_REVIEW", "Every assessed artifact needs exactly one independent implementation-role review.");
   }
-  const nominatedStartingPoint = draft.leads.some((lead) => lead.usefulArtifactIds.some((id) => roles.get(`${lead.caseId}/${id}`) === "starting_point"));
-  if ((review.conclusion === "precedent_found") !== nominatedStartingPoint
-    || (review.conclusion === "no_useful_precedent" && [...roles.values()].some((role) => role === "starting_point" || role === "unresolved"))) {
-    throw new GateFailure("CONFLICTING_ARTIFACT_REVIEW", "The corpus conclusion conflicts with its independently reviewed implementation roles.");
-  }
   return roles;
 }
 
@@ -264,7 +259,6 @@ export function buildCheckedAssessment(
   invalidRefs: Set<string>,
   corpus: CorpusSnapshot,
   artifactRoles: Map<string, ArtifactRole>,
-  reviewedConclusion: AssessmentConclusion,
   requirementReview: { request: string; constraints: RequestConstraints },
 ): AssessmentResult {
   const rejected = new Set(invalidRefs);
@@ -303,8 +297,7 @@ export function buildCheckedAssessment(
       }
       const role = artifactRoles.get(`${item.caseId}/${work.artifactId}`);
       if (((work.disposition === "reuse" || work.disposition === "adapt") && role !== "starting_point")
-        || (work.disposition === "verify" && role === "not_relevant")
-        || (reviewedConclusion === "no_useful_precedent" && work.disposition !== null && work.disposition !== "verify")) {
+        || (work.disposition === "verify" && role === "not_relevant")) {
         rejected.add(work.dispositionClaimId);
       }
     }
@@ -359,7 +352,7 @@ export function buildCheckedAssessment(
   });
   const contrasts = draft.contrasts.filter((item) => keepAll(item.reasonClaimIds, checked.accepted));
   const complete = [...corpus.caseAvailability.values()].every((state) => state === "available");
-  const noUsefulPrecedent = reviewedConclusion === "no_useful_precedent" && complete && invalidRefs.size === 0 && !requirementConflict
+  const noUsefulPrecedent = complete && invalidRefs.size === 0 && !requirementConflict
     && artifactRoles.size === knownArtifacts.size
     && [...artifactRoles.values()].every((role) => role === "context_only" || role === "not_relevant");
   const conclusion = leads.length > 0 ? "precedent_found" : noUsefulPrecedent ? "no_useful_precedent" : "cannot_be_established";
@@ -440,7 +433,9 @@ export function revalidateAssessment(result: AssessmentResult, request: string, 
   const verdicts = new Map(result.claims.map((claim) => [claim.claimId, "supported" as const]));
   const artifactRoles = new Map(reviewed.data.map((item) => [`${item.caseId}/${item.artifactId}`, item.role]));
   try {
-    const checked = buildCheckedAssessment(draft, verdicts, validClaimReferences(result.claims, request, corpus), corpus, artifactRoles, result.conclusion, { request, constraints: result.requestConstraints });
+    const checked = buildCheckedAssessment(draft, verdicts, validClaimReferences(result.claims, request, corpus), corpus, artifactRoles, { request, constraints: result.requestConstraints });
+    // Revalidation may withhold stale evidence, never upgrade a stored uncertain conclusion.
+    if (result.conclusion === "cannot_be_established" && checked.conclusion === "no_useful_precedent") checked.conclusion = result.conclusion;
     checked.withheldClaimCount += result.withheldClaimCount;
     return checked;
   } catch (error) {

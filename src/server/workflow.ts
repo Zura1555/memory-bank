@@ -180,7 +180,7 @@ export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> 
         const review = assessmentReviewSchema.parse(await loadStageOutput(this.env, reviewAttemptId));
         const verdicts = validateSupportReview(draft.claims, review);
         const artifactRoles = validateArtifactReview(draft, review);
-        const checked = buildCheckedAssessment(draft, verdicts, invalidRefs, corpus, artifactRoles, review.conclusion, { request, constraints: review.requestConstraints });
+        const checked = buildCheckedAssessment(draft, verdicts, invalidRefs, corpus, artifactRoles, { request, constraints: review.requestConstraints });
         await finishPhase(this.env, params, checked);
       } else {
         if (job.assessment_state !== "ready" || !job.assessment_result || !job.brief_selections?.length) throw new Error("BRIEF_PREREQUISITE_MISSING");

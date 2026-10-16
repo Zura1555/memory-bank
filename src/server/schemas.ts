@@ -1,5 +1,5 @@
 import * as z from "zod";
-import type { ComparisonRow } from "../shared/protocol.ts";
+import type { ComparisonRow, Selection } from "../shared/protocol.ts";
 import { assessmentPassageIds, type CorpusSnapshot } from "./corpus.ts";
 
 const id = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
@@ -32,7 +32,7 @@ const artifactWork = z.union([
   z.strictObject({ ...artifactWorkFields, disposition: z.literal("reuse"), blockerClaims: z.array(artifactClaim).max(0), verificationClaims: z.array(artifactClaim).max(0) }),
   z.strictObject({ ...artifactWorkFields, disposition: z.literal("adapt") }),
   z.strictObject({ ...artifactWorkFields, disposition: z.literal("verify"), usefulForLead: z.literal(false), verificationClaims: z.array(artifactClaim.extend({ kind: z.literal("recommendation") })).min(1).max(16) }),
-  z.strictObject({ ...artifactWorkFields, disposition: z.null(), usefulForLead: z.literal(false), supportingClaims: z.array(artifactClaim).max(0), blockerClaims: z.array(artifactClaim).max(0), verificationClaims: z.array(artifactClaim).max(0) }),
+  z.strictObject({ ...artifactWorkFields, disposition: z.null(), usefulForLead: z.literal(false), recommendation: artifactWorkFields.recommendation.extend({ dependsOnClaimIds: z.array(id).max(0) }), supportingClaims: z.array(artifactClaim).max(0), blockerClaims: z.array(artifactClaim).max(0), verificationClaims: z.array(artifactClaim).max(0) }),
 ]);
 const caseDraft = z.strictObject({
   caseId: id,
@@ -96,12 +96,69 @@ export const assessmentDraftSchema = z.strictObject({
     assessmentClaim.extend({ caseId: id, outcomeEvidence: z.literal(true), kind: z.literal("source_fact") }),
   ])).max(400),
 });
+
+function requestInventoryFor(request: string) {
+  const sentences = [...new Intl.Segmenter("en", { granularity: "sentence" }).segment(request)];
+  // 250 Unicode code points always fit the existing 500 UTF-16-unit quotation bound.
+  const excerpts = [...new Set([
+    ...(request.length <= 500 ? [request] : []),
+    ...sentences.flatMap(({ segment }) => segment.trim().match(/[\s\S]{1,250}/gu) ?? []).map((text) => text.trim()).filter(Boolean),
+  ])];
+  const quotes = z.array(z.enum(excerpts)).max(8);
+  return z.strictObject({ product_version: quotes, environment: quotes, scale: quotes, identity_access: quotes, recovery_operations: quotes });
+}
+
+export function assessmentDraftSchemaFor(request: string, sources: { caseId: string; passageIds: string[] }[]) {
+  const scopedClaims = sources.filter((item) => item.passageIds.length > 0).flatMap((item) => {
+    const scope = { caseId: z.literal(item.caseId), sourceRefs: z.array(z.enum(item.passageIds)).min(1).max(16) };
+    return [
+      assessmentClaim.extend({ ...scope, outcomeEvidence: z.literal(false) }),
+      assessmentClaim.extend({ ...scope, outcomeEvidence: z.literal(true), kind: z.literal("source_fact") }),
+    ];
+  });
+  const rankedCase = z.union([
+    caseDraft.extend({ tier: z.literal("lead"), state: lead.shape.state, reasonClaimIds: lead.shape.reasonClaimIds, comparisons: z.array(comparison).max(24) }),
+    caseDraft.extend({ tier: z.literal("contrast"), state: lead.shape.state, reasonClaimIds: lead.shape.reasonClaimIds, comparisons: z.array(comparison).max(24) }),
+    caseDraft.extend({ tier: z.literal("context") }),
+  ]);
+  return assessmentDraftSchema.omit({ leads: true, contrasts: true }).extend({
+    requestConstraints: requestInventoryFor(request),
+    cases: z.array(rankedCase).length(8),
+    claims: scopedClaims.length ? z.array(z.union(scopedClaims)).max(400) : assessmentDraftSchema.shape.claims.max(0),
+  }).transform(({ cases, ...output }) => ({
+    ...output,
+    cases: cases.map(({ caseId, outcome, artifactWork }) => ({ caseId, outcome, artifactWork })),
+    leads: cases.flatMap((item) => item.tier === "lead" ? [{
+      caseId: item.caseId, state: item.state, reasonClaimIds: item.reasonClaimIds, comparisons: item.comparisons,
+    }] : []),
+    contrasts: cases.flatMap((item) => item.tier === "contrast" ? [{
+      caseId: item.caseId, state: item.state, reasonClaimIds: item.reasonClaimIds,
+      usefulArtifactIds: item.artifactWork.filter((work) => work.usefulForLead).map((work) => work.artifactId),
+      comparisons: item.comparisons,
+    }] : []),
+  })).pipe(assessmentDraftSchema);
+}
 export const briefDraftSchema = z.strictObject({
   reuse: z.array(briefItem).max(32),
   adapt: z.array(briefItem).max(32),
   verify: z.array(briefItem).max(32),
   claims: z.array(claim).max(400),
 });
+
+export function briefDraftSchemaFor(selected: Selection[]) {
+  if (selected.length === 0) throw new Error("BRIEF_SELECTION_REQUIRED");
+  const scopes = selected.map((item) => ({
+    caseId: z.literal(item.caseId), artifactId: z.literal(item.artifactId), versionId: z.literal(item.versionId),
+  }));
+  const items = z.union(scopes.map((scope) => briefItem.extend(scope)));
+  const refs = z.union(scopes.map((scope) => sourceRef.extend(scope)));
+  return briefDraftSchema.extend({
+    reuse: z.array(items).max(32),
+    adapt: z.array(items).max(32),
+    verify: z.array(items).max(32),
+    claims: z.array(claim.extend({ sourceRefs: z.array(refs).min(1).max(16) })).max(400),
+  });
+}
 export const supportReviewSchema = z.strictObject({
   claimReviews: z.array(z.strictObject({
     claimId: id,
@@ -115,16 +172,15 @@ export const artifactReviewsSchema = z.array(z.strictObject({
 })).max(256);
 export const assessmentReviewSchema = supportReviewSchema.extend({
   requestConstraints: requestConstraintsSchema,
-  conclusion: z.enum(["precedent_found", "no_useful_precedent", "cannot_be_established"]),
   artifactReviews: artifactReviewsSchema,
 });
 
 export interface ReviewTargets {
   claimIds: string[];
-  artifacts?: { caseId: string; artifactId: string; proposedForLead: boolean }[];
+  artifacts?: { caseId: string; artifactId: string }[];
 }
 
-export function reviewSchema(targets: ReviewTargets) {
+export function reviewSchema(targets: ReviewTargets, request: string) {
   const claimReviews = z.array(z.strictObject({
     claimId: targets.claimIds.length ? z.enum(targets.claimIds) : id,
     verdict: z.enum(["supported", "unsupported", "uncertain"]),
@@ -132,9 +188,7 @@ export function reviewSchema(targets: ReviewTargets) {
   if (!targets.artifacts) return supportReviewSchema.extend({ claimReviews });
   return assessmentReviewSchema.extend({
     claimReviews,
-    conclusion: targets.artifacts.some((item) => item.proposedForLead)
-      ? assessmentReviewSchema.shape.conclusion
-      : z.enum(["no_useful_precedent", "cannot_be_established"]),
+    requestConstraints: requestInventoryFor(request),
     artifactReviews: artifactReviewsSchema.length(targets.artifacts.length),
   });
 }
@@ -261,7 +315,7 @@ export function openRouterSchema(name: string, schema: z.ZodType): {
   type: "json_schema";
   json_schema: { name: string; strict: true; schema: Record<string, unknown> };
 } {
-  const generated = z.toJSONSchema(schema, { target: "draft-7" }) as Record<string, unknown>;
+  const generated = z.toJSONSchema(schema, { target: "draft-7", io: "input" }) as Record<string, unknown>;
   delete generated.$schema;
   return { type: "json_schema", json_schema: { name, strict: true, schema: generated } };
 }

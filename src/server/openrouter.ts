@@ -109,14 +109,14 @@ const providerResponseSchema = z.object({
 
 function resultSchema(stage: ModelStage, prompt: StagePrompt) {
   switch (stage) {
-    case "assessment_draft": return assessmentDraftSchema;
-    case "brief_draft": return briefDraftSchema;
+    case "assessment_draft": return prompt.responseSchema ?? assessmentDraftSchema;
+    case "brief_draft": return prompt.responseSchema ?? briefDraftSchema;
     case "assessment_review":
     case "brief_review":
       if (!prompt.reviewTargets || (stage === "assessment_review") !== (prompt.reviewTargets.artifacts !== undefined)) {
         throw new ModelCallError("MODEL_REVIEW_TARGETS_UNAVAILABLE", null, false);
       }
-      return reviewSchema(prompt.reviewTargets);
+      return reviewSchema(prompt.reviewTargets, prompt.currentRequest ?? "");
   }
 }
 
