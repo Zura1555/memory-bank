@@ -6,9 +6,9 @@ import { Separator } from "@base-ui/react/separator";
 
 type Page = "ask" | "sources" | "knowledge";
 const destinations: { page: Page; href: string; label: string; detail: string; icon: string }[] = [
-  { page: "ask", href: "/", label: "Ask", detail: "Build a checked brief", icon: "M4 5h16v11H9l-5 4V5Z" },
-  { page: "sources", href: "/?sources", label: "Sources", detail: "Inspect original work", icon: "M7 3h7l4 4v14H7V3Zm7 0v5h4M10 12h5m-5 4h5" },
-  { page: "knowledge", href: "/?knowledge", label: "Reviewed knowledge", detail: "Decisions and lessons", icon: "m4 6 8-3 8 3v14l-8-3-8 3V6Zm8-3v14" },
+  { page: "ask", href: "/", label: "Ask", detail: "Work brief builder", icon: "M4 5h16v11H9l-5 4V5Z" },
+  { page: "sources", href: "/?sources", label: "Sources", detail: "Original corpus", icon: "M7 3h7l4 4v14H7V3Zm7 0v5h4M10 12h5m-5 4h5" },
+  { page: "knowledge", href: "/?knowledge", label: "Reviewed knowledge", detail: "Decisions & lessons", icon: "m4 6 8-3 8 3v14l-8-3-8 3V6Zm8-3v14" },
 ];
 
 function locationView() {
@@ -86,11 +86,11 @@ export function AppShell({ ask, sources, knowledge }: {
   return <div className="app-shell" onClick={navigate}>
     <a className="skip-link" href="#main-content">Skip to content</a>
     <aside className="app-sidebar" aria-label="Workspace sidebar">
-      <div className="sidebar-brand">{brand}<span className="workspace-caption">Your evidence workspace</span></div>
+      <div className="sidebar-brand">{brand}<span className="workspace-caption">Evidence Workbench</span></div>
       <Separator className="shell-separator" />
-      <p className="nav-group-label">Workspace</p>
+      <p className="nav-group-label">Navigation</p>
       <Navigation page={view.page} />
-      <div className="sidebar-note"><span className="eyebrow">Checked before use</span><p>Original work. Exact passages. Clear limits.</p><span>Fictional examples only</span></div>
+      <div className="sidebar-note"><span className="eyebrow">Verified Corpus</span><p>Fictional onboarding records</p></div>
     </aside>
     <div className="app-body">
       <header className="app-header">
@@ -106,7 +106,7 @@ export function AppShell({ ask, sources, knowledge }: {
                 <Drawer.Popup className="navigation-drawer" finalFocus={() => navigating.current ? false : true}>
                   <Drawer.Content>
                     <div className="drawer-heading"><Drawer.Title className="drawer-title">Memory Bank</Drawer.Title><Drawer.Close render={<Button className="icon-button" aria-label="Close navigation" />}>Close</Drawer.Close></div>
-                    <Drawer.Description className="muted">Your evidence workspace</Drawer.Description>
+                    <Drawer.Description className="muted">Evidence Workbench</Drawer.Description>
                     <Navigation page={view.page} />
                     <p className="drawer-disclaimer">Fictional evidence · checked before use</p>
                   </Drawer.Content>
@@ -117,7 +117,7 @@ export function AppShell({ ask, sources, knowledge }: {
           <span className="header-workspace">Workspace <span aria-hidden="true">/</span></span>
           <span className="header-page">{destinations.find((item) => item.page === view.page)!.label}</span>
         </div>
-        <span className="fictional-banner">Fictional examples only</span>
+        <span className="fictional-banner">Fictional examples</span>
       </header>
       <main id="main-content" ref={main} tabIndex={-1}>
         <div hidden={view.page !== "ask"}>{ask(view.page === "ask")}</div>
