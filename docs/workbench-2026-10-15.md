@@ -155,3 +155,32 @@ Browser checks passed:
 - At 1440×1000 and 320×1000, in both light/dark schemes: visual inspection, answer-to-submit keyboard flow, keyboard historical disclosure, exact-passage dialog, version-specific original link, Escape/focus return, and no document horizontal overflow. Comparison tables retain local horizontal scrolling. Chromium reported zero page errors.
 
 Repeat with browser-local interception only: replay ready Adapt, supply a production/version constraint and replay a withheld result; hold the POST before releasing it to inspect immediate invalidation. Repeat with a 503, failed checked phase, and deferred old polling/brief/admission responses; open prior/current evidence, replace the predecessor on another recheck, and expire the prior result independently. Never submit these scenarios to a paid endpoint without separate authorization.
+
+## Ask presentation verification — 2026-10-17
+
+Issue #25 changes Ask presentation, not admission policy, model stages, reference checks, separate support review, or pack generation. Suggestions are authored from the Cedar, Grove, and Ibis fictional source requests; no held-out evaluation file was read or shipped to the browser. Source-card and selectable-passage projection now share the accepted artifact-work-claim boundary used by server selection validation. Blocker-only citations remain inspectable without becoming selectable evidence.
+
+Commands run from the dedicated `feat/ask-request-suggestions-25` worktree:
+
+```sh
+npm run typecheck
+npm test
+npm run build
+python3 -m http.server 8795 --bind 127.0.0.1 --directory .cloudflare/output/v0/workers/default/assets
+```
+
+Typecheck and build passed. All 28 TypeScript tests and one Python test passed. The new `src/ui/checked-sources.test.ts` regression covers withheld, wrong-case/artifact, blocker-only, unavailable/failed, deduplicated, and distinct retained-version evidence. Primary LSP diagnostics reported zero errors in all three changed TypeScript files.
+
+Chromium opened the built assets at `http://127.0.0.1:8795/`. A read-only attempt to obtain an existing retained checked job failed with `ECONNREFUSED`; the browser therefore used isolated synthetic checked-contract/API replay with exact passages from the retained fictional corpus. Every `/api/` request was intercepted in that browser. No Worker writes, provider requests, paid admission changes, deployment, live-original integrity claim, or model requalification occurred. Export responses were presentation-only fixture bytes; existing server pack tests, not this replay, cover real pack construction.
+
+Observed browser checks:
+
+- Keyboard Enter on a suggestion focused and filled the request, with zero admission POSTs. Editing preserved the change. Tab/Enter submitted it once. History/Saved remained collapsed so request entry was primary.
+- Admission receipt/status retrieval, queue wait, assembling, drafting, reference checks, and separate support review remained distinct. Even replay responses deliberately carrying result-shaped content during running stages exposed no draft or source cards.
+- A ready assessment exposed three accepted artifact source cards, checked recommendation citations, withheld counts, a contrast, and unknown target-version applicability. Enter opened the exact cited passage; Escape closed the dialog and returned focus.
+- The submitted request stayed visible in findings, selection, and brief. Brief submission stayed disabled until explicit artifact and passage selection; the POST contained three exact artifact/version/passage identities. Brief queue and support review showed no generated brief.
+- A ready brief showed Reuse, Adapt, Verify, unresolved blocking checks, and withholding. Both existing export controls made bearer-authenticated format-specific requests without a new model stage. Instrumenting browser blob creation and download-anchor activation confirmed the exact replay bytes and `.md` / `.json` filenames. Browser filesystem download completion was not established; this is export-control presentation proof, not a live generated pack check.
+- Disabled admission (`503 ADMISSION_NOT_ENABLED`), service failure (`503 INTERNAL_FAILURE`), failed checks, reconciliation, withheld results, and a complete-eight-case no-useful-precedent result each retained their distinct presentation. No denied/failed/withheld response produced a checked source card or implied a successful no-match check.
+- The normal flow ran at 1440px and again by keyboard at 320px. Entry, findings/source cards, selection, and brief were inspected in 320px light/dark schemes; all six failure/limited-result states were checked in both schemes. `documentElement.scrollWidth <= documentElement.clientWidth` passed. Comparison tables retain local scrolling. Chromium reported zero page errors.
+
+Repeat using browser-local interception only: fill a suggestion without submitting, defer admission/status, replay each real protocol stage, and release a ready checked-contract result. Inspect citations, explicitly choose work and retained passages, then replay brief queue/review/readiness and both export responses. Repeat with the six denied/failure/limited-result states above at 320px in both schemes. Replay proves presentation only; live AI qualification and paid access remain separate gates.
