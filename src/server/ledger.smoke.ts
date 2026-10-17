@@ -24,9 +24,10 @@ const composeArgs = ["compose", "-p", project, "-f", join(root, "compose.yaml"),
 function compose(args: string[], input?: Buffer): Buffer {
   return execFileSync("docker", [...composeArgs, ...args], { cwd: root, input, timeout: 720_000 });
 }
-const [jobId, reservationId, settledJobId, settledReservationId, settledAttemptId] =
-  Array.from({ length: 5 }, () => randomUUID());
+const [jobId, reservationId, settledJobId, settledReservationId, settledAttemptId, outputJobId, outputReservationId] =
+  Array.from({ length: 7 }, () => randomUUID());
 let attemptId: string;
+let outputAttemptId: string;
 const readyJobId = randomUUID();
 const readyCapabilityHash = Buffer.alloc(32, 1);
 const readySelections: Selection[] = [{ caseId: "case-1", artifactId: "procedure", versionId: "procedure-v1", passageIds: ["passage-b", "passage-a"] }];
@@ -34,6 +35,11 @@ let providerRequests = 0;
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => {
   providerRequests++;
+  if (providerRequests === 2) return Response.json({
+    id: "gen-synthetic-truncated", model: "openai/gpt-6-luna", provider: "OpenAI",
+    choices: [{ finish_reason: "length", message: { content: "PRIVATE_SYNTHETIC_PARTIAL_OUTPUT" } }],
+    usage: { prompt_tokens: 100, completion_tokens: 20, cost: 0.001 },
+  });
   if (providerRequests !== 1) throw new Error("PROVIDER_REPLAY_FORBIDDEN_IN_SMOKE");
   return new Response(new ReadableStream({
     start(controller) { controller.error(new TypeError("PRIVATE_SYNTHETIC_TRANSPORT_DETAIL")); },
@@ -49,7 +55,10 @@ async function verify(connectionString: string, expected: unknown): Promise<void
     }
     assert.deepEqual(snapshot, expected, "Every ledger row must survive unchanged");
     const env = { APP_ENV: "development", LOCAL_DATABASE_URL: connectionString } as Env;
-    for (const [job, reservation, attempt] of [[jobId, reservationId, attemptId], [settledJobId, settledReservationId, settledReservationId]]) {
+    for (const [job, reservation, attempt] of [
+      [jobId, reservationId, attemptId], [settledJobId, settledReservationId, settledReservationId],
+      [outputJobId, outputReservationId, outputAttemptId],
+    ]) {
       await assert.rejects(runPaidStage(env, {
         jobId: job, attemptId: reservation, phase: "assessment", workflowId: `${job}-assessment-1`,
       }, 1, "assessment_draft", { instructions: "No dispatch permitted", untrustedData: {} }),
@@ -58,7 +67,7 @@ async function verify(connectionString: string, expected: unknown): Promise<void
     assert.deepEqual(await startBrief(env, readyJobId, readyCapabilityHash, readySelections), {
       jobId: readyJobId, briefState: "ready",
     }, "A persisted JSONB selection must resume the ready brief regardless of object or passage order");
-    assert.equal(providerRequests, 1, "Replay must not add to the single synthetic provider request");
+    assert.equal(providerRequests, 2, "Replay must not add to the two synthetic provider requests");
     for (const [table, rows] of Object.entries(snapshot)) {
       assert.deepEqual((await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows, rows,
         "Rejected replay must not mutate accounting");
@@ -79,14 +88,16 @@ try {
     assert.deepEqual(initial, { available_credit_micro_usd: null, admission_enabled: false });
     // Synthetic state only: no historical IDs, provider charges, credentials, or paid jobs.
     await pool.query(`BEGIN;
-      UPDATE campaign_budget SET available_credit_micro_usd = 4000000, held_micro_usd = 600000,
+      UPDATE campaign_budget SET available_credit_micro_usd = 4000000, held_micro_usd = 1200000,
         reconciled_spend_micro_usd = 12345 WHERE singleton;
       INSERT INTO jobs (id, request_text, corpus_version, corpus_sha256, stage, assessment_state, expires_at) VALUES
         ('${jobId}', 'Synthetic restart smoke', 'ledger-smoke', repeat('a', 64), 'reconciliation_required', 'reconciliation_required', now() + interval '1 day'),
-        ('${settledJobId}', 'Synthetic settled smoke', 'ledger-smoke', repeat('a', 64), 'failed', 'failed', now() + interval '1 day');
+        ('${settledJobId}', 'Synthetic settled smoke', 'ledger-smoke', repeat('a', 64), 'failed', 'failed', now() + interval '1 day'),
+        ('${outputJobId}', 'Synthetic incomplete output smoke', 'ledger-smoke', repeat('a', 64), 'reconciliation_required', 'reconciliation_required', now() + interval '1 day');
       INSERT INTO phase_reservations (id, job_id, phase, attempt_no, amount_micro_usd, state, actual_micro_usd, reconciliation_note, reconciled_at) VALUES
         ('${reservationId}', '${jobId}', 'assessment', 1, 600000, 'held', NULL, NULL, NULL),
-        ('${settledReservationId}', '${settledJobId}', 'assessment', 1, 600000, 'reconciled', 12345, 'Synthetic smoke only', now());
+        ('${settledReservationId}', '${settledJobId}', 'assessment', 1, 600000, 'reconciled', 12345, 'Synthetic smoke only', now()),
+        ('${outputReservationId}', '${outputJobId}', 'assessment', 1, 600000, 'held', NULL, NULL, NULL);
       UPDATE workflow_control SET active_attempt_id = '${reservationId}' WHERE singleton;
       INSERT INTO model_attempts (id, reservation_id, job_id, phase, call_index, state, requested_model, generation_id, error_code) VALUES
         ('${settledAttemptId}', '${settledReservationId}', '${settledJobId}', 'assessment', 1, 'reconciled', 'smoke-no-provider', 'synthetic-settled', NULL);
@@ -126,7 +137,36 @@ try {
         .filter(([key]) => key in diagnostic)), diagnostic,
     );
     assert.ok(!JSON.stringify(status).includes("PRIVATE_SYNTHETIC_TRANSPORT_DETAIL"));
-    console.log("Real paid-stage failure persisted safe diagnostics and operator status; one synthetic response, no provider network access.");
+    await assert.rejects(runPaidStage(env, {
+      jobId: outputJobId, attemptId: outputReservationId, phase: "assessment", workflowId: `${outputJobId}-assessment-1`,
+    }, 1, "assessment_draft", { instructions: "Synthetic incomplete output smoke", untrustedData: {} }),
+    (error: unknown) => {
+      assert.ok(error instanceof ReconciliationRequired);
+      assert.equal(error.code, "MODEL_OUTPUT_TOKEN_LIMIT");
+      outputAttemptId = error.attemptId;
+      return true;
+    });
+    const outputDiagnostic = (await pool.query(
+      `SELECT state, error_code, generation_id, usage, returned_model, provider, result_json
+       FROM model_attempts WHERE id = $1`, [outputAttemptId!],
+    )).rows[0];
+    assert.deepEqual(outputDiagnostic, {
+      state: "uncertain", error_code: "MODEL_OUTPUT_TOKEN_LIMIT", generation_id: "gen-synthetic-truncated",
+      usage: { promptTokens: 100, completionTokens: 20, reportedCostUsd: 0.001,
+        responseId: "gen-synthetic-truncated", requestedModel: "openai/gpt-6-luna",
+        returnedModel: "openai/gpt-6-luna", provider: "OpenAI" },
+      returned_model: "openai/gpt-6-luna", provider: "OpenAI", result_json: null,
+    });
+    const outputStatus = await operatorStatus(env) as { recentModelAttempts: { id: string }[] };
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(outputStatus.recentModelAttempts.find((attempt) => attempt.id === outputAttemptId)!)
+        .filter(([key]) => key in outputDiagnostic)),
+      Object.fromEntries(Object.entries(outputDiagnostic).filter(([key]) => key !== "result_json")),
+    );
+    assert.ok(!JSON.stringify(outputStatus).includes("PRIVATE_SYNTHETIC_"));
+    assert.deepEqual((await pool.query("SELECT held_micro_usd, reconciled_spend_micro_usd, admission_enabled FROM campaign_budget")).rows[0],
+      { held_micro_usd: "1200000", reconciled_spend_micro_usd: "12345", admission_enabled: false });
+    console.log("Real paid-stage failures retained safe causes and reported usage without exposing output or releasing holds; two synthetic responses, no provider network access.");
     expected = {};
     for (const table of ["campaign_budget", "workflow_control", "jobs", "phase_reservations", "model_attempts", "job_outbox", "operator_reconciliations"]) {
       expected[table] = (await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows;

@@ -26,6 +26,7 @@ export class ModelCallError extends Error {
   readonly failurePhase: FailurePhase;
   readonly failureCause: FailureCause | null;
   generationId: string | null = null;
+  usage: ModelUsage | null = null;
 
   constructor(
     code: string, status: number | null, uncertain: boolean,
@@ -165,6 +166,7 @@ export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StageP
   }
 
   let generationId = safeGenerationId(response.headers.get("x-generation-id"));
+  let usage: ModelUsage | null = null;
   try {
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
@@ -178,7 +180,7 @@ export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StageP
     if (!parsedEnvelope.success) throw new ModelCallError("MODEL_RESPONSE_INVALID", response.status, true, "response_validation");
     const data = parsedEnvelope.data;
     const choice = data.choices?.[0];
-    const usage: ModelUsage = {
+    usage = {
       promptTokens: data.usage?.prompt_tokens ?? null,
       completionTokens: data.usage?.completion_tokens ?? null,
       reportedCostUsd: data.usage?.cost ?? null,
@@ -187,9 +189,12 @@ export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StageP
       returnedModel: data.model ?? null,
       provider: data.provider ?? null,
     };
-    if (!choice || choice.finish_reason !== "stop" || typeof choice.message?.content !== "string" || choice.message.refusal) {
-      throw new ModelCallError("MODEL_OUTPUT_INCOMPLETE_OR_REFUSED", response.status, true, "output_validation");
-    }
+    if (!choice) throw new ModelCallError("MODEL_OUTPUT_CHOICE_MISSING", response.status, true, "output_validation");
+    if (choice.message?.refusal) throw new ModelCallError("MODEL_OUTPUT_REFUSED", response.status, true, "output_validation");
+    if (choice.finish_reason === "content_filter") throw new ModelCallError("MODEL_OUTPUT_CONTENT_FILTERED", response.status, true, "output_validation");
+    if (choice.finish_reason === "length") throw new ModelCallError("MODEL_OUTPUT_TOKEN_LIMIT", response.status, true, "output_validation");
+    if (choice.finish_reason !== "stop") throw new ModelCallError("MODEL_OUTPUT_NOT_STOPPED", response.status, true, "output_validation");
+    if (typeof choice.message?.content !== "string") throw new ModelCallError("MODEL_OUTPUT_CONTENT_MISSING", response.status, true, "output_validation");
     let decoded: unknown;
     try {
       decoded = JSON.parse(choice.message.content);
@@ -200,7 +205,10 @@ export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StageP
     if (!parsed.success) throw new ModelCallError("MODEL_OUTPUT_SCHEMA_INVALID", response.status, true, "output_validation");
     return { output: parsed.data, usage };
   } catch (error) {
-    if (error instanceof ModelCallError) error.generationId = generationId;
+    if (error instanceof ModelCallError) {
+      error.generationId = generationId;
+      error.usage = usage;
+    }
     throw error;
   }
 }

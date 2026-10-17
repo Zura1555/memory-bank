@@ -149,3 +149,53 @@ test("invalid output preserves an envelope-only generation ID but rejects arbitr
     globalThis.fetch = originalFetch;
   }
 });
+
+test("unusable output retains reported usage and distinguishes safe failure conditions without retrying", async () => {
+  const originalFetch = globalThis.fetch;
+  const scenarios = [
+    { choices: [], code: "MODEL_OUTPUT_CHOICE_MISSING" },
+    { choices: [{ finish_reason: "length", message: { content: "PRIVATE_PARTIAL_OUTPUT" } }], code: "MODEL_OUTPUT_TOKEN_LIMIT" },
+    { choices: [{ finish_reason: "stop", message: { refusal: "PRIVATE_REFUSAL" } }], code: "MODEL_OUTPUT_REFUSED" },
+    { choices: [{ finish_reason: "content_filter" }], code: "MODEL_OUTPUT_CONTENT_FILTERED" },
+    { choices: [{ finish_reason: "PRIVATE_UNKNOWN_REASON" }], code: "MODEL_OUTPUT_NOT_STOPPED" },
+    { choices: [{ finish_reason: "stop", message: {} }], code: "MODEL_OUTPUT_CONTENT_MISSING" },
+    { choices: [{ finish_reason: "stop", message: { content: "PRIVATE_INVALID_JSON" } }], code: "MODEL_OUTPUT_INVALID_JSON" },
+    { choices: [{ finish_reason: "stop", message: { content: "{}" } }], code: "MODEL_OUTPUT_SCHEMA_INVALID" },
+    { choices: [{ finish_reason: "length" }], code: "MODEL_OUTPUT_TOKEN_LIMIT", unpriced: true },
+  ];
+  try {
+    for (const scenario of scenarios) {
+      let requests = 0;
+      globalThis.fetch = async () => {
+        requests++;
+        return Response.json({
+          id: "gen-unusable-output", model: "openai/gpt-6-luna", provider: "OpenAI",
+          choices: scenario.choices,
+          ...("unpriced" in scenario ? {} : { usage: { prompt_tokens: 100, completion_tokens: 20, cost: 0.001 } }),
+        });
+      };
+      await assert.rejects(callOpenRouter({ OPENROUTER_API_KEY: "synthetic-only" } as Env, "assessment_review", {
+        instructions: "Synthetic output failure", untrustedData: {},
+        reviewTargets: { claimIds: ["claim-one"], artifacts: [] },
+      }), (error: unknown) => {
+        assert.ok(error instanceof ModelCallError);
+        assert.equal(error.code, scenario.code);
+        assert.equal(error.uncertain, true, "Reported usage does not authorize releasing a hold or accepting output");
+        assert.equal(error.generationId, "gen-unusable-output");
+        assert.equal(error.failurePhase, "output_validation");
+        assert.deepEqual(error.usage, {
+          promptTokens: "unpriced" in scenario ? null : 100,
+          completionTokens: "unpriced" in scenario ? null : 20,
+          reportedCostUsd: "unpriced" in scenario ? null : 0.001,
+          responseId: "gen-unusable-output", requestedModel: "openai/gpt-6-luna",
+          returnedModel: "openai/gpt-6-luna", provider: "OpenAI",
+        });
+        assert.ok(!JSON.stringify(error).includes("PRIVATE_"));
+        return true;
+      });
+      assert.equal(requests, 1);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
