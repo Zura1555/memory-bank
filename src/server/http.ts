@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "./env.ts";
+import type { SourceCatalogEntry } from "../shared/protocol.ts";
 import { createAssessmentJob, startBrief } from "./admission.ts";
 import { capabilityHash } from "./auth.ts";
 import { exactOriginal, exactPassage, EvidenceUnavailable, knowledgeCards, loadCorpus } from "./corpus.ts";
@@ -100,6 +101,28 @@ app.onError((error) => {
 });
 
 app.get("/api/health", (c) => c.json({ status: "ok" as const }));
+
+app.get("/api/sources", async (c) => {
+  const corpus = await loadCorpus(c.env);
+  const sources: SourceCatalogEntry[] = corpus.manifest.cases.flatMap((pastCase) =>
+    pastCase.artifacts.flatMap((artifact) => artifact.versions.map((version) => {
+      const available = corpus.availableVersions.has(version.versionId);
+      return {
+        caseId: pastCase.caseId, caseTitle: pastCase.title,
+        artifactId: artifact.artifactId, title: artifact.title,
+        versionId: version.versionId, mimeType: version.mimeType,
+        statedDate: version.statedDate, fictional: true,
+        availability: available ? "available" : version.extractionStatus === "incomplete" ? "incomplete" : "unavailable",
+        exclusionReasons: available ? [] : version.exclusionReasons.length ? version.exclusionReasons : ["The exact original is unavailable or could not be verified."],
+        passages: available ? version.passages.map((passage) => ({
+          caseId: pastCase.caseId, artifactId: artifact.artifactId, versionId: version.versionId,
+          passageId: passage.passageId, sourceKind: passage.sourceKind,
+        })) : [],
+      };
+    })),
+  );
+  return c.json({ sources });
+});
 
 app.get("/api/knowledge", async (c) => {
   const caseId = c.req.query("caseId");

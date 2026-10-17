@@ -178,6 +178,20 @@ export interface PassageView extends SourceRef {
   location: Record<string, string | number | boolean | null | string[]>;
 }
 
+export interface SourceCatalogEntry {
+  caseId: string;
+  caseTitle: string;
+  artifactId: string;
+  title: string;
+  versionId: string;
+  mimeType: string;
+  statedDate: string | null;
+  fictional: true;
+  availability: "available" | "incomplete" | "unavailable";
+  exclusionReasons: string[];
+  passages: (SourceRef & { sourceKind: PassageView["sourceKind"] })[];
+}
+
 // HTTP contract used by the browser and Worker.
 // POST /api/jobs {request} -> 202 CreateJobResponse
 // GET /api/jobs/:jobId (Authorization: Bearer <capability>) -> 200 JobView
@@ -185,4 +199,5 @@ export interface PassageView extends SourceRef {
 // GET /api/jobs/:jobId/pack/:format (capability, ready checked brief) -> attachment; format = markdown | json
 // GET /api/evidence/passages/:passageId -> 200 PassageView
 // GET /api/evidence/originals/:versionId -> exact retained original bytes
+// GET /api/sources -> 200 {sources: SourceCatalogEntry[]}
 // GET /api/health -> 200 {status:"ok"}
