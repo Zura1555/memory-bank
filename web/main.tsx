@@ -2,6 +2,11 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { Dialog } from "@base-ui/react/dialog";
 import { Select } from "@base-ui/react/select";
+import { Button } from "@base-ui/react/button";
+import { Field } from "@base-ui/react/field";
+import { Input } from "@base-ui/react/input";
+import { Collapsible } from "@base-ui/react/collapsible";
+import { AppShell } from "./shell";
 import type {
   ArtifactAssessment,
   AssessmentResult,
@@ -25,6 +30,7 @@ import type {
   PhaseState,
   Selection,
   SourceRef,
+  SourceCatalogEntry,
   StartBriefRequest,
   StartBriefResponse,
 } from "../src/shared/protocol";
@@ -523,13 +529,105 @@ function CuratedKnowledge({ caseId, recordId, inspect }: { caseId?: string; reco
 
 function KnowledgePage({ recordId }: { recordId?: string }) {
   const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
-  return <main className="app-shell">
-    <header className="app-header"><a href="/" className="brand">Memory Bank</a><span className="fictional-banner">Fictional examples only</span><a href="?knowledge">All reviewed records</a></header>
-    <h1>Curated knowledge</h1>
-    <p>Human-reviewed historical records, independent of expiring assessment jobs.</p>
-    <CuratedKnowledge recordId={recordId} inspect={setPassageRef} />
+  return <section className="workflow" aria-labelledby="knowledge-title">
+    <div className="intro"><p className="eyebrow">Human-reviewed context</p><h1 id="knowledge-title">Reviewed knowledge</h1>
+      <p>Decisions and lessons from fictional past work, independent of expiring assessment jobs.</p></div>
+    {recordId && <a href="/?knowledge" className="back-link">All reviewed records</a>}
+    <div className="screen"><CuratedKnowledge recordId={recordId} inspect={setPassageRef} /></div>
     <EvidenceDialog sourceRef={passageRef} onClose={() => setPassageRef(null)} />
-  </main>;
+  </section>;
+}
+
+function isSourceCatalogEntry(value: unknown): value is SourceCatalogEntry {
+  return isRecord(value) && isText(value.caseId) && isText(value.caseTitle)
+    && isText(value.artifactId) && isText(value.title) && isText(value.versionId)
+    && isText(value.mimeType) && (value.statedDate === null || isText(value.statedDate))
+    && value.fictional === true && ["available", "incomplete", "unavailable"].includes(value.availability as string)
+    && Array.isArray(value.exclusionReasons) && value.exclusionReasons.every(isText)
+    && Array.isArray(value.passages) && value.passages.every((ref: unknown) =>
+      isSourceRef(ref) && isRecord(ref) && ref.caseId === value.caseId
+      && ref.artifactId === value.artifactId && ref.versionId === value.versionId
+      && ["native", "ocr_transcription", "visual_observation", "visual_interpretation"].includes(ref.sourceKind as string))
+    && (value.availability === "available" || value.passages.length === 0);
+}
+
+function SourceFilter({ title, value, options, onChange }: {
+  title: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void;
+}) {
+  return <Select.Root items={options} value={value} onValueChange={(next) => { if (next !== null) onChange(next); }}>
+    <div className="source-filter"><Select.Label className="field-label">{title}</Select.Label>
+      <Select.Trigger className="version-select-trigger"><Select.Value /><Select.Icon aria-hidden="true">⌄</Select.Icon></Select.Trigger>
+    </div>
+    <Select.Portal><Select.Positioner className="version-select-positioner" sideOffset={6} collisionPadding={12}>
+      <Select.Popup className="version-select-popup"><Select.List className="version-select-list">
+        {options.map((option) => <Select.Item key={option.value} value={option.value} className="version-select-item">
+          <Select.ItemText>{option.label}</Select.ItemText><Select.ItemIndicator aria-hidden="true">✓</Select.ItemIndicator>
+        </Select.Item>)}
+      </Select.List></Select.Popup>
+    </Select.Positioner></Select.Portal>
+  </Select.Root>;
+}
+
+function SourcesPage() {
+  const [sources, setSources] = useState<SourceCatalogEntry[] | null>(null);
+  const [error, setError] = useState(false);
+  const [query, setQuery] = useState("");
+  const [caseId, setCaseId] = useState("");
+  const [mimeType, setMimeType] = useState("");
+  const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/sources", { signal: controller.signal });
+        if (!response.ok) throw new Error("Sources unavailable");
+        const body: unknown = await response.json();
+        if (!isRecord(body) || !Array.isArray(body.sources) || !body.sources.every(isSourceCatalogEntry)) throw new Error("Invalid source inventory");
+        if (!controller.signal.aborted) setSources(body.sources);
+      } catch {
+        if (!controller.signal.aborted) setError(true);
+      }
+    })();
+    return () => controller.abort();
+  }, []);
+  const caseOptions = [...new Map((sources ?? []).map((source) => [source.caseId, { value: source.caseId, label: source.caseTitle }])).values()];
+  const typeOptions = [...new Set((sources ?? []).map((source) => source.mimeType))].map((type) => ({ value: type, label: type }));
+  const needle = query.trim().toLocaleLowerCase();
+  const filtered = (sources ?? []).filter((source) => (!caseId || source.caseId === caseId)
+    && (!mimeType || source.mimeType === mimeType)
+    && (!needle || `${source.title} ${source.caseTitle}`.toLocaleLowerCase().includes(needle)));
+  return <section className="workflow" aria-labelledby="sources-title">
+    <div className="intro"><p className="eyebrow">The original work, not a summary</p><h1 id="sources-title">Sources</h1>
+      <p>Browse the fictional corpus. Inspect exact retained passages and download their originals. This is not an AI relevance assessment.</p></div>
+    {error ? <p className="notice notice-error" role="alert">The source inventory could not be verified. Reload to try again.</p>
+      : sources === null ? <p role="status">Loading source inventory…</p> : <>
+        <div className="screen source-controls" role="search" aria-label="Search the source corpus">
+          <Field.Root name="source-search"><Field.Label>Search sources</Field.Label>
+            <Input value={query} onValueChange={setQuery} placeholder="Source title or case name" className="source-search" type="search" />
+          </Field.Root>
+          <SourceFilter title="Case" value={caseId} onChange={setCaseId} options={[{ value: "", label: "All cases" }, ...caseOptions]} />
+          <SourceFilter title="File type" value={mimeType} onChange={setMimeType} options={[{ value: "", label: "All file types" }, ...typeOptions]} />
+          <Button className="secondary-button" type="button" onClick={() => { setQuery(""); setCaseId(""); setMimeType(""); }} disabled={!query && !caseId && !mimeType}>Clear filters</Button>
+        </div>
+        <p className="source-count muted" role="status">{filtered.length} of {sources.length} retained source versions</p>
+        {filtered.length === 0 ? <p className="screen empty-state">No sources match these filters. Clear the filters to browse the corpus.</p>
+          : <div className="source-catalog">{filtered.map((source) => <article className="screen source-card" key={`${source.caseId}-${source.artifactId}-${source.versionId}`}>
+            <div className="card-heading"><div><p className="eyebrow">{source.caseTitle}</p><h2>{source.title}</h2></div><Badge tone={source.availability}>{label(source.availability)}</Badge></div>
+            <p className="record-id">Case {source.caseId} · Artifact {source.artifactId} · Version {source.versionId}</p>
+            <div className="badge-row"><Badge tone="fictional">Fictional source</Badge><Badge>{source.mimeType}</Badge>
+              {[...new Set(source.passages.map((ref) => ref.sourceKind))].map((kind) => <Badge key={kind}>{label(kind)}</Badge>)}</div>
+            <p className="muted source-date">{source.statedDate ? `Stated date: ${source.statedDate}` : "No stated date"}</p>
+            {source.availability === "available" ? <>
+              <a href={`/api/evidence/originals/${encodeURIComponent(source.versionId)}`}>Download exact fictional original</a>
+              {source.passages.length > 0 ? <Collapsible.Root className="source-passages">
+                <Collapsible.Trigger render={<Button className="secondary-button" />}>Inspect passages ({source.passages.length})</Collapsible.Trigger>
+                <Collapsible.Panel><SourceLinks refs={source.passages} inspect={setPassageRef} /></Collapsible.Panel>
+              </Collapsible.Root> : <p className="muted">No inspectable passages are retained.</p>}
+            </> : <StringList title="Source unavailable for use" items={source.exclusionReasons} />}
+          </article>)}</div>}
+      </>}
+    <EvidenceDialog sourceRef={passageRef} onClose={() => setPassageRef(null)} />
+  </section>;
 }
 
 function CaseCard({ item, claims, inspect }: { item: CaseAssessment; claims: ClaimMap; inspect: InspectPassage }) {
@@ -839,7 +937,7 @@ function EvidenceDialog({ sourceRef, onClose }: { sourceRef: SourceRef | null; o
 
 const stepNames = ["Client request", "Checked examples", "Selected work", "Checked brief"];
 
-function App() {
+function App({ active }: { active: boolean }) {
   const [step, setStep] = useState(1);
   const [request, setRequest] = useState("");
   const [session, setSession] = useState<Session | null>(null);
@@ -890,14 +988,20 @@ function App() {
 
   useEffect(() => {
     if (!session) return;
+    let timer: number;
     const expire = () => {
-      if (Date.parse(session.expiresAt) > Date.now()) return;
+      const remaining = Date.parse(session.expiresAt) - Date.now();
+      if (remaining > 0) {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(expire, remaining);
+        return;
+      }
       startNewRequest();
       setRequest("");
       setLocalData(readBrowserJobs());
       setServiceError("This job reached its original expiry. Its request, results, and access capability are no longer available in this tab.");
     };
-    const timer = window.setTimeout(expire, Math.max(0, Date.parse(session.expiresAt) - Date.now()));
+    timer = window.setTimeout(expire, Math.max(0, Date.parse(session.expiresAt) - Date.now()));
     window.addEventListener("focus", expire);
     document.addEventListener("visibilitychange", expire);
     return () => {
@@ -906,6 +1010,7 @@ function App() {
       document.removeEventListener("visibilitychange", expire);
     };
   }, [session]);
+  useEffect(() => { if (!active) setPassageRef(null); }, [active]);
 
   useEffect(() => {
     if (!previousJob) return;
@@ -1202,15 +1307,9 @@ function App() {
   const assessmentAvailable = assessmentState === "ready" && !!assessment;
 
   return (
-    <main className="app-shell">
-      <header className="app-header">
-        <a href="/" className="brand" aria-label="Memory Bank home"><span className="brand-mark" aria-hidden="true">M</span><span>Memory Bank</span></a>
-        <span className="fictional-banner">Fictional examples only</span>
-        <a href="?knowledge">Reviewed decisions and lessons</a>
-
-        {(session || previousJob || step > 1) && <button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</button>}
-      </header>
+    <>
       <section className="workflow" aria-labelledby="workflow-title">
+        {(session || previousJob || step > 1) && <div className="workflow-actions"><Button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</Button></div>}
         <div className="intro">
           <p className="eyebrow">Evidence-grounded work planning</p>
           <h1 id="workflow-title">Build a checked work brief</h1>
@@ -1264,10 +1363,12 @@ function App() {
           <section className="screen" aria-labelledby="request-title">
             <div className="screen-heading"><span className="step-kicker">Step 1 of 4</span><h2 id="request-title">What does the client need?</h2><p>Describe the request and constraints. This is sent to the service to check against fictional past examples.</p></div>
             <form onSubmit={submitRequest} className="request-form">
-              <label htmlFor="client-request">Client request</label>
-              <textarea id="client-request" name="request" value={request} onChange={(event) => setRequest(event.currentTarget.value)} rows={8} maxLength={6000} required placeholder="Describe the requested work, relevant constraints, and what a useful outcome would look like." />
-              <p className="field-hint">Do not include sensitive personal information.</p>
-              <button className="primary-button" type="submit" disabled={submittingRequest || !request.trim()}>{submittingRequest ? "Sending request…" : "Check past examples"}</button>
+              <Field.Root name="request">
+                <Field.Label htmlFor="client-request">Client request</Field.Label>
+                <Field.Control render={<textarea id="client-request" rows={8} maxLength={6000} required placeholder="Describe the requested work, relevant constraints, and what a useful outcome would look like." />} value={request} onValueChange={setRequest} />
+                <Field.Description className="field-hint">Do not include sensitive personal information.</Field.Description>
+              </Field.Root>
+              <Button className="primary-button" type="submit" disabled={submittingRequest || !request.trim()}>{submittingRequest ? "Sending request…" : "Check past examples"}</Button>
             </form>
           </section>
         )}
@@ -1400,12 +1501,12 @@ function App() {
         )}
       </section>
       <EvidenceDialog sourceRef={passageRef} onClose={() => setPassageRef(null)} />
-      <footer className="app-footer"><span>Memory Bank</span><span>Fictional evidence · checked before use</span></footer>
-    </main>
+    </>
   );
 }
 
-const knowledgeQuery = new URLSearchParams(window.location.search);
-createRoot(document.getElementById("root")!).render(knowledgeQuery.has("knowledge")
-  ? <KnowledgePage recordId={knowledgeQuery.get("knowledge") || undefined} />
-  : <App />);
+createRoot(document.getElementById("root")!).render(<AppShell
+  ask={(active) => <App active={active} />}
+  sources={<SourcesPage />}
+  knowledge={(recordId) => <KnowledgePage key={recordId ?? "all"} recordId={recordId} />}
+/>);
