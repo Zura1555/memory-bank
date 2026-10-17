@@ -404,7 +404,12 @@ export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): As
         kind: "interpretation",
         sourceRefs: resolveRefs(work.recommendation.sourceRefs),
         requestQuotes: work.recommendation.requestQuotes,
-        dependsOnClaimIds: claimIds,
+        // The classification is a server-generated label of the disposition
+        // recommendation alone. Depending on every supporting/blocker/
+        // verification claim made one peripheral withheld claim erase the
+        // independently reviewed disposition through dependency closure;
+        // those claims are reviewed and filtered individually instead.
+        dependsOnClaimIds: [dispositionClaimId],
       });
       return {
         artifactId: work.artifactId,
