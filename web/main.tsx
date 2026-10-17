@@ -9,6 +9,7 @@ import { Collapsible } from "@base-ui/react/collapsible";
 import { AppShell } from "./shell";
 import type {
   ArtifactAssessment,
+  ArtifactRole,
   AssessmentResult,
   AssessmentConclusion,
   ComparisonRow,
@@ -28,6 +29,7 @@ import type {
   OutcomeStatus,
   PassageView,
   PhaseState,
+  RequestConstraints,
   Selection,
   SourceRef,
   SourceCatalogEntry,
@@ -143,7 +145,14 @@ function isComparison(value: unknown): value is ComparisonRow {
     && (value.requirementClaimId !== null || value.relation === "unknown");
 }
 
-function isAssessment(value: unknown): value is AssessmentResult {
+function isRequestConstraints(value: unknown): value is RequestConstraints {
+  return isRecord(value)
+    && Object.keys(value).length === 5
+    && ["product_version", "environment", "scale", "identity_access", "recovery_operations"]
+      .every((dimension) => isTextList(value[dimension]) && value[dimension].length <= 8);
+}
+
+function isAssessment(value: unknown, request: string): value is AssessmentResult {
   if (!isRecord(value)
     || !Array.isArray(value.cases) || !value.cases.every(isCaseAssessment)
     || !Array.isArray(value.leads) || !value.leads.every(isLead)
@@ -151,13 +160,19 @@ function isAssessment(value: unknown): value is AssessmentResult {
     || !Array.isArray(value.claims) || !value.claims.every(isClaim)
     || !isAssessmentConclusion(value.conclusion)
     || !isTextList(value.clarifyingClaimIds)
+    || !isRequestConstraints(value.requestConstraints)
+    || !Array.isArray(value.artifactReviews) || !value.artifactReviews.every((item: unknown) =>
+      isRecord(item) && isText(item.caseId) && isText(item.artifactId) && ["starting_point", "context_only", "not_relevant", "unresolved"].includes(item.role as string))
     || !Array.isArray(value.comparisons) || value.comparisons.length > 24 || !value.comparisons.every(isComparison)
     || !Array.isArray(value.nextActions) || value.nextActions.length > 3
     || !value.nextActions.every((item: unknown) => isRecord(item) && isText(item.caseId) && isText(item.artifactId) && isText(item.claimId))
     || !isCount(value.withheldClaimCount)) return false;
+  const requestConstraints = value.requestConstraints;
+  if (Object.values(requestConstraints).some((quotes) => quotes.some((quote) => !request.includes(quote)))) return false;
   const claims = new Map<string, Claim>(value.claims.map((claim: Claim) => [claim.claimId, claim]));
   if (claims.size !== value.claims.length || value.claims.some((claim: Claim) => claim.dependsOnClaimIds.some((id) => !claims.has(id)))) return false;
   if (!value.comparisons.every((row: ComparisonRow) =>
+    (row.requirementClaimId === null) === (requestConstraints[row.dimension].length === 0) &&
     (row.requirementClaimId === null || (claims.get(row.requirementClaimId)?.kind === "interpretation"
       && claims.get(row.requirementClaimId)?.requestQuotes.length === 1))
     && claims.get(row.evidenceClaimId)?.kind === "source_fact"
@@ -167,6 +182,11 @@ function isAssessment(value: unknown): value is AssessmentResult {
     && (row.requirementClaimId === null || claims.get(row.assessmentClaimId)?.dependsOnClaimIds.includes(row.requirementClaimId))
     && claims.get(row.implicationClaimId)?.dependsOnClaimIds.includes(row.assessmentClaimId))) return false;
   const cases: CaseAssessment[] = value.cases;
+  const roles = new Map<string, ArtifactRole>(value.artifactReviews.map((item: { caseId: string; artifactId: string; role: ArtifactRole }) => [`${item.caseId}/${item.artifactId}`, item.role]));
+  if (roles.size !== value.artifactReviews.length
+    || value.artifactReviews.some((review: { caseId: string; artifactId: string }) => !cases.some((item) => item.caseId === review.caseId && item.artifactWork.some((work) => work.artifactId === review.artifactId)))
+    || cases.some((item) => item.artifactWork.some((work) => work.availability !== "unavailable" && !roles.has(`${item.caseId}/${work.artifactId}`)))
+    || cases.some((item) => item.artifactWork.some((work) => (work.disposition === "reuse" || work.disposition === "adapt") && roles.get(`${item.caseId}/${work.artifactId}`) !== "starting_point"))) return false;
   if (!value.nextActions.every((action: { caseId: string; artifactId: string; claimId: string }) => {
     const work = cases.find((item) => item.caseId === action.caseId)?.artifactWork.find((item) => item.artifactId === action.artifactId);
     return work?.disposition && [...work.verificationClaimIds, ...work.blockerClaimIds].includes(action.claimId)
@@ -182,9 +202,9 @@ function visibleConclusion(result: AssessmentResult, claims: ClaimMap): Assessme
   const hasSupportedLead = result.leads.some((lead) => claimsFor(lead.reasonClaimIds, claims).length > 0);
   if (result.conclusion === "no_useful_precedent"
     && (result.cases.length !== 8
-      || result.cases.some((item) => item.availability !== "available" || item.outcome === "unknown")
+      || result.cases.some((item) => item.availability !== "available")
       || result.leads.length > 0
-      || result.withheldClaimCount > 0)) {
+      || result.artifactReviews.some((item) => item.role === "starting_point" || item.role === "unresolved"))) {
     return "cannot_be_established";
   }
   if (result.conclusion === "precedent_found" && !hasSupportedLead) return "cannot_be_established";
@@ -236,7 +256,7 @@ function isJobView(value: unknown): value is JobView {
     && isDuration(value.assessmentProcessingMs)
     && isDuration(value.briefQueueWaitMs)
     && isDuration(value.briefProcessingMs)
-    && (value.assessment === undefined || isAssessment(value.assessment))
+    && (value.assessment === undefined || isAssessment(value.assessment, value.request))
     && (value.brief === undefined || isBrief(value.brief))
     && (value.error === undefined || (isRecord(value.error) && isText(value.error.code) && isText(value.error.message) && typeof value.error.retryable === "boolean"));
 }
@@ -258,6 +278,7 @@ function JobTimings({ job }: { job: JobView }) {
           {job.assessmentQueueWaitMs !== null && <div><dt>Observed queue wait</dt><dd>{formatDuration(job.assessmentQueueWaitMs)}</dd></div>}
           {job.assessmentProcessingMs !== null && <div><dt>Observed processing time</dt><dd>{formatDuration(job.assessmentProcessingMs)}</dd></div>}
         </dl>
+        {job.assessmentState !== "not_started" && job.assessmentQueueWaitMs === null && job.assessmentProcessingMs === null && <p className="timing-target">Observed timing unavailable: timestamps are missing or inconsistent.</p>}
       </div>
       <div className="timing-phase">
         <h3>Brief</h3>
@@ -266,6 +287,7 @@ function JobTimings({ job }: { job: JobView }) {
           {job.briefQueueWaitMs !== null && <div><dt>Observed queue wait</dt><dd>{formatDuration(job.briefQueueWaitMs)}</dd></div>}
           {job.briefProcessingMs !== null && <div><dt>Observed processing time</dt><dd>{formatDuration(job.briefProcessingMs)}</dd></div>}
         </dl>
+        {job.briefState !== "not_started" && job.briefQueueWaitMs === null && job.briefProcessingMs === null && <p className="timing-target">Observed timing unavailable: timestamps are missing or inconsistent.</p>}
       </div>
     </section>
   );
@@ -664,6 +686,7 @@ function WorkCard({
   item,
   caseId,
   availability,
+  reviewRole,
   claims,
   draft,
   onChange,
@@ -672,6 +695,7 @@ function WorkCard({
   item: ArtifactAssessment;
   caseId: string;
   availability: CaseAvailability;
+  reviewRole: ArtifactRole | undefined;
   claims: ClaimMap;
   draft: WorkDraft;
   onChange: (next: WorkDraft) => void;
@@ -687,7 +711,7 @@ function WorkCard({
   const passageRefs = Array.from(new Map(
     refs.filter((ref) => ref.versionId === selectedVersion).map((ref) => [ref.passageId, ref]),
   ).values());
-  const canSelect = item.availability !== "unavailable" && (availability === "available" || availability === "partial") && hasSupportedWorkClaim && versions.length > 0;
+  const canSelect = item.disposition !== null && item.availability !== "unavailable" && (availability === "available" || availability === "partial") && hasSupportedWorkClaim && versions.length > 0;
   const blocked = item.availability === "unavailable" || availability === "failed" || availability === "unavailable";
   return (
     <article className={`work-card${draft.selected ? " work-card-selected" : ""}`}>
@@ -700,6 +724,8 @@ function WorkCard({
           ? <Badge tone="unavailable">Not assessed</Badge>
           : hasSupportedWorkClaim && item.disposition
             ? <Badge tone={item.disposition}>{label(item.disposition)}</Badge>
+            : reviewRole === "context_only" || reviewRole === "not_relevant"
+              ? <Badge tone="neutral">{reviewRole === "context_only" ? "Context only" : "Not applicable"}</Badge>
             : <Badge tone="unknown">Disposition withheld</Badge>}
       </div>
       <div className="badge-row status-row">
@@ -842,7 +868,7 @@ function PackExport({ session, expiresAt }: { session: Session; expiresAt: strin
   return <section className="content-section" aria-labelledby="pack-title">
     <h3 id="pack-title">Export evidence-linked starter pack</h3>
     <p>Review reusable material, required adaptations, and blocked verification below. Export preserves the checked brief, selected version inventory, hashes, reviewed context, and cited excerpts without another model call.</p>
-    <p>Fictional data only; not production approval. Excerpts remain readable offline. Originals are linked, not bundled or changed; live links are not guaranteed indefinitely. New exports stop at job expiry: <time dateTime={expiresAt}>{new Date(expiresAt).toLocaleString()}</time>.</p>
+    <p>Fictional data only; not production approval. Excerpts remain readable offline. Originals are linked, not bundled or changed; live links are not guaranteed indefinitely. New exports stop at the application job expiry shown above.</p>
     <div className="action-row">
       <button className="secondary-button" type="button" disabled={busy || expired} onClick={() => void download("markdown")}>Download Markdown pack</button>
       <button className="secondary-button" type="button" disabled={busy || expired} onClick={() => void download("json")}>Download JSON manifest</button>
@@ -1388,6 +1414,7 @@ function App({ active }: { active: boolean }) {
         </nav>
 
         {serviceError && <p role="alert" className="notice notice-error">{serviceError}</p>}
+        {step > 1 && job && <p className="field-hint">Application job access expires: <time dateTime={job.expiresAt}>{new Date(job.expiresAt).toLocaleString()}</time> (seven days after creation). Provider/platform and backup retention is separate; downloaded packs remain on your device.</p>}
         {step > 1 && job && <JobTimings job={job} />}
         {session && job && (assessmentAvailable || (job.briefState === "ready" && job.brief)) && (
           <div className="action-row">
@@ -1404,8 +1431,10 @@ function App({ active }: { active: boolean }) {
             <form onSubmit={submitRequest} className="request-form">
               <Field.Root name="request">
                 <Field.Label htmlFor="client-request">Client request</Field.Label>
-                <Field.Control render={<textarea id="client-request" rows={8} maxLength={6000} required placeholder="Describe the requested work, relevant constraints, and what a useful outcome would look like." />} value={request} onValueChange={setRequest} />
-                <Field.Description className="field-hint">Do not include sensitive personal information.</Field.Description>
+                <Field.Control render={<textarea id="client-request" aria-describedby="request-hint request-processing request-retention" rows={8} maxLength={6000} required placeholder="Describe the requested work, relevant constraints, and what a useful outcome would look like." />} value={request} onValueChange={setRequest} />
+                <Field.Description id="request-hint" className="field-hint">Do not include sensitive personal information.</Field.Description>
+                <p id="request-processing" className="field-hint">Requests, fictional evidence, and generated drafts/reviews are sent through <a href="https://openrouter.ai/privacy">OpenRouter</a> to <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI</a>. The deployed app uses <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a> for processing/storage and <a href="https://neon.com/privacy-policy">Neon</a> for job storage; development uses local platform/database equivalents.</p>
+                <p id="request-retention" className="field-hint">Application request/results and job access expire seven days after creation; minimal billing and replay-prevention records remain. Provider/platform copies follow the linked policies, not this seven-day expiry; backup retention is separate. Downloaded packs remain on your device.</p>
               </Field.Root>
               <Button className="primary-button" type="submit" disabled={submittingRequest || !request.trim()}>{submittingRequest ? "Sending request…" : "Check past examples"}</Button>
             </form>
@@ -1428,8 +1457,8 @@ function App({ active }: { active: boolean }) {
                 <div><strong>{submittingRequest ? "Submitting request for admission" : assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job?.stage ?? "assembling")}</strong><p>No result is shown until the evidence check is ready.</p></div>
               </div>
             )}
-            {assessmentState === "failed" && <div className="notice notice-error" role="alert"><strong>Evidence check failed.</strong> No past-example result is available.</div>}
-            {assessmentState === "reconciliation_required" && <div className="notice notice-warning" role="alert"><strong>Evidence reconciliation is required.</strong> Results are withheld until the checked evidence can be reconciled.</div>}
+            {assessmentState === "failed" && <div className="notice notice-error" role="alert"><strong>Assessment failed.</strong> {job?.error?.message ?? "No checked past-example result is available."}</div>}
+            {assessmentState === "reconciliation_required" && <div className="notice notice-warning" role="alert"><strong>Assessment needs operator reconciliation.</strong> {job?.error?.message ?? "The service could not establish the dispatch outcome. No automatic retry was made."}</div>}
             {assessmentState === "ready" && !assessment && <div className="notice notice-error" role="alert">The service did not return a supported checked assessment. No result is shown.</div>}
             {!session && !submittingRequest && submittedClarification && <p className="notice notice-warning" role="status">No current checked answer is available. Previous content is historical only. No selections or dependent brief remain.</p>}
             {assessmentAvailable && (
@@ -1500,7 +1529,7 @@ function App({ active }: { active: boolean }) {
             {!assessmentAvailable && <div className="notice notice-warning" role="alert">A ready, supported assessment is required before work can be selected.</div>}
             {assessmentAvailable && workChoices.length === 0 && <div className="empty-state">No checked work artifacts are available for selection.</div>}
             {assessmentAvailable && workChoices.length > 0 && <div className="work-list">{workChoices.map(({ caseId, availability, item, sourceRefs, key }) => (
-              <WorkCard key={key} caseId={caseId} availability={availability} item={item} claims={assessmentClaims} draft={getDraft(key, sourceRefs)} onChange={(next) => updateDraft(key, next)} inspect={setPassageRef} />
+              <WorkCard key={key} caseId={caseId} availability={availability} item={item} reviewRole={assessment.artifactReviews.find((review) => review.caseId === caseId && review.artifactId === item.artifactId)?.role} claims={assessmentClaims} draft={getDraft(key, sourceRefs)} onChange={(next) => updateDraft(key, next)} inspect={setPassageRef} />
             ))}</div>}
             {selectedCount > 0 && !selectionsValid && <p className="notice notice-warning" role="status">Each selected artifact needs at least one checked passage from its chosen retained version.</p>}
             {selectedCount === 0 && assessmentAvailable && workChoices.length > 0 && <p className="field-hint">No work is selected. Choosing work is required to make a brief.</p>}
@@ -1521,8 +1550,8 @@ function App({ active }: { active: boolean }) {
               </div>
             )}
             {briefState === "ready" && !job?.brief && pollMode === "brief" && <div className="status-panel" role="status" aria-live="polite"><span className="status-indicator" aria-hidden="true" /><div><strong>Retrieving the checked brief</strong><p>The service reported readiness; the checked result is still being fetched.</p></div></div>}
-            {briefState === "failed" && <div className="notice notice-error" role="alert"><strong>Brief check failed.</strong> No checked brief is available.</div>}
-            {briefState === "reconciliation_required" && <div className="notice notice-warning" role="alert"><strong>Brief reconciliation is required.</strong> No unsupported brief content is shown.</div>}
+            {briefState === "failed" && <div className="notice notice-error" role="alert"><strong>Brief check failed.</strong> {job?.error?.message ?? "No checked brief is available."}</div>}
+            {briefState === "reconciliation_required" && <div className="notice notice-warning" role="alert"><strong>Brief needs operator reconciliation.</strong> {job?.error?.message ?? "The service could not establish the dispatch outcome. No automatic retry was made."}</div>}
             {briefState === "ready" && !job?.brief && pollMode !== "brief" && <div className="notice notice-error" role="alert">The service did not return a supported checked brief. No result is shown.</div>}
             {briefState === "ready" && job?.brief && (
               <>

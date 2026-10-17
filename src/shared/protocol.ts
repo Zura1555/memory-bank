@@ -56,6 +56,13 @@ export interface ClaimReview {
   verdict: SupportVerdict;
 }
 
+export type ArtifactRole = "starting_point" | "context_only" | "not_relevant" | "unresolved";
+export interface ArtifactReview {
+  caseId: string;
+  artifactId: string;
+  role: ArtifactRole;
+}
+
 export interface ArtifactAssessment {
   artifactId: string;
   availability: "available" | "partial" | "unavailable";
@@ -93,6 +100,8 @@ export interface ComparisonRow {
   implicationClaimId: string;
 }
 
+export type RequestConstraints = Record<ComparisonRow["dimension"], string[]>;
+
 export interface NextAction {
   caseId: string;
   artifactId: string;
@@ -103,6 +112,8 @@ export interface AssessmentResult {
   conclusion: AssessmentConclusion;
   clarifyingClaimIds: string[];
   comparisons: ComparisonRow[];
+  requestConstraints: RequestConstraints;
+  artifactReviews: ArtifactReview[];
   nextActions: NextAction[];
   cases: CaseAssessment[];
   leads: Lead[];
