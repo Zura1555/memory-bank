@@ -195,6 +195,54 @@ test("brief disposition is withheld when its recommendation claim is unsupported
 });
 
 
+test("checked brief survives only when each item carries its own atomic quotation claims", () => {
+  const corpus = fixture();
+  const request = "Keep source keys separate. Stop before replay when state is unclear.";
+  const quotes = ["Keep source keys separate.", "Stop before replay when state is unclear."];
+  const selections = [
+    { caseId: "case-1", artifactId: "request", versionId: "request-v1" },
+    { caseId: "case-1", artifactId: "handover", versionId: "handover-v1-case-1" },
+  ];
+  const refsFor = (item: typeof selections[number]) => [{
+    caseId: item.caseId, artifactId: item.artifactId, versionId: item.versionId,
+    passageId: item.artifactId === "request" ? "p-request-v1" : "p-handover-v1-case-1",
+  }];
+  const claimsFor = (item: typeof selections[number], prefix: string): Claim[] => [
+    { claimId: `${prefix}-disposition`, kind: "recommendation", text: "Adapt this work for the new request after the checks below.", sourceRefs: refsFor(item), requestQuotes: [], dependsOnClaimIds: [] },
+    ...quotes.map((quote, index) => ({
+      claimId: `${prefix}-quote-${index}`, kind: "recommendation" as const,
+      text: `Check this before adapting: ${quote}`, sourceRefs: refsFor(item), requestQuotes: [quote], dependsOnClaimIds: [],
+    })),
+  ];
+  const draft: BriefDraft = {
+    reuse: [], verify: [],
+    adapt: selections.map((item, index) => {
+      const claims = claimsFor(item, `item-${index}`);
+      return { ...item, disposition: "adapt" as const, dispositionClaimId: claims[0].claimId, claimIds: claims.map((claim) => claim.claimId) };
+    }),
+    claims: selections.flatMap((item, index) => claimsFor(item, `item-${index}`)),
+  };
+  const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
+  const constraintReviews = selections.map((item) => ({ ...item, requestQuotes: quotes }));
+  const checked = buildCheckedBrief(draft, verdicts, validateBriefDraft(draft, request, selections, corpus), { request, constraintReviews });
+  assert.deepEqual(checked.adapt.map((item) => item.artifactId), ["request", "handover"],
+    "A shared quotation repeated as a dedicated atomic claim per item covers both items.");
+  assert.equal(checked.withheldClaimCount, 0);
+
+  // The captured failure shape: one item's disposition prose carries the shared
+  // quotation while its metadata names only another quotation, and it has no
+  // dedicated claim for the shared one. The other item's coverage cannot save it.
+  const doomed = structuredClone(draft);
+  const disposition = doomed.claims.find((claim) => claim.claimId === "item-0-disposition")!;
+  disposition.text = `Adapt this work: ${quotes[0]} ${quotes[1]}`;
+  disposition.requestQuotes = [quotes[0]];
+  doomed.claims = doomed.claims.filter((claim) => claim.claimId !== "item-0-quote-1");
+  doomed.adapt[0].claimIds = doomed.adapt[0].claimIds.filter((claimId) => claimId !== "item-0-quote-1");
+  const withheld = buildCheckedBrief(doomed, verdicts, validateBriefDraft(doomed, request, selections, corpus), { request, constraintReviews });
+  assert.deepEqual(withheld.adapt.map((item) => item.artifactId), ["handover"],
+    "A quotation present only in prose, without matching metadata on that item, withholds that item.");
+});
+
 test("support review must cover each claim exactly once", () => {
   const claim: Claim = {
     claimId: "claim-one",
@@ -298,6 +346,41 @@ test("artifact recommendations and role claims remain independently reviewable",
       }),
     })),
   };
+  // A current-client constraint is not a historical fact merely because it cites a past request.
+  const requestClaim = { ...output.claims[0], kind: "source_fact" as const, outcomeEvidence: false as const, text: "The current request states: current request.", requestQuotes: ["current request"] };
+  const mistakenRequirement = structuredClone(output);
+  mistakenRequirement.claims[0] = requestClaim;
+  assert.equal(assessmentDraftSchema.safeParse(mistakenRequirement).success, false);
+  const generation = assessmentDraftPrompt("current request", corpus).responseSchema!;
+  const providerSchema = openRouterSchema("assessment", generation).json_schema.schema;
+  assert.doesNotMatch(JSON.stringify(providerSchema), /"allOf":/, "OpenAI Structured Outputs rejects allOf composition.");
+  const provider = new Ajv({ strict: false }).compile(providerSchema);
+  const wire = {
+    ...mistakenRequirement,
+    cases: Object.fromEntries(mistakenRequirement.cases.map(({ caseId, artifactWork, outcome }) => [caseId, {
+      outcome, tier: "context",
+      artifactWork: Object.fromEntries(artifactWork.map(({ artifactId, ...work }) => [artifactId, work])),
+    }])),
+  };
+  const { leads: _leads, contrasts: _contrasts, ...providerWire } = wire;
+  assert.equal(provider(providerWire), false);
+  mistakenRequirement.claims[0] = { ...requestClaim, kind: "interpretation" };
+  assert.equal(assessmentDraftSchema.safeParse(mistakenRequirement).success, true);
+  providerWire.claims[0] = { ...requestClaim, kind: "interpretation" };
+  assert.equal(provider(providerWire), true);
+  mistakenRequirement.cases[0].artifactWork[0].recommendation.dependsOnClaimIds = [requestClaim.claimId];
+  const requirementDraft = parseAssessmentDraft(mistakenRequirement, corpus);
+  const requirementInvalid = validateAssessmentDraft(requirementDraft, "current request", corpus);
+  const requirementVerdicts = new Map<string, SupportVerdict>(requirementDraft.claims.map((claim) => [claim.claimId, "supported"]));
+  const buildRequirement = () => buildCheckedAssessment(requirementDraft, requirementVerdicts, requirementInvalid, corpus, artifactRoles(requirementDraft), emptyRequirementReview);
+  const selection = [{ caseId: "case-1", artifactId: "request", versionId: "request-v1", passageIds: ["p-request-v1"] }];
+  assert.equal(buildRequirement().cases[0].artifactWork[0].disposition, "adapt");
+  assert.deepEqual(validateSelections(selection, buildRequirement(), corpus), selection);
+  for (const verdict of ["uncertain", "unsupported"] as const) {
+    requirementVerdicts.set(requestClaim.claimId, verdict);
+    assert.equal(buildRequirement().cases[0].artifactWork[0].disposition, null);
+    assert.throws(() => validateSelections(selection, buildRequirement(), corpus));
+  }
   const { claimId: _, ...blocker } = {
     ...draft.claims[0], kind: "recommendation" as const, text: "Verify the new target before adaptation.",
     sourceRefs: draft.claims[0].sourceRefs.map((ref) => wireIds.get(ref.passageId)!),
@@ -928,6 +1011,12 @@ test("provider generation binds request inventories and each case claim to their
   const ownContrast = structuredClone(valid);
   Object.assign(ownContrast.cases["case-1"], { tier: "contrast", state: "partial", reasons: [reason], comparisons: [{ dimension: "environment", requirementQuote: null, relation: "unknown", evidence: cell, assessment: cell, implication: cell }] });
   assert.equal(validate(ownContrast), true);
+  const inventedReasonQuote = structuredClone(ownContrast);
+  Object.assign(inventedReasonQuote.cases["case-1"], { reasons: [{ ...reason, requestQuotes: [`${request}?`] }] });
+  assert.equal(validate(inventedReasonQuote), false, "A fabricated quotation must not poison an otherwise supported lead reason.");
+  const quotedHistoricalReason = structuredClone(ownContrast);
+  Object.assign(quotedHistoricalReason.cases["case-1"], { reasons: [{ ...reason, kind: "source_fact", requestQuotes: ["Named operators need recovery evidence."] }] });
+  assert.equal(validate(quotedHistoricalReason), false, "Provider and normalized schemas must agree on historical reason quotations.");
   const normalizedContrast = assessmentDraftPrompt(request, corpus).responseSchema!.parse(ownContrast) as AssessmentOutput;
   assert.equal(normalizedContrast.claims.find((claim) => claim.claimId === normalizedContrast.contrasts[0].reasonClaimIds[0])?.caseId, "case-1");
   const foreignReason = structuredClone(ownContrast);
@@ -978,7 +1067,7 @@ test("brief generation cannot add an unselected background artifact", async () =
   const output: BriefDraft = {
     reuse: [], verify: [],
     adapt: [{ caseId: selected[0].caseId, artifactId: selected[0].artifactId, versionId: selected[0].versionId, disposition: "adapt", dispositionClaimId: "choose", claimIds: ["choose"] }],
-    claims: [{ claimId: "choose", kind: "recommendation", text: "Adapt the selected procedure after checking compatibility.", sourceRefs: [{ caseId: selected[0].caseId, artifactId: selected[0].artifactId, versionId: selected[0].versionId, passageId: selected[0].passageIds[0] }], requestQuotes: ["current request"], dependsOnClaimIds: [] }],
+    claims: [{ claimId: "choose", kind: "recommendation", text: "Check the current request before adapting the selected procedure.", sourceRefs: [{ caseId: selected[0].caseId, artifactId: selected[0].artifactId, versionId: selected[0].versionId, passageId: selected[0].passageIds[0] }], requestQuotes: ["current request"], dependsOnClaimIds: [] }],
   };
   const selectedKey: string = "case-1/handover/handover-v1-case-1";
   const wireOutput = {
@@ -1002,6 +1091,35 @@ test("brief generation cannot add an unselected background artifact", async () =
   assert.deepEqual(normalized.claims, output.claims, "A supplied context label must resolve to its unchanged canonical identity.");
   const validate = new Ajv({ strict: false }).compile(providerSchema!);
   assert.equal(validate(wireOutput), true);
+  assert.doesNotMatch(JSON.stringify(providerSchema), /"allOf":/);
+  const lostQuote = structuredClone(wireOutput);
+  lostQuote.claims[0].text = "Adapt after checking client compatibility.";
+  assert.equal(validate(lostQuote), true, "The brief provider grammar omits long unanchored quote patterns; it no longer rejects hidden metadata by itself.");
+  assert.equal(prompt.responseSchema!.safeParse(lostQuote).success, false, "Runtime parsing still rejects hidden request metadata instead of visible recommendation constraints.");
+  const requestAsHistory = structuredClone(wireOutput);
+  requestAsHistory.claims[0].kind = "source_fact";
+  assert.equal(validate(requestAsHistory), false);
+  const literalRequest = "Use [sandbox].";
+  const literalPrompt = briefDraftPrompt(literalRequest, selected, corpus, checked);
+  const literalWire = structuredClone(wireOutput);
+  literalWire.claims[0].requestQuotes = [literalRequest];
+  literalWire.claims[0].text = `Verify the requested constraint: ${literalRequest}`;
+  const validateLiteral = new Ajv({ strict: false }).compile(openRouterSchema("brief", literalPrompt.responseSchema!, { omitUnanchoredTextPatterns: true }).json_schema.schema);
+  assert.equal(validateLiteral(literalWire), true);
+  literalWire.claims[0].text = "Verify the requested constraint: Use s.";
+  assert.equal(literalPrompt.responseSchema!.safeParse(literalWire).success, false, "Request punctuation is literal at runtime, not a user-supplied regular expression.");
+  const multiRequest = "First decisive sentence. Second decisive sentence.";
+  const multiPrompt = briefDraftPrompt(multiRequest, selected, corpus, checked);
+  assert.match(multiPrompt.instructions, /dedicated atomic recommendation claim/);
+  assert.match(multiPrompt.instructions, /No claim's text may contain a verbatim complete request sentence\/chunk other than its own sole requestQuotes entry/);
+  const strayWire = structuredClone(wireOutput);
+  strayWire.claims[0].requestQuotes = ["First decisive sentence."];
+  strayWire.claims[0].text = "Check the request: First decisive sentence. Second decisive sentence.";
+  assert.equal(multiPrompt.responseSchema!.safeParse(strayWire).success, false,
+    "A quotation in prose but not in the carrying claim's metadata is rejected at parse time, before independent review is spent.");
+  strayWire.claims[0].text = "Check the request: First decisive sentence.";
+  assert.equal(multiPrompt.responseSchema!.safeParse(strayWire).success, true,
+    "A dedicated atomic claim carrying its quotation in both prose and metadata still parses.");
   const unselected = structuredClone(wireOutput);
   unselected.items["case-1/request/request-v1"] = structuredClone(unselected.items[selectedKey]);
   assert.equal(validate(unselected), false, "Full case background cannot add an unselected brief item.");

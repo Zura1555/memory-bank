@@ -194,7 +194,8 @@ test("compatible providers normalize reviews but reject foreign claims and trunc
         } else {
           await assert.rejects(callModel(env, "brief_review", prompt), (error: unknown) => {
             assert.ok(error instanceof ModelCallError);
-            assert.equal(error.code, scenario === "foreign-claim" ? "MODEL_OUTPUT_SCHEMA_INVALID" : "MODEL_OUTPUT_INCOMPLETE_OR_REFUSED");
+            assert.equal(error.code, scenario === "foreign-claim" ? "MODEL_OUTPUT_SCHEMA_INVALID"
+              : provider === "anthropic" ? "MODEL_OUTPUT_INCOMPLETE_OR_REFUSED" : "MODEL_OUTPUT_TOKEN_LIMIT");
             assert.equal(error.uncertain, true);
             assert.equal(error.generationId, id);
             return true;
@@ -305,7 +306,8 @@ test("Go protocols preserve review validation, usage, and per-job identity over 
           });
         } else {
           await assert.rejects(callModel(env, "brief_review", prompt, session), {
-            code: scenario === "foreign-claim" ? "MODEL_OUTPUT_SCHEMA_INVALID" : "MODEL_OUTPUT_INCOMPLETE_OR_REFUSED",
+            code: scenario === "foreign-claim" ? "MODEL_OUTPUT_SCHEMA_INVALID"
+              : api === "chat-completions" ? "MODEL_OUTPUT_TOKEN_LIMIT" : "MODEL_OUTPUT_INCOMPLETE_OR_REFUSED",
             generationId: id, uncertain: true,
           });
         }
@@ -356,6 +358,109 @@ test("Responses refuses partial, refused, ambiguous, or non-JSON outputs and pre
       } as Env, "brief_review", {
         instructions: "Review fictional evidence", untrustedData: {}, reviewTargets: { claimIds: [], selections: [] },
       }, "job-one"), { code, generationId: "resp_diagnostic", uncertain: true, status: 200 });
+      assert.equal(requests, 1);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+test("brief provider grammar omits sentence patterns while runtime parsing still requires the visible quotation", async () => {
+  const { briefDraftSchemaFor } = await import("./schemas.ts");
+  const request = "Check the target window first.";
+  const corpus = {
+    manifest: { schemaVersion: 2, corpusVersion: "test", cases: [{
+      caseId: "case-1", title: "Case", fictional: true, records: [],
+      artifacts: [{ artifactId: "art", title: "Art", fictional: true, versions: [{
+        versionId: "art-v1", sourcePath: "corpora/test/originals/x", mimeType: "text/plain", sha256: "x",
+        statedDate: null, importedAt: "2026-01-01", extractionStatus: "complete", exclusionReasons: [],
+        passages: [{ passageId: "p1", excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }],
+      }] }],
+    }] },
+    manifestSha256: "x", availableVersions: new Set(["art-v1"]), caseAvailability: new Map(),
+    passages: new Map([["p1", { caseId: "case-1", artifactId: "art", versionId: "art-v1", passageId: "p1", title: "Art", fictional: true, statedDate: null, excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }]]),
+    versions: new Map(),
+  } as never;
+  const selected = [{ caseId: "case-1", artifactId: "art", versionId: "art-v1", passageIds: ["p1"] }];
+  const prompt = { instructions: "Draft a brief", untrustedData: {}, responseSchema: briefDraftSchemaFor(request, selected, corpus) };
+  const wire = (text: string) => JSON.stringify({
+    items: { "case-1/art/art-v1": { disposition: "adapt", dispositionClaimId: "c1", claimIds: ["c1"] } },
+    claims: [{ claimId: "c1", kind: "recommendation", text, sourceRefs: ["e1"], requestQuotes: [request], dependsOnClaimIds: [] }],
+  });
+  const originalFetch = globalThis.fetch;
+  try {
+    let capturedSchema = "";
+    globalThis.fetch = async (_input, init) => {
+      capturedSchema = JSON.stringify(JSON.parse(init!.body as string).response_format.json_schema.schema);
+      return Response.json({ id: "gen-brief-visible-quote", choices: [{ finish_reason: "stop", message: { content: wire(`Adapt only after this check: ${request}`) } }] });
+    };
+    const accepted = await callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt);
+    assert.equal((accepted.output as { adapt: unknown[] }).adapt.length, 1);
+    const patterns: string[] = [];
+    const collect = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(collect);
+      if (typeof node !== "object" || node === null) return;
+      for (const [key, value] of Object.entries(node)) { if (key === "pattern") patterns.push(String(value)); collect(value); }
+    };
+    collect(JSON.parse(capturedSchema));
+    assert.ok(!patterns.some((pattern) => pattern.includes("Check the target")), "Provider schema must not embed the request sentence as a text pattern");
+    assert.ok(capturedSchema.includes("^[a-z0-9]"), "Anchored identity patterns stay in the provider grammar");
+
+    globalThis.fetch = async () => Response.json({
+      id: "gen-brief-hidden-quote", choices: [{ finish_reason: "stop", message: { content: wire("Adapt after checking compatibility.") } }],
+    });
+    await assert.rejects(callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt), (error: unknown) => {
+      assert.ok(error instanceof ModelCallError);
+      assert.equal(error.code, "MODEL_OUTPUT_SCHEMA_INVALID", "Hidden quotation metadata is still rejected before any brief is accepted");
+      return true;
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("unusable output retains reported usage and distinguishes safe failure conditions without retrying", async () => {
+  const originalFetch = globalThis.fetch;
+  const scenarios = [
+    { choices: [], code: "MODEL_OUTPUT_CHOICE_MISSING" },
+    { choices: [{ finish_reason: "length", message: { content: "PRIVATE_PARTIAL_OUTPUT" } }], code: "MODEL_OUTPUT_TOKEN_LIMIT" },
+    { choices: [{ finish_reason: "stop", message: { refusal: "PRIVATE_REFUSAL" } }], code: "MODEL_OUTPUT_REFUSED" },
+    { choices: [{ finish_reason: "content_filter" }], code: "MODEL_OUTPUT_CONTENT_FILTERED" },
+    { choices: [{ finish_reason: "PRIVATE_UNKNOWN_REASON" }], code: "MODEL_OUTPUT_NOT_STOPPED" },
+    { choices: [{ finish_reason: "stop", message: {} }], code: "MODEL_OUTPUT_CONTENT_MISSING" },
+    { choices: [{ finish_reason: "stop", message: { content: "PRIVATE_INVALID_JSON" } }], code: "MODEL_OUTPUT_INVALID_JSON" },
+    { choices: [{ finish_reason: "stop", message: { content: "{}" } }], code: "MODEL_OUTPUT_SCHEMA_INVALID" },
+    { choices: [{ finish_reason: "length" }], code: "MODEL_OUTPUT_TOKEN_LIMIT", unpriced: true },
+  ];
+  try {
+    for (const scenario of scenarios) {
+      let requests = 0;
+      globalThis.fetch = async () => {
+        requests++;
+        return Response.json({
+          id: "gen-unusable-output", model: "openai/gpt-6-luna", provider: "OpenAI",
+          choices: scenario.choices,
+          ...("unpriced" in scenario ? {} : { usage: { prompt_tokens: 100, completion_tokens: 20, cost: 0.001 } }),
+        });
+      };
+      await assert.rejects(callModel({ OPENROUTER_API_KEY: "synthetic-only" } as Env, "assessment_review", {
+        instructions: "Synthetic output failure", untrustedData: {},
+        reviewTargets: { claimIds: ["claim-one"], artifacts: [] },
+      }), (error: unknown) => {
+        assert.ok(error instanceof ModelCallError);
+        assert.equal(error.code, scenario.code);
+        assert.equal(error.uncertain, true, "Reported usage does not authorize releasing a hold or accepting output");
+        assert.equal(error.generationId, "gen-unusable-output");
+        assert.equal(error.failurePhase, "output_validation");
+        assert.deepEqual(error.usage, {
+          promptTokens: "unpriced" in scenario ? null : 100,
+          completionTokens: "unpriced" in scenario ? null : 20,
+          reportedCostUsd: "unpriced" in scenario ? null : 0.001,
+          responseId: "gen-unusable-output", requestedModel: "openai/gpt-6-luna",
+          returnedModel: "openai/gpt-6-luna", provider: "OpenAI",
+        });
+        assert.ok(!JSON.stringify(error).includes("PRIVATE_"));
+        return true;
+      });
       assert.equal(requests, 1);
     }
   } finally {

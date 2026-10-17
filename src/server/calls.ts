@@ -73,12 +73,16 @@ export async function runPaidStage(
     try {
       const updated = await pool.query(
         `UPDATE model_attempts SET state = $2, error_code = $3, generation_id = $4,
-           http_status = $5, failure_phase = $6, failure_cause = $7, completed_at = now()
+           http_status = $5, failure_phase = $6, failure_cause = $7, usage = $8::jsonb,
+           returned_model = COALESCE($9, returned_model), provider = COALESCE($10, provider), completed_at = now()
          WHERE id = $1 AND state = 'dispatching'`,
         [attempt.attemptId, state, code, error instanceof ModelCallError ? error.generationId : null,
           error instanceof ModelCallError ? error.status : null,
           error instanceof ModelCallError ? error.failurePhase : null,
-          error instanceof ModelCallError ? error.failureCause : null],
+          error instanceof ModelCallError ? error.failureCause : null,
+          error instanceof ModelCallError && error.usage ? JSON.stringify(error.usage) : null,
+          error instanceof ModelCallError ? error.usage?.returnedModel ?? null : null,
+          error instanceof ModelCallError ? error.usage?.provider ?? null : null],
       );
       if (!updated.rowCount) throw new Error("MODEL_ATTEMPT_STATE_CHANGED");
     } catch {

@@ -18,12 +18,16 @@ const claim = z.strictObject({
   dependsOnClaimIds: z.array(id).max(32),
 });
 const assessmentClaim = claim.extend({ sourceRefs: z.array(id).min(1).max(16) });
+const globalAssessmentClaim = z.union([
+  assessmentClaim.extend({ caseId: id, outcomeEvidence: z.literal(false), kind: z.enum(["interpretation", "recommendation"]) }),
+  assessmentClaim.extend({ caseId: id, outcomeEvidence: z.boolean(), kind: z.literal("source_fact"), requestQuotes: z.array(claim.shape.requestQuotes.element).max(0) }),
+]);
 const artifactClaim = assessmentClaim.omit({ claimId: true });
-function artifactWorkFor(sourceRefs: z.ZodType<string[], string[]>) {
-  const localClaim = artifactClaim.extend({ sourceRefs });
+function artifactWorkFor(sourceRefs: z.ZodType<string[], string[]>, requestQuotes: z.ZodType<string[], string[]> = assessmentClaim.shape.requestQuotes) {
+  const localClaim = artifactClaim.extend({ sourceRefs, requestQuotes });
   const fields = {
     usefulForLead: z.boolean(),
-    recommendation: assessmentClaim.omit({ claimId: true, kind: true }).extend({ sourceRefs }),
+    recommendation: assessmentClaim.omit({ claimId: true, kind: true }).extend({ sourceRefs, requestQuotes }),
     supportingClaims: z.array(localClaim).max(32),
     blockerClaims: z.array(localClaim).max(16),
     verificationClaims: z.array(localClaim.extend({ kind: z.literal("recommendation") })).max(16),
@@ -93,44 +97,50 @@ export const assessmentDraftSchema = z.strictObject({
   leads: z.array(lead.omit({ usefulArtifactIds: true }).extend({ comparisons: z.array(comparison).max(24) })).max(3),
   contrasts: z.array(lead.extend({ comparisons: z.array(comparison).max(24) })).max(8),
   clarifyingClaimIds: z.array(id).max(8),
-  claims: z.array(z.union([
-    assessmentClaim.extend({ caseId: id, outcomeEvidence: z.literal(false) }),
-    assessmentClaim.extend({ caseId: id, outcomeEvidence: z.literal(true), kind: z.literal("source_fact") }),
-  ])).max(400),
+  claims: z.array(globalAssessmentClaim).max(400),
 });
 
-function requestInventoryFor(request: string) {
+function requestQuoteChoices(request: string): string[] {
   const sentences = [...new Intl.Segmenter("en", { granularity: "sentence" }).segment(request)];
   // 250 Unicode code points always fit the existing 500 UTF-16-unit quotation bound.
-  const excerpts = [...new Set([
+  return [...new Set([
     ...(request.length <= 500 ? [request] : []),
     ...sentences.flatMap(({ segment }) => segment.trim().match(/[\s\S]{1,250}/gu) ?? []).map((text) => text.trim()).filter(Boolean),
   ])];
-  const quotes = z.array(z.enum(excerpts)).max(8);
+}
+
+function requestInventoryFor(request: string) {
+  const quotes = z.array(z.enum(requestQuoteChoices(request))).max(8);
   return z.strictObject({ product_version: quotes, environment: quotes, scale: quotes, identity_access: quotes, recovery_operations: quotes });
 }
 
 export function assessmentDraftSchemaFor(request: string, sources: { caseId: string; artifacts: { artifactId: string; passageIds: string[] }[]; passageIds: string[] }[]) {
+  const requestConstraints = requestInventoryFor(request);
+  const requestQuotes = requestConstraints.shape.product_version;
   const scopedClaims = sources.filter((item) => item.passageIds.length > 0).flatMap((item) => {
     const scope = { caseId: z.literal(item.caseId), sourceRefs: z.array(z.enum(item.passageIds)).min(1).max(16) };
     return [
-      assessmentClaim.extend({ ...scope, outcomeEvidence: z.literal(false) }),
-      assessmentClaim.extend({ ...scope, outcomeEvidence: z.literal(true), kind: z.literal("source_fact") }),
+      globalAssessmentClaim.options[0].extend({ ...scope, requestQuotes }),
+      globalAssessmentClaim.options[1].extend(scope),
     ];
   });
   const rankedCaseFor = (source: typeof sources[number]) => {
     const sourceRefs = z.array(source.passageIds.length ? z.enum(source.passageIds) : id).min(1).max(16);
     const ownComparison = z.union(comparison.options.map((option) => option.extend({
-      evidence: comparisonFields.evidence.extend({ sourceRefs }),
-      assessment: comparisonFields.assessment.extend({ sourceRefs }),
-      implication: comparisonFields.implication.extend({ sourceRefs }),
+      requirementQuote: option.shape.requirementQuote instanceof z.ZodNull ? option.shape.requirementQuote : requestQuotes.element,
+      evidence: comparisonFields.evidence.extend({ sourceRefs, requestQuotes }),
+      assessment: comparisonFields.assessment.extend({ sourceRefs, requestQuotes }),
+      implication: comparisonFields.implication.extend({ sourceRefs, requestQuotes }),
     })));
     const comparisons = z.array(ownComparison).max(source.passageIds.length ? 24 : 0);
-    const reasons = z.array(artifactClaim.extend({ sourceRefs })).min(1).max(16);
+    const reasons = z.array(z.union([
+      artifactClaim.extend({ sourceRefs, requestQuotes, kind: z.enum(["interpretation", "recommendation"]) }),
+      artifactClaim.extend({ sourceRefs, kind: z.literal("source_fact"), requestQuotes: z.array(claim.shape.requestQuotes.element).max(0) }),
+    ])).min(1).max(16);
     const caseFields = {
       outcome: caseDraft.shape.outcome,
       artifactWork: z.strictObject(Object.fromEntries(source.artifacts.map((artifact) => [
-        artifact.artifactId, artifactWorkFor(z.array(z.enum(artifact.passageIds)).min(1).max(16)),
+        artifact.artifactId, artifactWorkFor(z.array(z.enum(artifact.passageIds)).min(1).max(16), requestQuotes),
       ]))),
     };
     return z.union([
@@ -141,7 +151,7 @@ export function assessmentDraftSchemaFor(request: string, sources: { caseId: str
   };
   const cases = z.strictObject(Object.fromEntries(sources.map((item) => [item.caseId, rankedCaseFor(item)])));
   return assessmentDraftSchema.omit({ leads: true, contrasts: true }).extend({
-    requestConstraints: requestInventoryFor(request),
+    requestConstraints,
     cases,
     claims: scopedClaims.length ? z.array(z.union(scopedClaims)).max(400) : assessmentDraftSchema.shape.claims.max(0),
   }).transform(({ cases, ...output }) => {
@@ -186,7 +196,7 @@ export const briefDraftSchema = z.strictObject({
   claims: z.array(claim).max(400),
 });
 
-export function briefDraftSchemaFor(selected: Selection[], corpus: CorpusSnapshot) {
+export function briefDraftSchemaFor(request: string, selected: Selection[], corpus: CorpusSnapshot) {
   if (selected.length === 0) throw new Error("BRIEF_SELECTION_REQUIRED");
   const inventory = selected.map((item) => ({ key: `${item.caseId}/${item.artifactId}/${item.versionId}`, item }));
   const selectedVersions = new Set(inventory.map(({ key }) => key));
@@ -198,9 +208,38 @@ export function briefDraftSchemaFor(selected: Selection[], corpus: CorpusSnapsho
   }]));
   if (refs.size === 0) throw new Error("BRIEF_SELECTED_EVIDENCE_UNAVAILABLE");
   const decision = briefItem.omit({ caseId: true, artifactId: true, versionId: true });
+  const localClaim = claim.extend({ sourceRefs: z.array(z.enum([...refs.keys()])).min(1).max(16) });
+  const quoteChoices = requestQuoteChoices(request);
+  const quotedClaims = quoteChoices.map((quote) => localClaim.extend({
+    kind: z.enum(["interpretation", "recommendation"]),
+    text: z.string().min(1).max(4_000).regex(new RegExp(quote.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))),
+    requestQuotes: z.array(z.literal(quote)).length(1),
+  }));
+  const unquotedClaim = localClaim.extend({ requestQuotes: z.array(claim.shape.requestQuotes.element).max(0) });
   return z.strictObject({
     items: z.strictObject(Object.fromEntries(inventory.map(({ key }) => [key, decision]))),
-    claims: z.array(claim.extend({ sourceRefs: z.array(z.enum([...refs.keys()])).min(1).max(16) })).max(400),
+    claims: z.array(z.union([unquotedClaim, ...quotedClaims])).max(400),
+  }).superRefine(({ claims }, ctx) => {
+    // A request quotation may appear in a claim's prose only as that claim's
+    // sole requestQuotes entry. Cramming several request sentences into one
+    // claim's text while its metadata can name just one of them yields a draft
+    // the checked-brief coverage gate must withhold in full, so reject it at
+    // parse time instead of spending the independent review on a doomed draft.
+    // Fragments of the carried quotation itself are the same constraint, not a
+    // stray quotation. This only rejects drafts; it never repairs them.
+    claims.forEach((item, claimIndex) => {
+      const carried = item.requestQuotes[0];
+      for (const choice of quoteChoices) {
+        if (choice === carried || (carried !== undefined && carried.includes(choice))) continue;
+        if (item.text.includes(choice)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["claims", claimIndex, "text"],
+            message: "Claim prose contains a request quotation that is not its sole requestQuotes entry; give that quotation its own atomic claim.",
+          });
+        }
+      }
+    });
   }).transform(({ items, claims }) => {
     const entries = inventory.map(({ key, item }) => ({
       caseId: item.caseId, artifactId: item.artifactId, versionId: item.versionId, ...items[key],
@@ -250,7 +289,7 @@ export function reviewSchema(targets: ReviewTargets, request: string) {
   if (targets.selections) {
     const entries = targets.selections.map((item) => ({ item, key: `${item.caseId}/${item.artifactId}/${item.versionId}` }));
     return z.strictObject({
-      constraintQuotes: z.strictObject(Object.fromEntries(entries.map(({ key }) => [key, claim.shape.requestQuotes]))),
+      constraintQuotes: z.strictObject(Object.fromEntries(entries.map(({ key }) => [key, z.array(z.enum(requestQuoteChoices(request))).max(8)]))),
       claimVerdicts,
     }).transform(({ constraintQuotes, claimVerdicts }) => ({
       constraintReviews: entries.map(({ item, key }) => ({
@@ -385,11 +424,29 @@ export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): As
   return { ...output, cases, leads, contrasts, comparisons, claims };
 }
 
-export function openRouterSchema(name: string, schema: z.ZodType): {
+export function openRouterSchema(name: string, schema: z.ZodType, options: { omitUnanchoredTextPatterns?: boolean } = {}): {
   type: "json_schema";
   json_schema: { name: string; strict: true; schema: Record<string, unknown> };
 } {
   const generated = z.toJSONSchema(schema, { target: "draft-7", io: "input", reused: "ref" }) as Record<string, unknown>;
   delete generated.$schema;
+  if (options.omitUnanchoredTextPatterns) {
+    // Long unanchored literal patterns (a whole request sentence that prose must
+    // contain) are the one brief-only construct in the provider grammar; the
+    // captured brief dispatch returned an empty `length` response in ~2.7s with
+    // no usage, while the far larger anchored-pattern assessment grammar works.
+    // The provider grammar is a generation guide, not the trust boundary: the
+    // runtime Zod schema parsed in callModel still enforces these patterns,
+    // and the checked-brief gate again requires each quote verbatim in prose.
+    // Anchored patterns (e.g. identity formats) stay in the provider grammar.
+    const strip = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(strip);
+      if (typeof node !== "object" || node === null) return;
+      const record = node as Record<string, unknown>;
+      if (typeof record.pattern === "string" && !record.pattern.startsWith("^")) delete record.pattern;
+      Object.values(record).forEach(strip);
+    };
+    strip(generated);
+  }
   return { type: "json_schema", json_schema: { name, strict: true, schema: generated } };
 }
