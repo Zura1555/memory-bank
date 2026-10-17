@@ -278,64 +278,97 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .local-job-label { margin: 0 0 .15rem; font-weight: 600; color: var(--ink); }
 .local-job-meta .field-hint { margin: 0; font-size: .76rem; }
 
-/* Step 1 Layout & Starter Templates Table (Image 1 & Image 2) */
+/* Step 1 Layout & Starter Templates Table (Image 1) */
 .step-one-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, .95fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.5rem;
   align-items: start;
 }
 .request-suggestions { margin: 0; }
-.request-suggestions > .field-hint { margin: .35rem 0 1rem; }
+.suggestions-header {
+  margin-bottom: 1.15rem;
+}
+.suggestions-header h3 {
+  margin: 0 0 .3rem;
+  color: var(--ink);
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+.suggestions-header .field-hint { margin: 0; }
 .suggestion-table {
   display: grid;
-  border-top: 1px solid var(--line);
 }
 .suggestion-table-head {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) auto 1.5rem;
-  gap: .75rem;
-  padding: .6rem .5rem;
-  border-bottom: 1px solid var(--line);
-  color: var(--muted);
-  font-size: .74rem;
-  font-weight: 700;
+  grid-template-columns: minmax(14rem, 1.8fr) minmax(8rem, 1fr) minmax(9rem, 1.1fr) 1.5rem;
+  align-items: center;
+  gap: 1rem;
+  padding: 0 .4rem .65rem;
+  border-bottom: 1px solid #edf1f6;
+  color: #64748b;
+  font-size: .78rem;
+  font-weight: 500;
+  text-align: left;
 }
-.suggestion-button {
+.suggestion-row {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) auto 1.5rem;
+  grid-template-columns: minmax(14rem, 1.8fr) minmax(8rem, 1fr) minmax(9rem, 1.1fr) 1.5rem;
   align-items: center;
-  gap: .75rem;
-  padding: .8rem .5rem;
+  gap: 1rem;
+  padding: .9rem .4rem;
   border: 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid #edf1f6;
   border-radius: 0;
   background: transparent;
+  color: var(--ink);
+  cursor: pointer;
   text-align: left;
-  overflow-wrap: anywhere;
+  transition: background-color 120ms ease-out;
+}
+.suggestion-row:last-child {
+  border-bottom: 0;
 }
 .suggestion-main {
   display: flex;
   align-items: center;
-  gap: .65rem;
+  gap: .85rem;
   min-width: 0;
 }
 .suggestion-title {
   color: var(--ink);
-  font-size: .86rem;
-  font-weight: 700;
+  font-size: .88rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+}
+.suggestion-cell {
+  color: #526277;
+  font-size: .84rem;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .suggestion-chevron {
   justify-self: end;
-  color: var(--muted);
-  font-size: 1.15rem;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #475569;
+  transition: transform 120ms ease-out, color 120ms ease-out;
 }
 @media (hover: hover) and (pointer: fine) {
-  .suggestion-button:not(:disabled):hover {
-    background: var(--accent-pale);
-    border-color: var(--line);
+  .suggestion-row:hover {
+    background: var(--quiet);
+  }
+  .suggestion-row:hover .suggestion-chevron {
+    color: var(--accent-bright);
+    transform: translateX(2px);
   }
 }
 
@@ -1218,8 +1251,9 @@ input[type="checkbox"] {
   .step-number { width: 1.35rem; height: 1.35rem; flex-basis: 1.35rem; }
   .card-grid, .overview-kpis, .job-timings { grid-template-columns: minmax(0, 1fr); }
   .suggestion-table-head { display: none; }
-  .suggestion-button { grid-template-columns: minmax(0, 1fr) auto; }
-  .suggestion-button .token-pill { grid-column: 1 / -1; justify-self: start; }
+  .suggestion-row { grid-template-columns: minmax(0, 1fr) auto; gap: .35rem .75rem; }
+  .suggestion-cell { grid-column: 1 / -2; padding-left: 2.65rem; font-size: .78rem; }
+  .suggestion-chevron { grid-column: 2; grid-row: 1 / 3; }
   .screen { border-radius: .95rem; }
   .section-heading { align-items: flex-start; flex-direction: column; gap: .35rem; }
   .action-row, .action-row-split { align-items: stretch; flex-direction: column-reverse; }
