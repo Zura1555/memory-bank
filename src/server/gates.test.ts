@@ -3,7 +3,7 @@ import Ajv from "ajv";
 import test from "node:test";
 import type { ArtifactRole, AssessmentResult, Claim, RequestConstraints, Selection, SupportVerdict } from "../shared/protocol.ts";
 import { assessmentDraftSchema, assessmentReviewSchema, briefDraftSchema, openRouterSchema, parseAssessmentDraft, reviewSchema, type AssessmentDraft, type AssessmentOutput, type BriefDraft } from "./schemas.ts";
-import { buildCheckedAssessment, buildCheckedBrief, GateFailure, revalidateAssessment, revalidateBrief, validateAssessmentDraft, validateBriefDraft, validateArtifactReview, validateSupportReview } from "./gates.ts";
+import { boundAssessmentQuotes, buildCheckedAssessment, buildCheckedBrief, GateFailure, revalidateAssessment, revalidateBrief, validateAssessmentDraft, validateBriefDraft, validateArtifactReview, validateSupportReview } from "./gates.ts";
 import { HttpFailure } from "./errors.ts";
 import { jobView, type JobRecord } from "./jobs.ts";
 import { buildStarterPack } from "./packs.ts";
@@ -1326,4 +1326,78 @@ test("agreed operational acceptance constraints establish no useful precedent an
   corpus.passages.delete("p-request-v1");
   corpus.availableVersions.delete("request-v1");
   assert.equal(revalidateAssessment(checked, request, corpus).conclusion, "cannot_be_established");
+});
+
+test("a combined brief survives a reviewer inventory naming another item's bound quotation", () => {
+  const corpus = fixture();
+  const request = "Alpha limit applies. Beta window applies.";
+  const QA = "Alpha limit applies.";
+  const QB = "Beta window applies.";
+  const refsFor = (artifactId: string, versionId: string) => [{
+    caseId: "case-1", artifactId, versionId,
+    passageId: artifactId === "request" ? "p-request-v1" : "p-handover-v1-case-1",
+  }];
+  const assessment = {
+    conclusion: "precedent_found",
+    clarifyingClaimIds: [],
+    comparisons: [],
+    requestConstraints: { product_version: [], environment: [], scale: [], identity_access: [], recovery_operations: [] },
+    artifactReviews: [],
+    nextActions: [],
+    leads: [],
+    contrasts: [],
+    withheldClaimCount: 0,
+    claims: [
+      { claimId: "a-bound", kind: "recommendation", text: `Recorded check: ${QA}`, sourceRefs: refsFor("request", "request-v1"), requestQuotes: [QA], dependsOnClaimIds: [] },
+      { claimId: "b-bound", kind: "recommendation", text: `Recorded check: ${QB}`, sourceRefs: refsFor("handover", "handover-v1-case-1"), requestQuotes: [QB], dependsOnClaimIds: [] },
+      // A combined request's disposition claim declares every request sentence
+      // as provenance without stating the other item's sentence in prose.
+      { claimId: "a-disposition", kind: "recommendation", text: "Adapt this work for the combined request.", sourceRefs: refsFor("request", "request-v1"), requestQuotes: [QA, QB], dependsOnClaimIds: [] },
+    ],
+    cases: [{
+      caseId: "case-1", availability: "available", outcome: "unknown", outcomeClaimIds: [], claimIds: [],
+      artifactWork: [
+        { artifactId: "request", availability: "available", exclusionReasons: [], disposition: "adapt", dispositionClaimId: "a-disposition", claimIds: ["a-bound"], blockerClaimIds: [], verificationClaimIds: [] },
+        { artifactId: "handover", availability: "available", exclusionReasons: [], disposition: "adapt", dispositionClaimId: "b-disposition", claimIds: ["b-bound"], blockerClaimIds: [], verificationClaimIds: [] },
+      ],
+    }],
+  } as unknown as AssessmentResult;
+  assert.deepEqual(boundAssessmentQuotes(assessment, { caseId: "case-1", artifactId: "request", versionId: "request-v1" }), [QA],
+    "Only quotations the item's own work both declares and states bind its brief coverage.");
+
+  const draft: BriefDraft = {
+    reuse: [], verify: [],
+    adapt: [
+      { caseId: "case-1", artifactId: "request", versionId: "request-v1", disposition: "adapt", dispositionClaimId: "a-disposition-brief", claimIds: ["a-disposition-brief", "a-quote"] },
+      { caseId: "case-1", artifactId: "handover", versionId: "handover-v1-case-1", disposition: "adapt", dispositionClaimId: "b-disposition-brief", claimIds: ["b-disposition-brief", "b-quote"] },
+    ],
+    claims: [
+      { claimId: "a-disposition-brief", kind: "recommendation", text: "Adapt this work after the checks below.", sourceRefs: refsFor("request", "request-v1"), requestQuotes: [], dependsOnClaimIds: [] },
+      { claimId: "a-quote", kind: "recommendation", text: `Check first: ${QA}`, sourceRefs: refsFor("request", "request-v1"), requestQuotes: [QA], dependsOnClaimIds: [] },
+      { claimId: "b-disposition-brief", kind: "recommendation", text: "Adapt this work after the checks below.", sourceRefs: refsFor("handover", "handover-v1-case-1"), requestQuotes: [], dependsOnClaimIds: [] },
+      { claimId: "b-quote", kind: "recommendation", text: `Check first: ${QB}`, sourceRefs: refsFor("handover", "handover-v1-case-1"), requestQuotes: [QB], dependsOnClaimIds: [] },
+    ],
+  };
+  const selections = [
+    { caseId: "case-1", artifactId: "request", versionId: "request-v1" },
+    { caseId: "case-1", artifactId: "handover", versionId: "handover-v1-case-1" },
+  ];
+  const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
+  // The independent reviewer inventories the handover item's quotation under both items.
+  const constraintReviews = [
+    { ...selections[0], requestQuotes: [QA, QB] },
+    { ...selections[1], requestQuotes: [QB] },
+  ];
+  const checked = buildCheckedBrief(draft, verdicts, validateBriefDraft(draft, request, selections, corpus), { request, constraintReviews, assessment });
+  assert.deepEqual(checked.adapt.map((item) => item.artifactId), ["request", "handover"],
+    "A quotation bound to another item cannot erase this item when its own checked work never asserted it.");
+
+  // The item's own bound quotation remains fully enforced.
+  const doomed = structuredClone(draft);
+  const own = doomed.claims.find((claim) => claim.claimId === "a-quote")!;
+  own.text = "Check compatibility first.";
+  own.requestQuotes = [];
+  const withheld = buildCheckedBrief(doomed, verdicts, validateBriefDraft(doomed, request, selections, corpus), { request, constraintReviews, assessment });
+  assert.deepEqual(withheld.adapt.map((item) => item.artifactId), ["handover"],
+    "Dropping the item's own assessment-bound quotation still withholds that item.");
 });

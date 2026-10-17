@@ -506,3 +506,31 @@ test("provider redirects are rejected without forwarding the request or retrying
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("brief wire format includes the disposition claim in its item even when the draft omits it from claimIds", async () => {
+  const { briefDraftSchemaFor } = await import("./schemas.ts");
+  const request = "Check the target window first.";
+  const corpus = {
+    manifest: { schemaVersion: 2, corpusVersion: "test", cases: [{
+      caseId: "case-1", title: "Case", fictional: true, records: [],
+      artifacts: [{ artifactId: "art", title: "Art", fictional: true, versions: [{
+        versionId: "art-v1", sourcePath: "corpora/test/originals/x", mimeType: "text/plain", sha256: "x",
+        statedDate: null, importedAt: "2026-01-01", extractionStatus: "complete", exclusionReasons: [],
+        passages: [{ passageId: "p1", excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }],
+      }] }],
+    }] },
+    manifestSha256: "x", availableVersions: new Set(["art-v1"]), caseAvailability: new Map(),
+    passages: new Map([["p1", { caseId: "case-1", artifactId: "art", versionId: "art-v1", passageId: "p1", title: "Art", fictional: true, statedDate: null, excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }]]),
+    versions: new Map(),
+  } as never;
+  const selected = [{ caseId: "case-1", artifactId: "art", versionId: "art-v1", passageIds: ["p1"] }];
+  const parsed = briefDraftSchemaFor(request, selected, corpus).parse({
+    items: { "case-1/art/art-v1": { disposition: "adapt", dispositionClaimId: "c1", claimIds: ["c2"] } },
+    claims: [
+      { claimId: "c1", kind: "recommendation", text: `Adapt only after this check: ${request}`, sourceRefs: ["e1"], requestQuotes: [request], dependsOnClaimIds: [] },
+      { claimId: "c2", kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] },
+    ],
+  });
+  assert.deepEqual(parsed.adapt[0].claimIds, ["c1", "c2"],
+    "The disposition claim is part of its item by construction; existence and kind are still validated downstream.");
+});

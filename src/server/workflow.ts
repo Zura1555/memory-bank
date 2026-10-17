@@ -203,6 +203,7 @@ export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> 
         const checked = buildCheckedBrief(draft, verdicts, invalidRefs, {
           request,
           constraintReviews: withAssessmentConstraintFloor(review.constraintReviews, assessment, request),
+          assessment,
         });
         await finishPhase(this.env, params, checked);
       }

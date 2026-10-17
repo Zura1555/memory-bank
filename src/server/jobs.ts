@@ -106,7 +106,7 @@ export async function getOwnedJob(env: Env, jobId: string, authorization: string
       const floored = job.assessment_result && job.brief_result.constraintReviews
         ? { ...job.brief_result, constraintReviews: withAssessmentConstraintFloor(job.brief_result.constraintReviews, job.assessment_result, job.request_text) }
         : job.brief_result;
-      job.brief_result = revalidateBrief(floored, job.request_text, corpus);
+      job.brief_result = revalidateBrief(floored, job.request_text, corpus, job.assessment_result ?? undefined);
     }
   }
   return jobView(job);

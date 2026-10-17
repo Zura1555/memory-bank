@@ -438,12 +438,16 @@ export function boundAssessmentQuotes(
   // forced one combined-brief item to carry another item's decisive quotation
   // (a support-access sign-off sentence on a connector item) even though both
   // the draft and the independent brief review judged it irrelevant there.
-  const inventory = Object.values(assessment.requestConstraints).flat();
+  // A quotation binds to this item only when its own work claim both declares
+  // it in requestQuotes and states it verbatim in prose. Declared-but-unstated
+  // provenance (a combined request's disposition claim listing every request
+  // sentence) and prose mentions harvested from the global inventory are not
+  // per-item coverage obligations; binding them forced a connector item to
+  // carry a handover sentence its own checked work never asserted.
   const quotes = new Set<string>();
   for (const claim of assessment.claims) {
     if (!sameSelectedVersion(claim, selection) || !assigned.has(claim.claimId)) continue;
-    for (const quote of claim.requestQuotes) quotes.add(quote);
-    for (const quote of inventory) if (claim.text.includes(quote)) quotes.add(quote);
+    for (const quote of claim.requestQuotes) if (claim.text.includes(quote)) quotes.add(quote);
   }
   return [...quotes];
 }
@@ -466,7 +470,7 @@ export function buildCheckedBrief(
   draft: BriefDraft,
   verdicts: Map<string, SupportVerdict>,
   invalidRefs: Set<string>,
-  requirementReview: { request: string; constraintReviews: BriefConstraintReview[] },
+  requirementReview: { request: string; constraintReviews: BriefConstraintReview[]; assessment?: AssessmentResult },
 ): BriefResult {
   const reviews = briefSupportReviewSchema.shape.constraintReviews.safeParse(requirementReview.constraintReviews);
   const identity = (item: { caseId: string; artifactId: string; versionId: string }) => `${item.caseId}/${item.artifactId}/${item.versionId}`;
@@ -485,7 +489,24 @@ export function buildCheckedBrief(
       const claim = claims.get(id);
       return claim?.kind === "recommendation" ? [claim] : [];
     });
-    const quotes = new Set([...inventory.get(identity(item))!, ...recommendations.flatMap((claim) => claim.requestQuotes)]);
+    // Coverage is enforced only for quotations bound to this item by the
+    // checked assessment or associated with it by the draft itself (declared
+    // or stated in an item claim). A brief reviewer inventorying another
+    // item's sentence under this item cannot by itself erase the item; the
+    // independently reviewed assessment binding is the per-item relevance
+    // record. Bound or draft-associated quotations remain fully enforced.
+    // Fresh builds always pass the checked assessment, so the filter is
+    // active in production and in revalidation (which receives the same
+    // assessment). It is inactive only for stored-record unit fixtures that
+    // present an already-floored inventory without its assessment.
+    const bound = requirementReview.assessment ? new Set(boundAssessmentQuotes(requirementReview.assessment, item)) : null;
+    const itemClaims = item.claimIds.flatMap((id) => {
+      const claim = claims.get(id);
+      return claim ? [claim] : [];
+    });
+    const quotes = new Set([...inventory.get(identity(item))!, ...recommendations.flatMap((claim) => claim.requestQuotes)]
+      .filter((quote) => bound === null || bound.has(quote)
+        || itemClaims.some((claim) => claim.requestQuotes.includes(quote) || claim.text.includes(quote))));
     if ([...quotes].some((quote) => !requirementReview.request.includes(quote)
       || !recommendations.some((claim) => supported.accepted.has(claim.claimId)
         && claim.requestQuotes.includes(quote) && claim.text.includes(quote)))) {
@@ -553,11 +574,11 @@ export function revalidateAssessment(result: AssessmentResult, request: string, 
   }
 }
 
-export function revalidateBrief(result: BriefResult, request: string, corpus: CorpusSnapshot): BriefResult {
+export function revalidateBrief(result: BriefResult, request: string, corpus: CorpusSnapshot, assessment?: AssessmentResult): BriefResult {
   const verdicts = new Map(result.claims.map((claim) => [claim.claimId, "supported" as const]));
   let checked: BriefResult;
   try {
-    checked = buildCheckedBrief(result, verdicts, validClaimReferences(result.claims, request, corpus), { request, constraintReviews: result.constraintReviews });
+    checked = buildCheckedBrief(result, verdicts, validClaimReferences(result.claims, request, corpus), { request, constraintReviews: result.constraintReviews, assessment });
   } catch (error) {
     if (error instanceof GateFailure && error.code === "INVALID_BRIEF_CONSTRAINT_REVIEW") {
       throw new EvidenceUnavailable("Required independent brief-constraint review is unavailable; a new checked brief is needed.");

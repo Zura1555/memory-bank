@@ -182,7 +182,7 @@ test("an assessment-accepted duration stays in the checked brief and both export
   job.assessment_result!.requestConstraints.identity_access = [duration];
   const reviews = job.brief_result!.constraintReviews.map((review) => ({ ...review, requestQuotes: [] as string[] }));
   const floored = withAssessmentConstraintFloor(reviews, job.assessment_result!, job.request_text);
-  assert.deepEqual(floored.find((review) => review.versionId === adapt.versionId)?.requestQuotes, [duration, "client scope"]);
+  assert.deepEqual(floored.find((review) => review.versionId === adapt.versionId)?.requestQuotes, [duration]);
   assert.deepEqual(floored.find((review) => review.versionId === sibling.versionId)?.requestQuotes, ["client scope"]);
   const generic = structuredClone(job.brief_result!);
   generic.constraintReviews = floored;

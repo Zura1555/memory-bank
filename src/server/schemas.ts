@@ -248,6 +248,11 @@ export function briefDraftSchemaFor(request: string, selected: Selection[], corp
   }).transform(({ items, claims }) => {
     const entries = inventory.map(({ key, item }) => ({
       caseId: item.caseId, artifactId: item.artifactId, versionId: item.versionId, ...items[key],
+      // The disposition claim is definitionally part of its item (the checked
+      // builder has always required it there); composing it server-side makes
+      // a mere listing omission impossible instead of failing the whole brief.
+      // Existence and recommendation kind are still validated, never repaired.
+      claimIds: [...new Set([items[key].dispositionClaimId, ...items[key].claimIds])],
     }));
     return {
       reuse: entries.filter((item) => item.disposition === "reuse"),

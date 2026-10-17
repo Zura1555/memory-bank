@@ -77,7 +77,7 @@ export function buildStarterPack(job: JobRecord, corpus: CorpusSnapshot, origin:
   const floored = job.brief_result.constraintReviews
     ? { ...job.brief_result, constraintReviews: withAssessmentConstraintFloor(job.brief_result.constraintReviews, assessment, job.request_text) }
     : job.brief_result;
-  const rechecked = revalidateBrief(floored, job.request_text, corpus);
+  const rechecked = revalidateBrief(floored, job.request_text, corpus, assessment);
   const claims = selectedClaims(rechecked.claims, selected);
   const claimIds = new Set(claims.map((claim) => claim.claimId));
   const keep = (items: BriefItem[]) => items.filter((item) => selected.has(identity(item)) && claimIds.has(item.dispositionClaimId) && item.claimIds.every((id) => claimIds.has(id)));
