@@ -135,6 +135,8 @@ test("brief assessment background is scoped to selected work without cutting its
   const prompt = briefDraftPrompt("current request", selected, corpus, checked);
   const background = (prompt.untrustedData as { historicalContext: { checkedAssessment: { cases: { caseId: string }[] } } }).historicalContext.checkedAssessment;
   assert.deepEqual(background.cases.map((item) => item.caseId), ["case-1"], "The brief draft prompt carries the scoped background, not all eight cases.");
+  assert.match(prompt.instructions, /the disposition claim is the item's premise, not its conclusion/);
+  assert.match(prompt.instructions, /never another recommendation, and never a capacity, identity, recovery or other verification\/blocker check/);
   const reviewPrompt = briefReviewPrompt("current request", selected, corpus, checked, {
     reuse: [], adapt: [], verify: [],
     claims: [{ claimId: "brief-1", kind: "recommendation", text: "Check the current request.", sourceRefs: [], requestQuotes: [], dependsOnClaimIds: [] }],
