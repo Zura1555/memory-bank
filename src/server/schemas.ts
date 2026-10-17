@@ -18,6 +18,10 @@ const claim = z.strictObject({
   dependsOnClaimIds: z.array(id).max(32),
 });
 const assessmentClaim = claim.extend({ sourceRefs: z.array(id).min(1).max(16) });
+const globalAssessmentClaim = z.union([
+  assessmentClaim.extend({ caseId: id, outcomeEvidence: z.literal(false), kind: z.enum(["interpretation", "recommendation"]) }),
+  assessmentClaim.extend({ caseId: id, outcomeEvidence: z.boolean(), kind: z.literal("source_fact"), requestQuotes: z.array(claim.shape.requestQuotes.element).max(0) }),
+]);
 const artifactClaim = assessmentClaim.omit({ claimId: true });
 function artifactWorkFor(sourceRefs: z.ZodType<string[], string[]>) {
   const localClaim = artifactClaim.extend({ sourceRefs });
@@ -93,10 +97,7 @@ export const assessmentDraftSchema = z.strictObject({
   leads: z.array(lead.omit({ usefulArtifactIds: true }).extend({ comparisons: z.array(comparison).max(24) })).max(3),
   contrasts: z.array(lead.extend({ comparisons: z.array(comparison).max(24) })).max(8),
   clarifyingClaimIds: z.array(id).max(8),
-  claims: z.array(z.union([
-    assessmentClaim.extend({ caseId: id, outcomeEvidence: z.literal(false) }),
-    assessmentClaim.extend({ caseId: id, outcomeEvidence: z.literal(true), kind: z.literal("source_fact") }),
-  ])).max(400),
+  claims: z.array(globalAssessmentClaim).max(400),
 });
 
 function requestInventoryFor(request: string) {
@@ -113,10 +114,7 @@ function requestInventoryFor(request: string) {
 export function assessmentDraftSchemaFor(request: string, sources: { caseId: string; artifacts: { artifactId: string; passageIds: string[] }[]; passageIds: string[] }[]) {
   const scopedClaims = sources.filter((item) => item.passageIds.length > 0).flatMap((item) => {
     const scope = { caseId: z.literal(item.caseId), sourceRefs: z.array(z.enum(item.passageIds)).min(1).max(16) };
-    return [
-      assessmentClaim.extend({ ...scope, outcomeEvidence: z.literal(false) }),
-      assessmentClaim.extend({ ...scope, outcomeEvidence: z.literal(true), kind: z.literal("source_fact") }),
-    ];
+    return globalAssessmentClaim.options.map((option) => option.extend(scope));
   });
   const rankedCaseFor = (source: typeof sources[number]) => {
     const sourceRefs = z.array(source.passageIds.length ? z.enum(source.passageIds) : id).min(1).max(16);

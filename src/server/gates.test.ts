@@ -295,6 +295,41 @@ test("artifact recommendations and role claims remain independently reviewable",
       }),
     })),
   };
+  // A current-client constraint is not a historical fact merely because it cites a past request.
+  const requestClaim = { ...output.claims[0], kind: "source_fact" as const, outcomeEvidence: false as const, text: "The current request states: current request.", requestQuotes: ["current request"] };
+  const mistakenRequirement = structuredClone(output);
+  mistakenRequirement.claims[0] = requestClaim;
+  assert.equal(assessmentDraftSchema.safeParse(mistakenRequirement).success, false);
+  const generation = assessmentDraftPrompt("current request", corpus).responseSchema!;
+  const providerSchema = openRouterSchema("assessment", generation).json_schema.schema;
+  assert.doesNotMatch(JSON.stringify(providerSchema), /"allOf":/, "OpenAI Structured Outputs rejects allOf composition.");
+  const provider = new Ajv({ strict: false }).compile(providerSchema);
+  const wire = {
+    ...mistakenRequirement,
+    cases: Object.fromEntries(mistakenRequirement.cases.map(({ caseId, artifactWork, outcome }) => [caseId, {
+      outcome, tier: "context",
+      artifactWork: Object.fromEntries(artifactWork.map(({ artifactId, ...work }) => [artifactId, work])),
+    }])),
+  };
+  const { leads: _leads, contrasts: _contrasts, ...providerWire } = wire;
+  assert.equal(provider(providerWire), false);
+  mistakenRequirement.claims[0] = { ...requestClaim, kind: "interpretation" };
+  assert.equal(assessmentDraftSchema.safeParse(mistakenRequirement).success, true);
+  providerWire.claims[0] = { ...requestClaim, kind: "interpretation" };
+  assert.equal(provider(providerWire), true);
+  mistakenRequirement.cases[0].artifactWork[0].recommendation.dependsOnClaimIds = [requestClaim.claimId];
+  const requirementDraft = parseAssessmentDraft(mistakenRequirement, corpus);
+  const requirementInvalid = validateAssessmentDraft(requirementDraft, "current request", corpus);
+  const requirementVerdicts = new Map<string, SupportVerdict>(requirementDraft.claims.map((claim) => [claim.claimId, "supported"]));
+  const buildRequirement = () => buildCheckedAssessment(requirementDraft, requirementVerdicts, requirementInvalid, corpus, artifactRoles(requirementDraft), emptyRequirementReview);
+  const selection = [{ caseId: "case-1", artifactId: "request", versionId: "request-v1", passageIds: ["p-request-v1"] }];
+  assert.equal(buildRequirement().cases[0].artifactWork[0].disposition, "adapt");
+  assert.deepEqual(validateSelections(selection, buildRequirement(), corpus), selection);
+  for (const verdict of ["uncertain", "unsupported"] as const) {
+    requirementVerdicts.set(requestClaim.claimId, verdict);
+    assert.equal(buildRequirement().cases[0].artifactWork[0].disposition, null);
+    assert.throws(() => validateSelections(selection, buildRequirement(), corpus));
+  }
   const { claimId: _, ...blocker } = {
     ...draft.claims[0], kind: "recommendation" as const, text: "Verify the new target before adaptation.",
     sourceRefs: draft.claims[0].sourceRefs.map((ref) => wireIds.get(ref.passageId)!),
