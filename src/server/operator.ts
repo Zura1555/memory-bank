@@ -3,6 +3,7 @@ import type { Env } from "./env.ts";
 import { database, transaction } from "./db.ts";
 import { operatorAuthorized } from "./auth.ts";
 import { HttpFailure } from "./errors.ts";
+import { ModelCallError, modelConfig } from "./model.ts";
 
 const CAMPAIGN_LIMIT_MICRO_USD = 5_000_000;
 
@@ -93,7 +94,14 @@ export async function operatorStatus(env: Env): Promise<object> {
 }
 
 export async function updateOperatorBudget(env: Env, update: OperatorBudgetUpdate): Promise<void> {
-  if (update.admissionEnabled && !env.OPENROUTER_API_KEY) throw new HttpFailure(409, "MODEL_CREDENTIAL_UNAVAILABLE");
+  if (update.admissionEnabled) {
+    try {
+      if (!modelConfig(env).apiKey) throw new ModelCallError("MODEL_CREDENTIAL_UNAVAILABLE", null, false);
+    } catch (error) {
+      if (error instanceof ModelCallError) throw new HttpFailure(409, error.code);
+      throw error;
+    }
+  }
   const result = await database(env).query(
     `UPDATE campaign_budget SET available_credit_micro_usd = $1, admission_enabled = $2, updated_at = now()
      WHERE singleton`,

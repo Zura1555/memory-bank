@@ -1035,6 +1035,8 @@ const suggestedRequests = [
 function App({ active }: { active: boolean }) {
   const [step, setStep] = useState(1);
   const [request, setRequest] = useState("");
+  const [modelInfo, setModelInfo] = useState<{ provider: string; model: string; endpoint: string } | null>(null);
+  const [modelInfoError, setModelInfoError] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [job, setJob] = useState<JobView | null>(null);
   const [previousJob, setPreviousJob] = useState<PreviousAssessment | null>(null);
@@ -1053,6 +1055,24 @@ function App({ active }: { active: boolean }) {
   const requestController = useRef<AbortController | null>(null);
   const briefController = useRef<AbortController | null>(null);
   const pollController = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/model-info", { signal: controller.signal });
+        const body: unknown = await response.json();
+        if (!response.ok || !isRecord(body) || !isText(body.model) || !isText(body.endpoint)
+          || !["openrouter", "openai", "anthropic"].includes(body.provider as string)) throw new Error("Invalid model configuration");
+        const endpoint = new URL(body.endpoint);
+        if (!["https:", "http:"].includes(endpoint.protocol)) throw new Error("Invalid model endpoint");
+        if (!controller.signal.aborted) setModelInfo({ provider: body.provider as string, model: body.model, endpoint: endpoint.origin });
+      } catch {
+        if (!controller.signal.aborted) setModelInfoError(true);
+      }
+    })();
+    return () => controller.abort();
+  }, []);
 
   function changeLocalJobs(change: (entries: LocalJob[]) => LocalJob[]) {
     try {
@@ -1235,7 +1255,7 @@ function App({ active }: { active: boolean }) {
 
   async function createAssessment(requestText: string, clarification = false) {
     const trimmed = requestText.trim();
-    if (!trimmed || submittingRequest) return;
+    if (!trimmed || submittingRequest || !modelInfo) return;
     if (clarification && job?.assessment && job.assessmentState === "ready" && Date.parse(job.expiresAt) > Date.now()) {
       setPreviousJob({ request: job.request, expiresAt: job.expiresAt, assessment: job.assessment });
     } else if (!clarification) {
@@ -1494,10 +1514,18 @@ function App({ active }: { active: boolean }) {
                 <Field.Label htmlFor="client-request">Client request</Field.Label>
                 <Field.Control render={<textarea id="client-request" aria-describedby="request-hint request-processing request-retention" rows={8} maxLength={6000} required placeholder="Describe the requested work, relevant constraints, and what a useful outcome would look like." />} value={request} onValueChange={setRequest} />
                 <Field.Description id="request-hint" className="field-hint">Do not include sensitive personal information.</Field.Description>
-                <p id="request-processing" className="field-hint">Requests, fictional evidence, and generated drafts/reviews are sent through <a href="https://openrouter.ai/privacy">OpenRouter</a> to <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI</a>. The deployed app uses <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a> for processing/storage and <a href="https://neon.com/privacy-policy">Neon</a> for job storage; development uses local platform/database equivalents.</p>
+                <p id="request-processing" className="field-hint">
+                  {modelInfo ? <>Requests, fictional evidence, and generated drafts/reviews are sent to <a href={modelInfo.endpoint}>{modelInfo.endpoint}</a> using the {modelInfo.provider} API and model <code>{modelInfo.model}</code>.{" "}
+                    {modelInfo.endpoint === "https://openrouter.ai" ? <><a href="https://openrouter.ai/privacy">OpenRouter</a> routes requests to <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI</a>.{" "}</>
+                      : modelInfo.endpoint === "https://api.openai.com" ? <><a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI data policy</a>.{" "}</>
+                      : modelInfo.endpoint === "https://api.anthropic.com" ? <><a href="https://privacy.anthropic.com/">Anthropic privacy policy</a>.{" "}</>
+                      : <>Ask the operator about this custom endpoint's upstream processors and retention policy.{" "}</>}
+                  </> : modelInfoError ? <>Model processing configuration is unavailable. Reload before submitting.{" "}</> : <>Loading model processing configuration.{" "}</>}
+                  The deployed app uses <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a> for processing/storage and <a href="https://neon.com/privacy-policy">Neon</a> for job storage; development uses local platform/database equivalents.
+                </p>
                 <p id="request-retention" className="field-hint">Application request/results and job access expire seven days after creation; minimal billing and replay-prevention records remain. Provider/platform copies follow the linked policies, not this seven-day expiry; backup retention is separate. Downloaded packs remain on your device.</p>
               </Field.Root>
-              <Button className="primary-button" type="submit" disabled={submittingRequest || !request.trim()}>{submittingRequest ? "Sending request…" : "Check past examples"}</Button>
+              <Button className="primary-button" type="submit" disabled={submittingRequest || !request.trim() || !modelInfo}>{submittingRequest ? "Sending request…" : "Check past examples"}</Button>
             </form>
             <section className="request-suggestions" aria-labelledby="suggestions-title">
               <h3 id="suggestions-title">Try a fictional client request</h3>

@@ -102,7 +102,10 @@ try {
          'ready', '{}'::jsonb, 'ready', $3::jsonb, now() + interval '1 day')`,
       [readyJobId, readyCapabilityHash, JSON.stringify(readySelections)],
     );
-    const env = { APP_ENV: "development", LOCAL_DATABASE_URL: connectionString, OPENROUTER_API_KEY: "synthetic-only" } as Env;
+    const env = {
+      APP_ENV: "development", LOCAL_DATABASE_URL: connectionString,
+      MODEL_PROVIDER: "openai", MODEL_NAME: "synthetic-model", OPENAI_API_KEY: "synthetic-only",
+    } as Env;
     await assert.rejects(runPaidStage(env, {
       jobId, attemptId: reservationId, phase: "assessment", workflowId: `${jobId}-assessment-1`,
     }, 1, "assessment_draft", { instructions: "Synthetic interrupted-body smoke", untrustedData: {} }),
@@ -113,12 +116,13 @@ try {
       return true;
     });
     const diagnostic = (await pool.query(
-      `SELECT state, error_code, generation_id, http_status, failure_phase, failure_cause
+      `SELECT state, error_code, generation_id, http_status, failure_phase, failure_cause, requested_model, provider
        FROM model_attempts WHERE id = $1`, [attemptId!],
     )).rows[0];
     assert.deepEqual(diagnostic, {
       state: "uncertain", error_code: "MODEL_DISPATCH_UNCERTAIN", generation_id: "gen-synthetic-interrupted",
       http_status: 200, failure_phase: "response_body", failure_cause: "transport_error",
+      requested_model: "synthetic-model", provider: "api.openai.com",
     });
     const status = await operatorStatus(env) as { recentModelAttempts: { id: string }[] };
     assert.deepEqual(

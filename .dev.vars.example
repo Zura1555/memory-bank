@@ -1,4 +1,11 @@
 APP_ENV=development
 LOCAL_DATABASE_URL=postgres://memory_bank:local_only@127.0.0.1:5433/memory_bank
+MODEL_PROVIDER=openrouter
+# Optional versioned API base URL, e.g. https://your-gateway.example/v1
+MODEL_BASE_URL=
+# Required for openai and anthropic; OpenRouter retains its existing default.
+MODEL_NAME=
 OPENROUTER_API_KEY=
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
 OPERATOR_TOKEN=

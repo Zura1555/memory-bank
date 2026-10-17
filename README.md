@@ -13,14 +13,46 @@ An English, evidence-backed reuse guide built from explicitly fictional client-o
    pip install -r ingestion/requirements.txt
    ```
 
-3. Copy `.dev.vars.example` to `.dev.vars`. Set `OPERATOR_TOKEN` to `openssl rand -hex 32`. Set `OPENROUTER_API_KEY` only when you are ready to make the approved paid model calls. Never commit `.dev.vars`.
+3. Copy `.dev.vars.example` to `.dev.vars`. Set `OPERATOR_TOKEN` to `openssl rand -hex 32`. Configure the model endpoint below and set its API key only when you are ready to make approved paid model calls. Never commit `.dev.vars`.
 4. Start local PostgreSQL: `docker compose up -d --wait postgres`. First initialization applies the SQL files in `migrations/` in filename order. The database is loopback-only on port 5433; the project-scoped `postgres_data` Docker volume preserves accounting and admission state across restarts and container recreation. Keep the same Compose project name/directory when returning to a campaign; another worktree/project gets a different volume, not the original ledger.
 5. Build the curator manifest and audit: `npm run ingest`. Publish only to cf local R2: `npm run publish:corpus`.
 6. Run `npm run dev`, then open `http://127.0.0.1:8787`. This builds with `cf` and serves the bundled Worker using Vite preview in development mode. Restart after edits; there is no hot reload. Bundling preserves startup-time AJV schema compilation, which the Vite development module runner rejects as dynamic code generation.
 
-Fresh ledgers start with admission disabled as a bootstrap safeguard, not an ongoing requirement to keep paid work disabled. Before enabling it, verify the initial remaining OpenRouter credit and route pricing in the provider dashboard or read-only provider API (`GET /api/v1/credits` and `GET /api/v1/models`); round remaining credit down to integer microUSD. `/api/operator/budget` records that campaign balance (1 USD = 1,000,000 microUSD). Metadata checks do not qualify the model route or full workflow. The $5 maximum caps admission, not provider invoices. The $0.30-per-call and $0.60-per-phase values are holds, not hard charge limits. Reconcile every terminal phase—including successful ones—against actual provider usage before further admission; the hold remains until reconciled, and an overage blocks later admissions but cannot prevent the provider charge. Do not reset the balance to the post-spend dashboard remainder because the ledger also subtracts reconciled spend. Disable admission if external activity changes the balance. This endpoint cannot query, add, or top up credit.
+Fresh ledgers start with admission disabled as a bootstrap safeguard, not an ongoing requirement to keep paid work disabled. Before enabling it, verify the selected provider's initial remaining credit and model pricing in its dashboard or read-only API (OpenRouter: `GET /api/v1/credits` and `GET /api/v1/models`); round remaining credit down to integer microUSD. `/api/operator/budget` records that campaign balance (1 USD = 1,000,000 microUSD). Metadata checks do not qualify the model route or full workflow. The $5 maximum caps admission, not provider invoices. The $0.30-per-call and $0.60-per-phase values are holds, not hard charge limits. Reconcile every terminal phase—including successful ones—against actual provider usage before further admission; the hold remains until reconciled, and an overage blocks later admissions but cannot prevent the provider charge. Do not reset the balance to the post-spend dashboard remainder because the ledger also subtracts reconciled spend. Disable admission if external activity changes the balance. This endpoint cannot query, add, or top up credit.
 
 The app has no fake AI fallback. Without a valid key and enabled ledger, paid jobs fail closed. Local queues, Workflows, and R2 use the cf local platform simulation, persisted under the project's `.cloudflare/state`; the corpus publisher explicitly selects the same store as Vite. Local setup never provisions or deploys remote infrastructure. Production uses the separate resources below; no Wrangler dependency or configuration is used.
+
+## Model endpoints
+
+OpenRouter remains the default: existing `OPENROUTER_API_KEY` configuration continues to use `openai/gpt-6-luna` on the pinned OpenAI-only route. Choose one provider per deployment; there is no automatic retry or provider fallback.
+
+For an OpenAI Chat Completions-compatible service, set these in `.dev.vars`:
+
+```dotenv
+MODEL_PROVIDER=openai
+MODEL_BASE_URL=https://your-openai-gateway.example/v1
+MODEL_NAME=your-model-id
+OPENAI_API_KEY=your-api-key
+```
+
+For an Anthropic Messages-compatible service:
+
+```dotenv
+MODEL_PROVIDER=anthropic
+MODEL_BASE_URL=https://your-anthropic-gateway.example/v1
+MODEL_NAME=your-model-id
+ANTHROPIC_API_KEY=your-api-key
+```
+
+`MODEL_BASE_URL` is a versioned API base, not a full completion URL: the app appends `/chat/completions` or `/messages`, preserving gateway path prefixes. Omit it to use `https://api.openai.com/v1` or `https://api.anthropic.com/v1`. HTTPS is required except for loopback HTTP (for example, `http://127.0.0.1:11434/v1`); URL credentials, query strings, fragments, and redirects are rejected. `MODEL_NAME` is required for both compatible modes. Only the selected provider's key is used.
+
+OpenAI-compatible endpoints must support strict JSON Schema `response_format`; Anthropic-compatible endpoints must support forced tool choice and return a single `submit_result` tool input. Both must support the stage schemas and 16,384 output tokens. All results still pass the same local schema, reference and independent-review checks; incomplete/refused/invalid results fail closed. Token usage is retained; absent provider-reported USD cost stays unknown and must be reconciled from provider billing, never assumed free.
+
+Restart development after configuration changes. Production uses equivalent Worker bindings (these values can be included with the selected credential in `.dev.vars.production` for the existing secrets-file deploy). Drain active workflows and reconcile outstanding charges before switching provider/model; do not reuse a different provider's credit as an unchanged campaign balance. The intake reads `GET /api/model-info` to disclose the actual provider/model and endpoint origin without exposing credentials or gateway paths. Custom endpoint operators must supply upstream processor/privacy information. Endpoint compatibility does not qualify a new model's quality, pricing, context fit, or latency.
+
+Verification: `npm test` passes 43 TypeScript tests and one Python test, including compatible-provider normalization, foreign-claim/truncation rejection, and selected-credential/configuration failures. A no-paid-call smoke sent both protocols through a real loopback HTTP server with a gateway path prefix and checked the public model-info projection. Chromium verified the live default OpenRouter disclosure plus UI-only OpenAI, Anthropic, custom-endpoint, and unavailable-configuration states; unavailable configuration blocked submission. The custom-endpoint notice fit at 320px in dark mode without horizontal overflow. These checks are protocol/UI proof, not real-provider inference or model qualification.
+
+`npm run typecheck` and the production build passed. The isolated `ledger.smoke.ts` also persisted the configured compatible model and endpoint host on an uncertain dispatch, exposed them in operator status, preserved accounting/replay guards across restart, container recreation and backup restore, and added no provider network requests. Operator-gate smoke rejected invalid configuration and missing selected-provider credentials before database access. No live campaign state, credentials, admission setting or deployment was changed.
 
 ## Paid admission authorization
 
@@ -34,7 +66,7 @@ This README records permission, not observed live state: editing or deploying it
 
 Use `Authorization: Bearer $OPERATOR_TOKEN` with `/api/operator/status` to inspect active work, provider usage, reservations, and reconciliation history. `PUT /api/operator/budget` accepts `availableCreditMicroUsd` and `admissionEnabled`; it only sets the owner's verified existing balance and does not create credit.
 
-Failed model attempts also expose `http_status`, `failure_phase`, and `failure_cause` to the operator. Phases distinguish request preparation, fetch, response headers/body, response validation, and output validation. Transport causes are limited to `deadline_exceeded`, `timeout`, `aborted`, and `transport_error`: only the call's own observed expired deadline yields `deadline_exceeded`; an upstream `TimeoutError` alone does not. Diagnostics retain no raw provider body, arbitrary error message, credential, request text, or stack. Generation IDs are bounded `gen-` identifiers, preserved from headers or a decoded envelope even when validation fails. These fields do not change holds, billing uncertainty, deadlines, or replay policy and cannot diagnose older failures retrospectively.
+Failed model attempts also expose `http_status`, `failure_phase`, and `failure_cause` to the operator. Phases distinguish request preparation, fetch, response headers/body, response validation, and output validation. Transport causes are limited to `deadline_exceeded`, `timeout`, `aborted`, and `transport_error`: only the call's own observed expired deadline yields `deadline_exceeded`; an upstream `TimeoutError` alone does not. Diagnostics retain no raw provider body, arbitrary error message, credential, request text, or stack. Generation IDs are bounded `gen-`, `chatcmpl-`, or `msg_` identifiers, preserved from headers or a decoded envelope even when validation fails. These fields do not change holds, billing uncertainty, deadlines, or replay policy and cannot diagnose older failures retrospectively.
 
 Verify operator authentication and concurrent database access with `node --env-file=.dev.vars --experimental-strip-types src/server/db.smoke.ts` while the local Worker is running. This read-only check submits no model jobs. Each database operation gets its own pool, and each checked-out connection is retired on release; neither sockets nor pending pool connections may cross Worker request contexts.
 
@@ -94,7 +126,7 @@ Observed local verification (2026-10-16): the smoke failed against tmpfs after r
 - `ingestion/` is offline curator tooling. It supports native text/CSV and format-aware Office/PDF/image paths; scans and visual observations require a hash-bound human-audited sidecar. Missing or incomplete extraction is excluded, never guessed.
 - `evaluation/keys.json` is offline-only and is not copied into `.cloudflare/output/`, R2, prompts, or application routes. Do not use evaluation keys for prompt tuning.
 - Anonymous job capabilities protect status/results. Application request/results expire after seven days; minimal accounting/idempotency records remain for operator reconciliation. Workflow checkpoint retention is configured for seven days; provider/platform/backup retention is separate and is not promised to be zero.
-- Before submission, the intake identifies OpenRouter/OpenAI processing, deployed Cloudflare/Neon storage/processing, local-development equivalents, and links the provider/platform privacy policies. It distinguishes seven-day application expiry from separate upstream/platform/backup retention, retained billing/replay records, and downloaded packs. The active job's exact expiry is visible during assessment, selection, and brief review, not only export. Terminal panels show the API's safe failure explanation without operator-only diagnostics.
+- Before submission, the intake identifies the configured model provider, model and endpoint origin, deployed Cloudflare/Neon storage/processing, and local-development equivalents. Official endpoints link their provider policies; custom endpoints require operator-supplied upstream/privacy information. It distinguishes seven-day application expiry from separate upstream/platform/backup retention, retained billing/replay records, and downloaded packs. The active job's exact expiry is visible during assessment, selection, and brief review, not only export. Terminal panels show the API's safe failure explanation without operator-only diagnostics.
 - Queue/Workflow duplicates use stable IDs. Paid model calls have no automatic retries or fallback; uncertain dispatch requires operator reconciliation.
 - Human-reviewed decision and lesson cards live in the versioned curator corpus, not expiring jobs. Browse `/?knowledge`, address a record with `/?knowledge=<recordId>`, or inspect it in case details. Cards link exact supporting passages/originals and mark superseded advice as history. Applying a lesson still requires the existing checked, request-specific recommendation pipeline; no new paid stage is added. See [curator authoring and review](ingestion/README.md#decision-and-lesson-records).
 
@@ -229,7 +261,7 @@ At the initial production deployment, Neon database `memory_bank` had migrations
 
 Because `main` automatically deploys, the database prerequisite below must be satisfied before merging this revision into `main`, not merely before a manual deploy.
 
-Production secrets are Cloudflare `secret_text` bindings: `OPERATOR_TOKEN` (freshly generated, separate from local) and `OPENROUTER_API_KEY`. Their local deployment copy is `.dev.vars.production`; the direct Neon `DATABASE_URL` is in `.env.production`. Both files are Git-ignored and mode 0600. Keep these files private and back them up in a password manager; never paste them into an issue or commit. Do not upload `.env.production` as Worker secrets or copy local development variables into production.
+Production secrets are Cloudflare `secret_text` bindings: `OPERATOR_TOKEN` (freshly generated, separate from local) and the selected provider's key (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`). Their local deployment copy is `.dev.vars.production`, which may also contain the model endpoint settings above; the direct Neon `DATABASE_URL` is in `.env.production`. Both files are Git-ignored and mode 0600. Keep these files private and back them up in a password manager; never paste them into an issue or commit. Do not upload `.env.production` as Worker secrets or copy local development variables into production.
 
 To update this deployment from an authenticated checkout:
 

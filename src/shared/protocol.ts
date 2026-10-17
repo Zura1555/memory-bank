@@ -219,3 +219,4 @@ export interface SourceCatalogEntry {
 // GET /api/evidence/originals/:versionId -> exact retained original bytes
 // GET /api/sources -> 200 {sources: SourceCatalogEntry[]}
 // GET /api/health -> 200 {status:"ok"}
+// GET /api/model-info -> 200 {provider: "openrouter" | "openai" | "anthropic", model: string, endpoint: string}
