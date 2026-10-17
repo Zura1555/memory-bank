@@ -150,6 +150,60 @@ test("invalid output preserves an envelope-only generation ID but rejects arbitr
   }
 });
 
+test("brief provider grammar omits sentence patterns while runtime parsing still requires the visible quotation", async () => {
+  const { briefDraftSchemaFor } = await import("./schemas.ts");
+  const request = "Check the target window first.";
+  const corpus = {
+    manifest: { schemaVersion: 2, corpusVersion: "test", cases: [{
+      caseId: "case-1", title: "Case", fictional: true, records: [],
+      artifacts: [{ artifactId: "art", title: "Art", fictional: true, versions: [{
+        versionId: "art-v1", sourcePath: "corpora/test/originals/x", mimeType: "text/plain", sha256: "x",
+        statedDate: null, importedAt: "2026-01-01", extractionStatus: "complete", exclusionReasons: [],
+        passages: [{ passageId: "p1", excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }],
+      }] }],
+    }] },
+    manifestSha256: "x", availableVersions: new Set(["art-v1"]), caseAvailability: new Map(),
+    passages: new Map([["p1", { caseId: "case-1", artifactId: "art", versionId: "art-v1", passageId: "p1", title: "Art", fictional: true, statedDate: null, excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }]]),
+    versions: new Map(),
+  } as never;
+  const selected = [{ caseId: "case-1", artifactId: "art", versionId: "art-v1", passageIds: ["p1"] }];
+  const prompt = { instructions: "Draft a brief", untrustedData: {}, responseSchema: briefDraftSchemaFor(request, selected, corpus) };
+  const wire = (text: string) => JSON.stringify({
+    items: { "case-1/art/art-v1": { disposition: "adapt", dispositionClaimId: "c1", claimIds: ["c1"] } },
+    claims: [{ claimId: "c1", kind: "recommendation", text, sourceRefs: ["e1"], requestQuotes: [request], dependsOnClaimIds: [] }],
+  });
+  const originalFetch = globalThis.fetch;
+  try {
+    let capturedSchema = "";
+    globalThis.fetch = async (_input, init) => {
+      capturedSchema = JSON.stringify(JSON.parse(init!.body as string).response_format.json_schema.schema);
+      return Response.json({ id: "gen-brief-visible-quote", choices: [{ finish_reason: "stop", message: { content: wire(`Adapt only after this check: ${request}`) } }] });
+    };
+    const accepted = await callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt);
+    assert.equal((accepted.output as { adapt: unknown[] }).adapt.length, 1);
+    const patterns: string[] = [];
+    const collect = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(collect);
+      if (typeof node !== "object" || node === null) return;
+      for (const [key, value] of Object.entries(node)) { if (key === "pattern") patterns.push(String(value)); collect(value); }
+    };
+    collect(JSON.parse(capturedSchema));
+    assert.ok(!patterns.some((pattern) => pattern.includes("Check the target")), "Provider schema must not embed the request sentence as a text pattern");
+    assert.ok(capturedSchema.includes("^[a-z0-9]"), "Anchored identity patterns stay in the provider grammar");
+
+    globalThis.fetch = async () => Response.json({
+      id: "gen-brief-hidden-quote", choices: [{ finish_reason: "stop", message: { content: wire("Adapt after checking compatibility.") } }],
+    });
+    await assert.rejects(callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt), (error: unknown) => {
+      assert.ok(error instanceof ModelCallError);
+      assert.equal(error.code, "MODEL_OUTPUT_SCHEMA_INVALID", "Hidden quotation metadata is still rejected before any brief is accepted");
+      return true;
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("unusable output retains reported usage and distinguishes safe failure conditions without retrying", async () => {
   const originalFetch = globalThis.fetch;
   const scenarios = [

@@ -402,11 +402,29 @@ export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): As
   return { ...output, cases, leads, contrasts, comparisons, claims };
 }
 
-export function openRouterSchema(name: string, schema: z.ZodType): {
+export function openRouterSchema(name: string, schema: z.ZodType, options: { omitUnanchoredTextPatterns?: boolean } = {}): {
   type: "json_schema";
   json_schema: { name: string; strict: true; schema: Record<string, unknown> };
 } {
   const generated = z.toJSONSchema(schema, { target: "draft-7", io: "input", reused: "ref" }) as Record<string, unknown>;
   delete generated.$schema;
+  if (options.omitUnanchoredTextPatterns) {
+    // Long unanchored literal patterns (a whole request sentence that prose must
+    // contain) are the one brief-only construct in the provider grammar; the
+    // captured brief dispatch returned an empty `length` response in ~2.7s with
+    // no usage, while the far larger anchored-pattern assessment grammar works.
+    // The provider grammar is a generation guide, not the trust boundary: the
+    // runtime Zod schema parsed in callOpenRouter still enforces these patterns,
+    // and the checked-brief gate again requires each quote verbatim in prose.
+    // Anchored patterns (e.g. identity formats) stay in the provider grammar.
+    const strip = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(strip);
+      if (typeof node !== "object" || node === null) return;
+      const record = node as Record<string, unknown>;
+      if (typeof record.pattern === "string" && !record.pattern.startsWith("^")) delete record.pattern;
+      Object.values(record).forEach(strip);
+    };
+    strip(generated);
+  }
   return { type: "json_schema", json_schema: { name, strict: true, schema: generated } };
 }

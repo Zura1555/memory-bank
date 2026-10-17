@@ -138,7 +138,7 @@ export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StageP
       provider: { only: ["openai"], order: ["openai"], allow_fallbacks: false, require_parameters: true },
       max_tokens: 16_384,
       reasoning: { effort: "none" },
-      response_format: openRouterSchema(stage, schema),
+      response_format: openRouterSchema(stage, schema, { omitUnanchoredTextPatterns: stage === "brief_draft" }),
       tools: [],
       tool_choice: "none",
       plugins: [],
