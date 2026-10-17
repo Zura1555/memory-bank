@@ -1063,7 +1063,7 @@ function App({ active }: { active: boolean }) {
         const response = await fetch("/api/model-info", { signal: controller.signal });
         const body: unknown = await response.json();
         if (!response.ok || !isRecord(body) || !isText(body.model) || !isText(body.endpoint)
-          || !["openrouter", "openai", "anthropic"].includes(body.provider as string)) throw new Error("Invalid model configuration");
+          || !["openrouter", "openai", "anthropic", "opencode-go"].includes(body.provider as string)) throw new Error("Invalid model configuration");
         const endpoint = new URL(body.endpoint);
         if (!["https:", "http:"].includes(endpoint.protocol)) throw new Error("Invalid model endpoint");
         if (!controller.signal.aborted) setModelInfo({ provider: body.provider as string, model: body.model, endpoint: endpoint.origin });
@@ -1519,6 +1519,7 @@ function App({ active }: { active: boolean }) {
                     {modelInfo.endpoint === "https://openrouter.ai" ? <><a href="https://openrouter.ai/privacy">OpenRouter</a> routes requests to <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI</a>.{" "}</>
                       : modelInfo.endpoint === "https://api.openai.com" ? <><a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI data policy</a>.{" "}</>
                       : modelInfo.endpoint === "https://api.anthropic.com" ? <><a href="https://privacy.anthropic.com/">Anthropic privacy policy</a>.{" "}</>
+                      : modelInfo.provider === "opencode-go" && modelInfo.endpoint === "https://opencode.ai" ? <><a href="https://opencode.ai/docs/go/#privacy">OpenCode Go model-specific data policies</a>.{" "}</>
                       : <>Ask the operator about this custom endpoint's upstream processors and retention policy.{" "}</>}
                   </> : modelInfoError ? <>Model processing configuration is unavailable. Reload before submitting.{" "}</> : <>Loading model processing configuration.{" "}</>}
                   The deployed app uses <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a> for processing/storage and <a href="https://neon.com/privacy-policy">Neon</a> for job storage; development uses local platform/database equivalents.

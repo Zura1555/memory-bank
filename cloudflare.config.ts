@@ -23,6 +23,18 @@ export default defineConfig(({ mode }) => ({
     ],
     env: {
       APP_ENV: bindings.text(mode === "development" ? "development" : "production"),
+      ...(mode === "development" ? {
+        LOCAL_DATABASE_URL: bindings.secret(),
+        MODEL_PROVIDER: bindings.secret(),
+        MODEL_API: bindings.secret(),
+        MODEL_BASE_URL: bindings.secret(),
+        MODEL_NAME: bindings.secret(),
+        OPENROUTER_API_KEY: bindings.secret(),
+        OPENAI_API_KEY: bindings.secret(),
+        ANTHROPIC_API_KEY: bindings.secret(),
+        OPENCODE_API_KEY: bindings.secret(),
+        OPERATOR_TOKEN: bindings.secret(),
+      } : {}),
       HYPERDRIVE: mode !== "development" && bindings.hyperdrive({
         id: "0880749f093c4bdaab7dd377c76f68b4",
       }),

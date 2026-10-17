@@ -14,6 +14,8 @@ export interface Env {
   LOCAL_DATABASE_URL?: string;
   OPENROUTER_API_KEY?: string;
   MODEL_PROVIDER?: string;
+  MODEL_API?: string;
+  OPENCODE_API_KEY?: string;
   MODEL_BASE_URL?: string;
   MODEL_NAME?: string;
   OPENAI_API_KEY?: string;

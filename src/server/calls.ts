@@ -66,7 +66,7 @@ export async function runPaidStage(
 
   let reply: ModelReply;
   try {
-    reply = await callModel(env, stage, prompt);
+    reply = await callModel(env, stage, prompt, params.jobId);
   } catch (error) {
     const code = error instanceof ModelCallError ? error.code : "MODEL_DISPATCH_UNCERTAIN";
     const state = error instanceof ModelCallError && !error.uncertain ? "failed" : "uncertain";
