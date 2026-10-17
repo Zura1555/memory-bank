@@ -641,19 +641,7 @@ The four requests frozen before tuning were each submitted **once**, after candi
 
 F1's relevant mapping facts survived, but `disposition-0-0` and `classification-disposition-0-0` excluded the actual work. F2's safe useful content did not excuse the omitted duration. F4's fail-closed Cannot-be-established result did not satisfy the frozen negative-result criterion. Independent offline graders checked original source passages; no expectation, capture, verdict, selection or conclusion was repaired. **Overall fresh gate: failed.** F1–F4 are now exposed material; later tuning requires another untouched set before any new held-out claim.
 
-### Memory and spending boundaries
-
-The clean final exposed workload yielded **11,144 process samples**: application workerd RSS/high-water **391,221,248 bytes**, front-proxy RSS **332,226,560 bytes**. **3,400 inspector samples** peaked at **44,050,676 bytes** for the simultaneously observed allocated-heap/embedder/backing-storage component sum. Fresh workload samples observed application RSS **390,295,552 bytes** (process-lifetime high-water **392,744,960**) and an inspector component sum of **31,332,051 bytes**. Neither measurement is an absolute application-isolate peak or the platform quota accounting. No idle-baseline subtraction or inference from small JS heap to total-isolate fit was used.
-
-The owner explicitly chose **“Finish locally; leave memory gate open.”** The **128 MB isolate-fit gate remains unqualified**; no staging/production deployment was authorized or performed.
-
-Across this entire follow-on, including failed/superseded candidates, diagnostics and fresh requests, **60 task-owned jobs produced 202 completed calls and 103 reconciled phases**. Actual stored response usage totaled **USD 0.8137823265**; phase-level upward rounding reconciled **813,829 microUSD**. Every new phase matched its actual completed response usage; zero new holds remained. Older/uncertain reservations were not released, and no provider credit/invoice monitoring, purchase, top-up, fallback or automatic retry occurred.
-
-Final shutdown checked no active attempt or pending job and admission disabled. A real subsequent POST returned **503 `ADMISSION_NOT_ENABLED`**, with unchanged job/attempt/reservation counts. A private custom-format durable-database backup was retained; task Worker/samplers/browser were stopped and task-created secret configuration and ingestion scratch were removed. Durable campaign data and immutable private captures remain outside Git.
-
-**Delivery boundary:** local code and checks are complete, not release qualification. The fresh gate failed; timing and total-isolate memory remain explicitly open. No merge, deployment, production-admission change or public release follows from this report.
-
-## Operational acceptance follow-up — issue #35, 2026-10-17
+### Operational acceptance follow-up — issue #35, 2026-10-17
 
 PR #42 supplied the shared operational-acceptance definition and independent-review reminder while this task was running. Those changes are preserved. The reviewer now explicitly distinguishes client operating deadlines, completion proof and rejected operational substitutes from the assistant's response deadline/format or evidence-inspection instructions. Exact request quotations and uncertainty qualifiers remain required; no schema, provider/profile, corpus, paid-stage count or historical capture/verdict was changed.
 
@@ -668,3 +656,15 @@ Observed offline verification:
 - A throwaway no-provider-network smoke used a fresh isolated PostgreSQL container, synthetic job capabilities, filesystem-backed original storage and actual authenticated Hono status/export routes. An explicitly hand-authored negative gate fixture retained all 24 reviewed roles and exact acceptance quotations on GET, offered no work, and was downgraded when an original was corrupted. Both negative fixture and authentic historical F4 returned **409 `CHECKED_BRIEF_REQUIRED`** for both pack formats; an unchanged accepted historical F2 brief exported JSON and Markdown with **200** and no capability leakage. Admission stayed disabled, model-attempt rows stayed zero, and only the smoke's own container was removed. This is route/gate proof, not new model output or Worker/platform qualification.
 
 The separately frozen final offline candidate source/configuration/corpus inventory has SHA-256 **`b2f9bbb9be35bea3e360c2a2c37bf70978404c8a46f6c600a8b622398112cadf`**; only server documentation changed after the runtime smoke's earlier source inventory. The authentic F4 capture still has three draft operational quotations, zero review quotations and 24 settled negative roles, and correctly replays as `cannot_be_established`; reads do not repair or upgrade it. **A newly generated F4 bounded-negative result and untouched-set application evaluation are not verified.** Paid calls/admission are unauthorized, and #32's candidate/integration, timing, memory and separate execution approvals remain prerequisites. The frozen keys, receipts and raw evidence remain private outside Git. No merge, deployment or release is authorized by these offline checks.
+
+### Memory and spending boundaries
+
+The clean final exposed workload yielded **11,144 process samples**: application workerd RSS/high-water **391,221,248 bytes**, front-proxy RSS **332,226,560 bytes**. **3,400 inspector samples** peaked at **44,050,676 bytes** for the simultaneously observed allocated-heap/embedder/backing-storage component sum. Fresh workload samples observed application RSS **390,295,552 bytes** (process-lifetime high-water **392,744,960**) and an inspector component sum of **31,332,051 bytes**. Neither measurement is an absolute application-isolate peak or the platform quota accounting. No idle-baseline subtraction or inference from small JS heap to total-isolate fit was used.
+
+The owner explicitly chose **“Finish locally; leave memory gate open.”** The **128 MB isolate-fit gate remains unqualified**; no staging/production deployment was authorized or performed.
+
+Across this entire follow-on, including failed/superseded candidates, diagnostics and fresh requests, **60 task-owned jobs produced 202 completed calls and 103 reconciled phases**. Actual stored response usage totaled **USD 0.8137823265**; phase-level upward rounding reconciled **813,829 microUSD**. Every new phase matched its actual completed response usage; zero new holds remained. Older/uncertain reservations were not released, and no provider credit/invoice monitoring, purchase, top-up, fallback or automatic retry occurred.
+
+Final shutdown checked no active attempt or pending job and admission disabled. A real subsequent POST returned **503 `ADMISSION_NOT_ENABLED`**, with unchanged job/attempt/reservation counts. A private custom-format durable-database backup was retained; task Worker/samplers/browser were stopped and task-created secret configuration and ingestion scratch were removed. Durable campaign data and immutable private captures remain outside Git.
+
+**Delivery boundary:** local code and checks are complete, not release qualification. The fresh gate failed; timing and total-isolate memory remain explicitly open. No merge, deployment, production-admission change or public release follows from this report.
