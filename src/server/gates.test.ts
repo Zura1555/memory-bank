@@ -4,6 +4,9 @@ import test from "node:test";
 import type { ArtifactRole, AssessmentResult, Claim, RequestConstraints, Selection, SupportVerdict } from "../shared/protocol.ts";
 import { assessmentDraftSchema, assessmentReviewSchema, briefDraftSchema, openRouterSchema, parseAssessmentDraft, reviewSchema, type AssessmentDraft, type AssessmentOutput, type BriefDraft } from "./schemas.ts";
 import { buildCheckedAssessment, buildCheckedBrief, GateFailure, revalidateAssessment, revalidateBrief, validateAssessmentDraft, validateBriefDraft, validateArtifactReview, validateSupportReview } from "./gates.ts";
+import { HttpFailure } from "./errors.ts";
+import { jobView, type JobRecord } from "./jobs.ts";
+import { buildStarterPack } from "./packs.ts";
 import { validateSelections } from "./selections.ts";
 import { assessmentPassageIds, EvidenceUnavailable, type Artifact, type CorpusSnapshot, type ModelCaseContext, type PastCase, type SourceVersion } from "./corpus.ts";
 import { dispositionChanges } from "../ui/lineage.ts";
@@ -961,4 +964,120 @@ test("brief generation cannot add an unselected background artifact", async () =
   const foreignClaim = structuredClone(wireOutput);
   foreignClaim.claims[0].sourceRefs[0] = ids.get("p-request-v1")!;
   assert.equal(validate(foreignClaim), false, "Brief claims must preserve selected-source ownership.");
+});
+
+test("agreed operational acceptance constraints establish no useful precedent and fail closed when agreement or evidence is lost", () => {
+  const corpus = fixture();
+  const request = "The operation must finish within the stated window, with proof for each record. A restored copy does not count as completion. Please assess whether past records help.";
+  const deadline = "The operation must finish within the stated window, with proof for each record.";
+  const rejectedSubstitute = "A restored copy does not count as completion.";
+  const quotes = [deadline, rejectedSubstitute];
+  const draft = assessmentDraft(corpus);
+  for (const item of draft.cases) for (const work of item.artifactWork) {
+    work.disposition = null;
+    const explanation = draft.claims.find((claim) => claim.claimId === work.dispositionClaimId)!;
+    explanation.kind = "interpretation";
+    explanation.text = "This record supplies background requirements, not an implementation procedure.";
+    item.claimIds.push(work.dispositionClaimId);
+    draft.claims.find((claim) => claim.claimId === `classification-${work.dispositionClaimId}`)!.text = "Artifact disposition: excluded.";
+  }
+  for (const claim of draft.claims) claim.requestQuotes = claim.requestQuotes.filter((quote) => request.includes(quote));
+  const sourceRefs = draft.claims.find((claim) => claim.claimId === "fact-0-0")!.sourceRefs;
+  draft.claims.push(
+    { claimId: "recovery-requirement", kind: "interpretation", text: "The current request states a completion window and required proof.", sourceRefs, requestQuotes: [deadline], dependsOnClaimIds: [] },
+    { claimId: "recovery-assessment", kind: "interpretation", text: "The recorded work does not establish this completion window.", sourceRefs, requestQuotes: [deadline], dependsOnClaimIds: ["fact-0-0", "recovery-requirement"] },
+    { claimId: "recovery-implication", kind: "recommendation", text: "Do not treat the recorded work as meeting the stated completion rule.", sourceRefs, requestQuotes: [deadline], dependsOnClaimIds: ["recovery-assessment"] },
+  );
+  draft.contrasts = [{ caseId: "case-1", state: "partial", usefulArtifactIds: [], reasonClaimIds: ["fact-0-0"] }];
+  draft.comparisons = [{
+    caseId: "case-1",
+    dimension: "recovery_operations",
+    requirementClaimId: "recovery-requirement",
+    evidenceClaimId: "fact-0-0",
+    relation: "unknown",
+    assessmentClaimId: "recovery-assessment",
+    implicationClaimId: "recovery-implication",
+  }];
+  const constraints = {
+    product_version: [],
+    environment: [],
+    scale: [],
+    identity_access: [],
+    recovery_operations: quotes,
+  };
+  draft.requestConstraints = {
+    product_version: [],
+    environment: [],
+    scale: [],
+    identity_access: [],
+    recovery_operations: [...quotes],
+  };
+  const roles = artifactRoles(draft, "context_only");
+  const verdicts = new Map(draft.claims.map((claim) => [claim.claimId, "supported" as const]));
+  const invalid = validateAssessmentDraft(draft, request, corpus);
+  const checked = buildCheckedAssessment(draft, verdicts, invalid, corpus, roles, { request, constraints });
+  assert.equal(checked.conclusion, "no_useful_precedent");
+  assert.deepEqual(checked.leads, []);
+  assert.ok(checked.cases.every((item) => item.artifactWork.every((work) => work.disposition === null)));
+  assert.deepEqual(checked.requestConstraints.recovery_operations, quotes);
+  for (const pastCase of corpus.manifest.cases) for (const artifact of pastCase.artifacts) {
+    const version = artifact.versions[0];
+    assert.throws(() => validateSelections([{
+      caseId: pastCase.caseId,
+      artifactId: artifact.artifactId,
+      versionId: version.versionId,
+      passageIds: [version.passages[0].passageId],
+    }], checked, corpus));
+  }
+  const reread = revalidateAssessment(checked, request, corpus);
+  assert.equal(reread.conclusion, "no_useful_precedent");
+  assert.deepEqual(reread.requestConstraints.recovery_operations, quotes);
+  const job: JobRecord = {
+    id: "00000000-0000-4000-8000-000000000035",
+    request_text: request,
+    corpus_version: corpus.manifest.corpusVersion,
+    corpus_sha256: corpus.manifestSha256,
+    stage: "ready",
+    assessment_state: "ready",
+    brief_state: "not_started",
+    assessment_result: reread,
+    brief_result: null,
+    brief_selections: null,
+    error_code: null,
+    created_at: new Date("2026-10-15T00:00:00Z"),
+    expires_at: new Date("2099-10-22T00:00:00Z"),
+    assessment_queued_at: new Date("2026-10-15T00:00:00Z"),
+    assessment_processing_started_at: null,
+    assessment_finished_at: null,
+    brief_queued_at: null,
+    brief_processing_started_at: null,
+    brief_finished_at: null,
+  };
+  job.assessment_result = revalidateAssessment(job.assessment_result!, job.request_text, corpus);
+  const view = jobView(job);
+  assert.equal(view.assessment?.conclusion, "no_useful_precedent");
+  assert.deepEqual(view.assessment?.requestConstraints.recovery_operations, quotes);
+  assert.throws(
+    () => buildStarterPack(job, corpus, "https://demo.example"),
+    (error: unknown) => error instanceof HttpFailure && error.status === 409 && error.code === "CHECKED_BRIEF_REQUIRED",
+  );
+  assert.equal(buildCheckedAssessment(draft, verdicts, invalid, corpus, roles, {
+    request,
+    constraints: { ...constraints, recovery_operations: [] },
+  }).conclusion, "cannot_be_established");
+  const unresolved = new Map(roles);
+  unresolved.set("case-1/request", "unresolved");
+  assert.equal(buildCheckedAssessment(draft, verdicts, invalid, corpus, unresolved, { request, constraints }).conclusion, "cannot_be_established");
+  const unsupported = new Map(verdicts);
+  for (const claimId of unsupported.keys()) {
+    if (claimId.startsWith("classification-") || claimId === "recovery-assessment" || claimId === "recovery-implication" || claimId === "recovery-requirement") {
+      unsupported.set(claimId, "unsupported");
+    }
+  }
+  assert.equal(buildCheckedAssessment(draft, unsupported, invalid, corpus, roles, { request, constraints }).conclusion, "cannot_be_established");
+  const preserved: AssessmentResult = { ...checked, conclusion: "cannot_be_established" };
+  assert.equal(revalidateAssessment(preserved, request, corpus).conclusion, "cannot_be_established");
+  corpus.passages.delete("p-request-v1");
+  corpus.availableVersions.delete("request-v1");
+  assert.equal(revalidateAssessment(checked, request, corpus).conclusion, "cannot_be_established");
 });
