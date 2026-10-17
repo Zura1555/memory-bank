@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { Dialog } from "@base-ui/react/dialog";
 import { Select } from "@base-ui/react/select";
@@ -39,6 +39,7 @@ import type {
 import { dispositionChanges } from "../src/ui/lineage";
 import { readLocalJobs, writeLocalJobs, reopenedJobMode, type LocalJob } from "../src/ui/local-jobs";
 import { checkedArtifactRefs } from "../src/ui/checked-sources";
+import { isPassage } from "../src/ui/passage";
 import "./styles.css";
 
 const phaseStates: PhaseState[] = ["not_started", "queued", "running", "ready", "failed", "reconciliation_required"];
@@ -321,25 +322,6 @@ function isCreateJobResponse(value: unknown): value is CreateJobResponse {
     && Number.isFinite(Date.parse(value.expiresAt)) && Date.parse(value.expiresAt) > Date.now();
 }
 
-function isLocation(value: unknown): value is PassageView["location"] {
-  return isRecord(value) && Object.values(value).every((item) =>
-    item === null || typeof item === "string" || typeof item === "number" || typeof item === "boolean"
-      || (Array.isArray(item) && item.every((entry) => typeof entry === "string")));
-}
-
-function isPassage(value: unknown, expected: SourceRef): value is PassageView {
-  return isRecord(value)
-    && value.caseId === expected.caseId
-    && value.artifactId === expected.artifactId
-    && value.versionId === expected.versionId
-    && value.passageId === expected.passageId
-    && isText(value.title)
-    && value.fictional === true
-    && (value.statedDate === null || isText(value.statedDate))
-    && isText(value.excerpt)
-    && ["native", "ocr_transcription", "visual_observation", "visual_interpretation"].includes(value.sourceKind as string)
-    && isLocation(value.location);
-}
 
 const labels: Record<string, string> = {
   not_started: "Not started",
@@ -407,22 +389,32 @@ function StringList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function SourceLinks({ refs, inspect, compact = false }: { refs: SourceRef[]; inspect: InspectPassage; compact?: boolean }) {
-  if (refs.length === 0) return <p className="muted">No checked source references are available.</p>;
+function SourceLinks({ refs, inspect, compact = false, previews = false }: { refs: SourceRef[]; inspect: InspectPassage; compact?: boolean; previews?: boolean }) {
+  if (refs.length === 0) return <p className="muted">No source references are available.</p>;
   const uniqueRefs = Array.from(new Map(refs.map((ref) => [`${ref.versionId}\u0000${ref.passageId}`, ref])).values());
   if (compact) return <div className="source-links" aria-label="Checked comparison evidence">{uniqueRefs.map((ref, index) =>
     <button key={`${ref.versionId}-${ref.passageId}`} className="text-button" type="button" onClick={() => inspect(ref)}>Inspect evidence{uniqueRefs.length > 1 ? ` ${index + 1}` : ""}</button>)}</div>;
-  return (
-    <div className="source-links" aria-label="Checked source records">
-      {uniqueRefs.map((ref) => (
-        <div className="source-link" key={`${ref.versionId}-${ref.passageId}`}>
-          <span className="record-id">Case {ref.caseId} · Artifact {ref.artifactId} · Passage {ref.passageId} · Version {ref.versionId}</span>
-          <button className="text-button" type="button" onClick={() => inspect(ref)}>Inspect checked passage</button>
-          <a href={`/api/evidence/originals/${encodeURIComponent(ref.versionId)}`}>Download exact fictional original</a>
-        </div>
-      ))}
+  if (previews) return <div className="passage-cards" aria-label="Source passages">{uniqueRefs.map((ref) =>
+    <PassageCard key={`${ref.caseId}-${ref.artifactId}-${ref.versionId}-${ref.passageId}`} sourceRef={ref} inspect={inspect} />)}</div>;
+  return <div className="source-links" aria-label="Source records">{uniqueRefs.map((ref) =>
+    <div className="source-link" key={`${ref.versionId}-${ref.passageId}`}>
+      <span className="record-id">Case {ref.caseId} · Artifact {ref.artifactId} · Passage {ref.passageId} · Version {ref.versionId}</span>
+      <button className="text-button" type="button" onClick={() => inspect(ref)}>Inspect passage</button>
+      <a href={`/api/evidence/originals/${encodeURIComponent(ref.versionId)}`}>Download exact fictional original</a>
+    </div>)}</div>;
+}
+
+function PassageCard({ sourceRef, inspect }: { sourceRef: SourceRef; inspect: InspectPassage }) {
+  const [expanded, setExpanded] = useState(false);
+  return <Collapsible.Root className="passage-card" open={expanded} onOpenChange={setExpanded}>
+    <div className="passage-card-heading">
+      <div><p className="eyebrow">Source passage · Fictional</p><p className="record-id">{sourceRef.artifactId} · {sourceRef.versionId}</p></div>
+      <button className="text-button" type="button" onClick={() => inspect(sourceRef)}>Inspect passage</button>
     </div>
-  );
+    <Collapsible.Trigger render={<Button className="text-button" />}>{expanded ? "Hide preview" : "Preview passage"}</Collapsible.Trigger>
+    <Collapsible.Panel>{expanded && <EvidencePassage sourceRef={sourceRef} preview />}</Collapsible.Panel>
+    <p className="record-id passage-identity">Case {sourceRef.caseId} · Passage {sourceRef.passageId}</p>
+  </Collapsible.Root>;
 }
 
 function ClaimCard({ claim, inspect }: { claim: Claim; inspect: InspectPassage }) {
@@ -547,7 +539,7 @@ function CuratedCard({ record, inspect }: { record: KnowledgeCard; inspect: Insp
     </>}
     <h4>Applicability</h4><p>{record.applicability}</p>
     <p className="field-hint">Historical evidence is not approval for a new request. Applying this record requires a checked recommendation against relevant passages and the client's constraints.</p>
-    <SourceLinks refs={record.evidence} inspect={inspect} />
+    <SourceLinks refs={record.evidence} inspect={inspect} previews />
     <a href={`?knowledge=${encodeURIComponent(record.recordId)}`}>Permanent record link</a>
   </article>;
 }
@@ -585,13 +577,12 @@ function CuratedKnowledge({ caseId, recordId, inspect }: { caseId?: string; reco
 
 function KnowledgePage({ recordId }: { recordId?: string }) {
   const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
-  return <section className="workflow" aria-labelledby="knowledge-title">
+  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow" aria-labelledby="knowledge-title">
     <div className="intro"><p className="eyebrow">Human-reviewed context</p><h1 id="knowledge-title">Reviewed knowledge</h1>
       <p>Decisions and lessons from fictional past work, independent of expiring assessment jobs.</p></div>
     {recordId && <a href="/?knowledge" className="back-link">All reviewed records</a>}
     <div className="screen"><CuratedKnowledge recordId={recordId} inspect={setPassageRef} /></div>
-    <EvidenceDialog sourceRef={passageRef} onClose={() => setPassageRef(null)} />
-  </section>;
+  </section></EvidenceWorkspace>;
 }
 
 function isSourceCatalogEntry(value: unknown): value is SourceCatalogEntry {
@@ -652,7 +643,7 @@ function SourcesPage() {
   const filtered = (sources ?? []).filter((source) => (!caseId || source.caseId === caseId)
     && (!mimeType || source.mimeType === mimeType)
     && (!needle || `${source.title} ${source.caseTitle}`.toLocaleLowerCase().includes(needle)));
-  return <section className="workflow" aria-labelledby="sources-title">
+  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow" aria-labelledby="sources-title">
     <div className="intro"><p className="eyebrow">The original work, not a summary</p><h1 id="sources-title">Sources</h1>
       <p>Browse the fictional corpus. Inspect exact retained passages and download their originals. This is not an AI relevance assessment.</p></div>
     {error ? <p className="notice notice-error" role="alert">The source inventory could not be verified. Reload to try again.</p>
@@ -677,13 +668,12 @@ function SourcesPage() {
               <a href={`/api/evidence/originals/${encodeURIComponent(source.versionId)}`}>Download exact fictional original</a>
               {source.passages.length > 0 ? <Collapsible.Root className="source-passages">
                 <Collapsible.Trigger render={<Button className="secondary-button" />}>Inspect passages ({source.passages.length})</Collapsible.Trigger>
-                <Collapsible.Panel><SourceLinks refs={source.passages} inspect={setPassageRef} /></Collapsible.Panel>
+                <Collapsible.Panel><SourceLinks refs={source.passages} inspect={setPassageRef} previews /></Collapsible.Panel>
               </Collapsible.Root> : <p className="muted">No inspectable passages are retained.</p>}
             </> : <StringList title="Source unavailable for use" items={source.exclusionReasons} />}
           </article>)}</div>}
       </>}
-    <EvidenceDialog sourceRef={passageRef} onClose={() => setPassageRef(null)} />
-  </section>;
+  </section></EvidenceWorkspace>;
 }
 
 function CaseCard({ item, claims, inspect }: { item: CaseAssessment; claims: ClaimMap; inspect: InspectPassage }) {
@@ -760,7 +750,7 @@ function WorkCard({
           {item.exclusionReasons.map((reason, index) => <li key={`${index}-${reason}`}>{reason}</li>)}
         </ul>
       )}
-      <SourceLinks refs={refs} inspect={inspect} />
+      <SourceLinks refs={refs} inspect={inspect} previews />
       {blocked && <p className="inline-blocker">{item.availability === "unavailable" ? "No usable source version is available; this artifact was not assessed and cannot be selected." : `This case is ${label(availability).toLowerCase()}; this work cannot be selected.`}</p>}
       {!canSelect && !blocked && <p className="inline-blocker">{hasSupportedWorkClaim ? "No checked passage is available for selection." : "No supported work claim is available; this artifact cannot be selected."}</p>}
       <label className="select-work">
@@ -914,7 +904,7 @@ function readBrowserJobs() {
   catch { return { entries: [] as LocalJob[], error: "Local History/Saved persistence failed. Browser storage may be unavailable or full; use browser settings to clear retained data. The main workflow still works in this tab." }; }
 }
 
-function EvidencePassage({ sourceRef }: { sourceRef: SourceRef }) {
+function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef; preview?: boolean }) {
   const [passage, setPassage] = useState<PassageView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -934,13 +924,13 @@ function EvidencePassage({ sourceRef }: { sourceRef: SourceRef }) {
       .then((body) => {
         if (!active) return;
         if (!isPassage(body, sourceRef)) {
-          setError("This passage could not be verified as fictional checked evidence.");
+          setError("This passage could not be verified as the requested fictional source.");
           return;
         }
         setPassage(body);
       })
       .catch(() => {
-        if (active && !controller.signal.aborted) setError("The checked passage could not be retrieved. Try again later.");
+        if (active && !controller.signal.aborted) setError("The source passage could not be retrieved. Try again later.");
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -949,21 +939,21 @@ function EvidencePassage({ sourceRef }: { sourceRef: SourceRef }) {
       active = false;
       controller.abort();
     };
-  }, [sourceRef]);
+  }, [sourceRef.caseId, sourceRef.artifactId, sourceRef.versionId, sourceRef.passageId]);
 
   return (
     <>
-      {loading && <p role="status" className="muted">Retrieving the checked passage…</p>}
+      {loading && <p role="status" className="muted">Loading source passage…</p>}
       {error && <p role="alert" className="notice notice-error">{error}</p>}
       {passage && (
-        <div className="passage-content">
+        <div className={`passage-content${preview ? " passage-preview" : ""}`}>
           <div className="badge-row"><Badge tone="fictional">Fictional record</Badge><Badge>{label(passage.sourceKind)}</Badge></div>
           <h3>{passage.title}</h3>
           <p className="muted">{passage.statedDate ? `Stated date: ${passage.statedDate}` : "No stated date"}</p>
           <blockquote>{passage.excerpt}</blockquote>
           {Object.keys(passage.location).length > 0 && (
             <dl className="location-list">
-              {Object.entries(passage.location).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{Array.isArray(value) ? value.join(", ") : value === null ? "Not stated" : String(value)}</dd></div>)}
+              {Object.entries(passage.location).map(([key, value]) => <div key={key}><dt>{key.replace(/([a-z])([A-Z])/g, "$1 $2")}</dt><dd>{Array.isArray(value) ? value.join(", ") : value === null ? "Not stated" : String(value)}</dd></div>)}
             </dl>
           )}
           <div className="source-links"><a href={`/api/evidence/originals/${encodeURIComponent(passage.versionId)}`}>Download exact fictional original</a></div>
@@ -973,25 +963,64 @@ function EvidencePassage({ sourceRef }: { sourceRef: SourceRef }) {
   );
 }
 
-function EvidenceDialog({ sourceRef, onClose }: { sourceRef: SourceRef | null; onClose: () => void }) {
-  return (
-    <Dialog.Root open={sourceRef !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+function EvidenceWorkspace({ sourceRef, onInspect, children }: {
+  sourceRef: SourceRef | null;
+  onInspect: (ref: SourceRef | null) => void;
+  children: ReactNode;
+}) {
+  const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
+  const pane = useRef<HTMLElement>(null);
+  const open = sourceRef !== null;
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1280px)");
+    const update = () => setDesktop(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
+    if (!open || !desktop) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const panel = pane.current;
+    panel?.focus({ preventScroll: true });
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        event.preventDefault();
+        onInspect(null);
+      }
+    };
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("keydown", escape);
+      if (opener?.isConnected && !opener.closest("[hidden], [inert]")
+        && (panel?.contains(document.activeElement) || document.activeElement === document.body)) {
+        opener.focus({ preventScroll: true });
+      }
+    };
+  }, [sourceRef, desktop, onInspect]);
+  const content = sourceRef && <>
+    <p className="field-hint">Inspecting a source does not select work or establish its applicability to this request.</p>
+    <p className="record-id">Case {sourceRef.caseId} · Artifact {sourceRef.artifactId} · Retained version {sourceRef.versionId} · Passage {sourceRef.passageId}</p>
+    <EvidencePassage key={JSON.stringify(sourceRef)} sourceRef={sourceRef} />
+  </>;
+  return <div className="evidence-workspace" data-inspecting={open && desktop ? "" : undefined}>
+    <div className="evidence-main">{children}</div>
+    {desktop ? open && <aside className="evidence-pane" aria-label="Source inspection" tabIndex={-1} ref={pane}>
+      <div className="dialog-header"><div><p className="eyebrow">Source inspection · Fictional</p><h2>Exact passage</h2></div>
+        <button className="icon-button" type="button" onClick={() => onInspect(null)} aria-label="Close passage">Close</button></div>
+      {content}
+    </aside> : <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onInspect(null); }}>
       <Dialog.Portal>
         <Dialog.Backdrop className="evidence-backdrop" />
         <Dialog.Popup className="evidence-dialog" aria-modal="true">
-          <div className="dialog-header">
-            <div>
-              <Dialog.Description className="eyebrow">Checked evidence · Fictional source</Dialog.Description>
-              <Dialog.Title>Exact passage</Dialog.Title>
-            </div>
-            <Dialog.Close className="icon-button" aria-label="Close passage">Close</Dialog.Close>
-          </div>
-          {sourceRef && <p className="record-id">Requested source: Case {sourceRef.caseId} · Artifact {sourceRef.artifactId} · Retained version {sourceRef.versionId} · Passage {sourceRef.passageId}</p>}
-          {sourceRef && <EvidencePassage key={JSON.stringify(sourceRef)} sourceRef={sourceRef} />}
+          <div className="dialog-header"><div>
+            <Dialog.Description className="eyebrow">Source inspection · Fictional</Dialog.Description>
+            <Dialog.Title>Exact passage</Dialog.Title>
+          </div><Dialog.Close className="icon-button" aria-label="Close passage">Close</Dialog.Close></div>
+          {content}
         </Dialog.Popup>
       </Dialog.Portal>
-    </Dialog.Root>
-  );
+    </Dialog.Root>}
+  </div>;
 }
 
 const stepNames = ["Client request", "Checked examples", "Selected work", "Checked brief"];
@@ -1399,7 +1428,7 @@ function App({ active }: { active: boolean }) {
   const questionClaims = assessmentAvailable ? assessmentClaims : new Map((questions?.claims ?? []).map((claim) => [claim.claimId, claim]));
 
   return (
-    <>
+    <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}>
       <section className="workflow" aria-labelledby="workflow-title">
         {(session || previousJob || step > 1) && <div className="workflow-actions"><Button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</Button></div>}
         <div className="intro">
@@ -1525,7 +1554,7 @@ function App({ active }: { active: boolean }) {
                         <ClaimGroup title="Checked reuse recommendation" ids={item.dispositionClaimId ? [item.dispositionClaimId] : []} claims={assessmentClaims} inspect={setPassageRef} />
                         <ClaimGroup title="Blockers" ids={item.blockerClaimIds} claims={assessmentClaims} inspect={setPassageRef} />
                         <ClaimGroup title="Required verification" ids={item.verificationClaimIds} claims={assessmentClaims} inspect={setPassageRef} />
-                        <SourceLinks refs={sourceRefs} inspect={setPassageRef} />
+                        <SourceLinks refs={sourceRefs} inspect={setPassageRef} previews />
                       </article>)}</div>
                       {!workChoices.some((work) => work.caseId === lead.caseId && lead.usefulArtifactIds.includes(work.item.artifactId) && work.sourceRefs.length > 0) && <p className="empty-state">No eligible checked source artifacts for this lead.</p>}
                     </section>
@@ -1627,8 +1656,7 @@ function App({ active }: { active: boolean }) {
           </section>
         )}
       </section>
-      <EvidenceDialog sourceRef={passageRef} onClose={() => setPassageRef(null)} />
-    </>
+    </EvidenceWorkspace>
   );
 }
 
