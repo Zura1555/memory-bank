@@ -38,7 +38,7 @@ test("brief review cannot accept a verdict for a background assessment claim", a
   globalThis.fetch = async () => Response.json({
     id: "gen-wrong-inventory", model: "openai/gpt-6-luna", provider: "OpenAI",
     choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
-      claimReviews: [{ claimId: "assessment-only", verdict: "supported" }],
+      claimVerdicts: { "assessment-only": "supported" },
     }) } }],
   }, { headers: { "x-generation-id": "gen-wrong-inventory" } });
   try {
