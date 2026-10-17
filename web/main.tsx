@@ -38,6 +38,7 @@ import type {
 } from "../src/shared/protocol";
 import { dispositionChanges } from "../src/ui/lineage";
 import { readLocalJobs, writeLocalJobs, reopenedJobMode, type LocalJob } from "../src/ui/local-jobs";
+import { checkedArtifactRefs } from "../src/ui/checked-sources";
 import "./styles.css";
 
 const phaseStates: PhaseState[] = ["not_started", "queued", "running", "ready", "failed", "reconciliation_required"];
@@ -58,6 +59,19 @@ function isAssessmentConclusion(value: unknown): value is AssessmentConclusion {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function admissionFailure(response: Response, subject: string): Promise<string> {
+  const body: unknown = await response.json().catch(() => null);
+  const reasons: Record<string, string> = {
+    ADMISSION_NOT_ENABLED: "Paid admission is disabled.",
+    AUTHORIZED_CREDIT_EXHAUSTED: "Authorized credit is exhausted.",
+    WORKFLOW_BUSY: "The service cannot admit another workflow yet.",
+  };
+  const code = isRecord(body) && isRecord(body.error) && typeof body.error.code === "string" ? body.error.code : "";
+  return Object.hasOwn(reasons, code)
+    ? `${subject} not admitted (HTTP ${response.status}). ${reasons[code]} No automatic retry was made.`
+    : `The service could not accept the ${subject.toLowerCase()} (HTTP ${response.status}). No admission was confirmed.`;
 }
 
 function isText(value: unknown): value is string {
@@ -344,7 +358,7 @@ const labels: Record<string, string> = {
   adapt: "Adapt",
   verify: "Verify",
   assembling: "Assembling examples",
-  drafting: "Drafting checked results",
+  drafting: "Drafting results — not yet checked",
   reference_check: "Checking references",
   support_review: "Reviewing support",
   native: "Native text",
@@ -702,10 +716,8 @@ function WorkCard({
   inspect: InspectPassage;
 }) {
   const otherClaimIds = item.claimIds.filter((id) => id !== item.dispositionClaimId);
-  const workClaimIds = [...item.claimIds, ...item.blockerClaimIds, ...item.verificationClaimIds];
   const hasSupportedWorkClaim = claimsFor(item.claimIds, claims).length > 0;
-  const refs = claimsFor(workClaimIds, claims).flatMap((claim) => claim.sourceRefs)
-    .filter((ref) => ref.caseId === caseId && ref.artifactId === item.artifactId);
+  const refs = checkedArtifactRefs(caseId, availability, item, claims);
   const versions = Array.from(new Set(refs.map((ref) => ref.versionId)));
   const selectedVersion = versions.includes(draft.versionId) ? draft.versionId : (versions[0] ?? "");
   const passageRefs = Array.from(new Map(
@@ -976,6 +988,13 @@ function EvidenceDialog({ sourceRef, onClose }: { sourceRef: SourceRef | null; o
 
 const stepNames = ["Client request", "Checked examples", "Selected work", "Checked brief"];
 
+// Authored from public fictional corpus requests, never held-out evaluation requests.
+const suggestedRequests = [
+  { title: "Plan a sandbox CSV import", basis: "Cedar Supply", request: "Plan a sandbox import of active supplier records from a UTF-8 CSV. Preserve source keys and reconcile accepted, rejected, and duplicate rows. What past mapping and reconciliation work could help, and what must we verify for a new target? No production writes are authorized." },
+  { title: "Scope temporary support access", basis: "Grove Clinic", request: "Two external support engineers need temporary read-only access to import errors in a test workspace. Require named accounts, MFA, expiry, and an access log; exclude patient charts and configuration changes. Find useful prior access work and identify unverified lifecycle or audit controls." },
+  { title: "Prepare an operator handover", basis: "Ibis Foods", request: "Prepare a test-environment handover of a nightly inventory import to a primary and backup operator. We need a runbook, escalation contact, recovery procedure, and witnessed recovery exercise. Which past work is useful, and which acceptance gaps remain? Production scheduling is out of scope." },
+];
+
 function App({ active }: { active: boolean }) {
   const [step, setStep] = useState(1);
   const [request, setRequest] = useState("");
@@ -1141,7 +1160,7 @@ function App({ active }: { active: boolean }) {
     };
   }, [session, pollMode]);
 
-  const assessment = job?.assessment;
+  const assessment = job?.assessmentState === "ready" ? job.assessment : undefined;
   const assessmentClaims = useMemo(() => new Map((assessment?.claims ?? []).map((claim) => [claim.claimId, claim] as const)), [assessment]);
   const briefClaims = useMemo(() => new Map((job?.brief?.claims ?? []).map((claim) => [claim.claimId, claim] as const)), [job?.brief]);
   const checkedLeads = (assessment?.leads ?? []).filter((lead) => claimsFor(lead.reasonClaimIds, assessmentClaims).length > 0);
@@ -1157,9 +1176,7 @@ function App({ active }: { active: boolean }) {
     return [...groups];
   }, [assessment]);
   const workChoices = useMemo(() => (assessment?.cases ?? []).flatMap((caseItem) => caseItem.artifactWork.map((item) => {
-    const claimIds = [...item.claimIds, ...item.blockerClaimIds, ...item.verificationClaimIds];
-    const sourceRefs = claimsFor(claimIds, assessmentClaims).flatMap((claim) => claim.sourceRefs)
-      .filter((ref) => ref.caseId === caseItem.caseId && ref.artifactId === item.artifactId);
+    const sourceRefs = checkedArtifactRefs(caseItem.caseId, caseItem.availability, item, assessmentClaims);
     return {
       caseId: caseItem.caseId,
       availability: caseItem.availability,
@@ -1221,7 +1238,8 @@ function App({ active }: { active: boolean }) {
       });
       if (submissionId !== requestSubmissionId.current || controller.signal.aborted) return;
       if (response.status !== 202) {
-        setServiceError(`The service could not accept the request (HTTP ${response.status}).`);
+        const message = await admissionFailure(response, "Request");
+        if (submissionId === requestSubmissionId.current && !controller.signal.aborted) setServiceError(message);
         return;
       }
       const result: unknown = await response.json();
@@ -1334,7 +1352,8 @@ function App({ active }: { active: boolean }) {
       });
       if (generation !== sessionGeneration.current || controller.signal.aborted) return;
       if (response.status !== 202) {
-        setServiceError(`The service could not start the brief (HTTP ${response.status}).`);
+        const message = await admissionFailure(response, "Brief");
+        if (generation === sessionGeneration.current && !controller.signal.aborted) setServiceError(message);
         return;
       }
       const receipt: unknown = await response.json();
@@ -1343,7 +1362,7 @@ function App({ active }: { active: boolean }) {
         setServiceError("The service returned an unsupported brief receipt. No unchecked brief is shown.");
         return;
       }
-      setJob((current) => current ? { ...current, briefState: receipt.briefState } : current);
+      setJob((current) => current ? { ...current, brief: undefined, briefState: receipt.briefState } : current);
       setPollMode("brief");
       setStep(4);
     } catch {
@@ -1364,7 +1383,7 @@ function App({ active }: { active: boolean }) {
     setWorkDrafts((current) => ({ ...current, [key]: next }));
   }
 
-  const assessmentState = job?.assessmentState ?? "queued";
+  const assessmentState = job?.assessmentState ?? "not_started";
   const briefState = job?.briefState ?? "not_started";
   const assessmentAvailable = assessmentState === "ready" && !!assessment;
   const rechecking = submittingRequest || pollMode === "assessment" || pollMode === "restore";
@@ -1376,11 +1395,12 @@ function App({ active }: { active: boolean }) {
       <section className="workflow" aria-labelledby="workflow-title">
         {(session || previousJob || step > 1) && <div className="workflow-actions"><Button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</Button></div>}
         <div className="intro">
-          <p className="eyebrow">Evidence-grounded work planning</p>
-          <h1 id="workflow-title">Build a checked work brief</h1>
-          <p>Review fictional past examples, choose the evidence that applies, and inspect every checked passage before using it.</p>
+          <p className="eyebrow">Ask Memory Bank · fictional evidence</p>
+          <h1 id="workflow-title">What can past work help you deliver?</h1>
+          <p>Bring a client request. Find checked leads, inspect the sources, and choose the work for an evidence-backed reuse brief.</p>
         </div>
-        <section className="local-library" aria-labelledby="local-library-title">
+        <details className="local-library">
+          <summary>History and Saved</summary>
           <h2 id="local-library-title">History and Saved</h2>
           <p className="field-hint">This browser/device only — no account sync or durable archive. Accepted jobs are recorded locally with a short request label and access capability. Do not retain them on a shared browser. Saving never extends the original seven-day expiry. No results, source bodies, or packs are stored here; downloaded packs remain independent offline files.</p>
           <div className="action-row" role="group" aria-label="Local job lists">
@@ -1404,7 +1424,7 @@ function App({ active }: { active: boolean }) {
             ))}
           </ul>
           {!localData.entries.some((entry) => library === "History" || entry.saved) && <p className="empty-state">No local {library.toLowerCase()} entries.</p>}
-        </section>
+        </details>
         <nav className="step-nav" aria-label="Workflow steps">
           <ol>{stepNames.map((name, index) => (
             <li key={name} className={step === index + 1 ? "step-current" : step > index + 1 ? "step-complete" : ""} aria-current={step === index + 1 ? "step" : undefined}>
@@ -1414,6 +1434,10 @@ function App({ active }: { active: boolean }) {
         </nav>
 
         {serviceError && <p role="alert" className="notice notice-error">{serviceError}</p>}
+        {step > 1 && (request.trim() || submittedClarification) && <section className="submitted-request" aria-label="Submitted request">
+          <h2>Client request</h2><p>{submittedClarification?.context ?? request.trim()}</p>
+          {submittedClarification && <><h3>Submitted clarification</h3><p>{submittedClarification.answers}</p></>}
+        </section>}
         {step > 1 && job && <p className="field-hint">Application job access expires: <time dateTime={job.expiresAt}>{new Date(job.expiresAt).toLocaleString()}</time> (seven days after creation). Provider/platform and backup retention is separate; downloaded packs remain on your device.</p>}
         {step > 1 && job && <JobTimings job={job} />}
         {session && job && (assessmentAvailable || (job.briefState === "ready" && job.brief)) && (
@@ -1438,6 +1462,14 @@ function App({ active }: { active: boolean }) {
               </Field.Root>
               <Button className="primary-button" type="submit" disabled={submittingRequest || !request.trim()}>{submittingRequest ? "Sending request…" : "Check past examples"}</Button>
             </form>
+            <section className="request-suggestions" aria-labelledby="suggestions-title">
+              <h3 id="suggestions-title">Try a fictional client request</h3>
+              <p className="field-hint">Inspired by the fictional corpus, not checked matches. Choosing one fills the editable request above; only submitting starts an admission request.</p>
+              <div className="suggestion-grid">{suggestedRequests.map((suggestion) => <Button key={suggestion.title} type="button" className="secondary-button suggestion-button" onClick={() => {
+                setRequest(suggestion.request);
+                document.getElementById("client-request")?.focus();
+              }}><span>{suggestion.title}</span><span className="field-hint">Based on {suggestion.basis}</span></Button>)}</div>
+            </section>
           </section>
         )}
 
@@ -1447,20 +1479,16 @@ function App({ active }: { active: boolean }) {
             <div className="assessment-layout">
             <section className="current-assessment" aria-labelledby="current-assessment-title">
             <h3 id="current-assessment-title">Current assessment</h3>
-            {(request.trim() || submittedClarification) && <div className="submitted-request">
-              <h4>Current request context</h4><p>{submittedClarification?.context ?? request.trim()}</p>
-              {submittedClarification && <><h4>Submitted clarification</h4><p>{submittedClarification.answers}</p></>}
-            </div>}
             {(session || submittingRequest) && (assessmentState === "queued" || assessmentState === "running" || assessmentState === "not_started") && (
               <div className="status-panel" role="status" aria-live="polite">
                 <span className="status-indicator" aria-hidden="true" />
-                <div><strong>{submittingRequest ? "Submitting request for admission" : assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job?.stage ?? "assembling")}</strong><p>No result is shown until the evidence check is ready.</p></div>
+                <div><strong>{submittingRequest ? "Submitting request for admission" : !job ? "Retrieving job status" : assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job.stage)}</strong><p>No draft is shown. Results appear only after reference checks and separate support review pass.</p></div>
               </div>
             )}
             {assessmentState === "failed" && <div className="notice notice-error" role="alert"><strong>Assessment failed.</strong> {job?.error?.message ?? "No checked past-example result is available."}</div>}
             {assessmentState === "reconciliation_required" && <div className="notice notice-warning" role="alert"><strong>Assessment needs operator reconciliation.</strong> {job?.error?.message ?? "The service could not establish the dispatch outcome. No automatic retry was made."}</div>}
             {assessmentState === "ready" && !assessment && <div className="notice notice-error" role="alert">The service did not return a supported checked assessment. No result is shown.</div>}
-            {!session && !submittingRequest && submittedClarification && <p className="notice notice-warning" role="status">No current checked answer is available. Previous content is historical only. No selections or dependent brief remain.</p>}
+            {!session && !submittingRequest && <p className="notice notice-warning" role="status">No current checked answer is available. No selections or dependent brief remain.{previousJob ? " Previous content is historical only." : ""}</p>}
             {assessmentAvailable && (
               <>
                 <div className={`conclusion-panel conclusion-${visibleConclusion(assessment, assessmentClaims)}`} role="status">
@@ -1480,6 +1508,19 @@ function App({ active }: { active: boolean }) {
                   {checkedLeads.length === 0 ? <p className="empty-state">No supported checked leads were returned.</p> : checkedLeads.slice(0, 3).map((lead) => <div key={lead.caseId}>
                     <LeadCard lead={lead} claims={assessmentClaims} inspect={setPassageRef} />
                     <ComparisonTable rows={assessment.comparisons.filter((row) => row.caseId === lead.caseId)} claims={assessmentClaims} inspect={setPassageRef} />
+                    <section className="checked-source-cards" aria-label={`Checked source artifacts for ${lead.caseId}`}>
+                      <h4>Checked source artifacts</h4>
+                      <p className="field-hint">Accepted work evidence, not corpus-only browse matches. Choose artifacts, retained versions, and passages in the next step; nothing is selected automatically.</p>
+                      <div className="card-grid">{workChoices.filter((work) => work.caseId === lead.caseId && lead.usefulArtifactIds.includes(work.item.artifactId) && work.sourceRefs.length > 0).map(({ item, sourceRefs, key }) => <article className="checked-source-card" key={key}>
+                        <div className="card-heading"><h4>{item.artifactId}</h4><Badge tone="fictional">Fictional source</Badge></div>
+                        {item.disposition && <Badge tone={item.disposition}>{label(item.disposition)}</Badge>}
+                        <ClaimGroup title="Checked reuse recommendation" ids={item.dispositionClaimId ? [item.dispositionClaimId] : []} claims={assessmentClaims} inspect={setPassageRef} />
+                        <ClaimGroup title="Blockers" ids={item.blockerClaimIds} claims={assessmentClaims} inspect={setPassageRef} />
+                        <ClaimGroup title="Required verification" ids={item.verificationClaimIds} claims={assessmentClaims} inspect={setPassageRef} />
+                        <SourceLinks refs={sourceRefs} inspect={setPassageRef} />
+                      </article>)}</div>
+                      {!workChoices.some((work) => work.caseId === lead.caseId && lead.usefulArtifactIds.includes(work.item.artifactId) && work.sourceRefs.length > 0) && <p className="empty-state">No eligible checked source artifacts for this lead.</p>}
+                    </section>
                   </div>)}
                 </section>
                 {checkedContrasts.length > 0 && <section className="content-section" aria-labelledby="contrast-title">
@@ -1546,7 +1587,7 @@ function App({ active }: { active: boolean }) {
             {(briefState === "queued" || briefState === "running" || briefState === "not_started") && (
               <div className="status-panel" role="status" aria-live="polite">
                 <span className="status-indicator" aria-hidden="true" />
-                <div><strong>{briefState === "queued" ? "Brief queued" : briefState === "not_started" ? "Brief has not started" : label(job?.stage ?? "drafting")}</strong><p>The service status is checked directly; no progress estimate is invented.</p></div>
+                <div><strong>{briefState === "queued" ? "Waiting in the brief queue" : briefState === "not_started" ? "Brief has not started" : job?.stage === "ready" ? "Retrieving brief status" : label(job?.stage ?? "running")}</strong><p>No draft is shown until reference checks and separate support review pass. Queue wait is not processing time.</p></div>
               </div>
             )}
             {briefState === "ready" && !job?.brief && pollMode === "brief" && <div className="status-panel" role="status" aria-live="polite"><span className="status-indicator" aria-hidden="true" /><div><strong>Retrieving the checked brief</strong><p>The service reported readiness; the checked result is still being fetched.</p></div></div>}

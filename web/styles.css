@@ -78,6 +78,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .local-job-list { padding: 0; list-style: none; }
 .local-job-list li { padding-block: 1rem; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .local-job-list li > p { margin-bottom: .6rem; }
+.local-library summary { cursor: pointer; font-weight: 700; }
+.local-library summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.local-library[open] summary { margin-bottom: 1rem; }
+.request-suggestions { margin-top: 2rem; }
+.suggestion-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .75rem; }
+.suggestion-button { flex-direction: column; align-items: flex-start; text-align: left; overflow-wrap: anywhere; }
+.suggestion-button .field-hint { font-weight: 400; margin: 0; }
+.submitted-request { margin-bottom: 1.5rem; overflow-wrap: anywhere; }
+.submitted-request h2 { font-size: 1.1rem; }
+.submitted-request p { white-space: pre-wrap; line-height: 1.6; }
+.checked-source-cards { margin-block: 1rem 2rem; }
+.checked-source-card { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--quiet); overflow-wrap: anywhere; }
+.checked-source-card .card-heading { flex-wrap: wrap; }
 
 .app-shell {
   display: grid;
