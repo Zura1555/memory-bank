@@ -38,7 +38,17 @@ export default defineConfig(({ mode }) => ({
       HYPERDRIVE: mode !== "development" && bindings.hyperdrive({
         id: "0880749f093c4bdaab7dd377c76f68b4",
       }),
-      ORIGINALS: bindings.r2({ name: "memory-bank-originals" }),
+      ORIGINALS: bindings.r2({ name: "memory-bank-originals", dev: { remote: true } }),
+      AI: bindings.ai({ dev: { remote: true } }),
+      VECTORIZE: bindings.vectorize({
+        name: mode === "development" ? "memory-bank-search-development" : "memory-bank-search-production",
+        dev: { remote: true },
+      }),
+      // ponytail: per-location abuse guard, not a global spend cap; durable global budgeting would be required for spend enforcement.
+      SEARCH_RATE_LIMITER: bindings.rateLimit({
+        namespace: "1401",
+        simple: { limit: 20, period: 60 },
+      }),
       JOB_QUEUE: bindings.queue({ name: "memory-bank-jobs" }),
       WORKFLOW: bindings.workflow({
         name: "memory-bank-workflow",

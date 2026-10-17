@@ -27,6 +27,8 @@ import type {
   Lead,
   KnowledgeCard,
   OutcomeStatus,
+  PassageSearchRequest,
+  PassageSearchResponse,
   PassageView,
   PhaseState,
   RequestConstraints,
@@ -620,6 +622,25 @@ function isSourceCatalogEntry(value: unknown): value is SourceCatalogEntry {
     && (value.availability === "available" || value.passages.length === 0);
 }
 
+function sourceRefKey(ref: SourceRef): string {
+  return JSON.stringify([ref.caseId, ref.artifactId, ref.versionId, ref.passageId]);
+}
+
+function isPassageSearchResponse(
+  value: unknown,
+  passagesById: Map<string, { source: SourceCatalogEntry; sourceKind: PassageView["sourceKind"] }>,
+  caseId: string,
+  mimeType: string,
+): value is PassageSearchResponse {
+  return isRecord(value) && Array.isArray(value.results) && value.results.every((result) => {
+    if (!isSourceRef(result) || !isPassage(result, result)) return false;
+    const catalogPassage = passagesById.get(sourceRefKey(result));
+    return catalogPassage !== undefined && result.sourceKind === catalogPassage.sourceKind
+      && (!caseId || catalogPassage.source.caseId === caseId)
+      && (!mimeType || catalogPassage.source.mimeType === mimeType);
+  });
+}
+
 function SourceFilter({ title, value, options, onChange }: {
   title: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void;
 }) {
@@ -644,6 +665,13 @@ function SourcesPage() {
   const [caseId, setCaseId] = useState("");
   const [mimeType, setMimeType] = useState("");
   const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
+  const [semanticQuery, setSemanticQuery] = useState("");
+  const [semanticSubmittedQuery, setSemanticSubmittedQuery] = useState("");
+  const [semanticResults, setSemanticResults] = useState<PassageView[] | null>(null);
+  const [semanticLoading, setSemanticLoading] = useState(false);
+  const [semanticError, setSemanticError] = useState<string | null>(null);
+  const semanticSearchController = useRef<AbortController | null>(null);
+  useEffect(() => () => semanticSearchController.current?.abort(), []);
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
@@ -659,12 +687,74 @@ function SourcesPage() {
     })();
     return () => controller.abort();
   }, []);
+  const passagesById = useMemo(() => {
+    const map = new Map<string, { source: SourceCatalogEntry; sourceKind: PassageView["sourceKind"] }>();
+    for (const source of sources ?? []) {
+      if (source.availability !== "available") continue;
+      for (const ref of source.passages) map.set(sourceRefKey(ref), { source, sourceKind: ref.sourceKind });
+    }
+    return map;
+  }, [sources]);
   const caseOptions = [...new Map((sources ?? []).map((source) => [source.caseId, { value: source.caseId, label: source.caseTitle }])).values()];
   const typeOptions = [...new Set((sources ?? []).map((source) => source.mimeType))].map((type) => ({ value: type, label: type }));
   const needle = query.trim().toLocaleLowerCase();
   const filtered = (sources ?? []).filter((source) => (!caseId || source.caseId === caseId)
     && (!mimeType || source.mimeType === mimeType)
     && (!needle || `${source.title} ${source.caseTitle}`.toLocaleLowerCase().includes(needle)));
+  const cancelSemanticSearch = () => {
+    semanticSearchController.current?.abort();
+    semanticSearchController.current = null;
+    setSemanticResults(null);
+    setSemanticSubmittedQuery("");
+    setSemanticError(null);
+    setSemanticLoading(false);
+  };
+  const submitSemanticSearch = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const searchQuery = semanticQuery.trim();
+    if (!searchQuery) return;
+    semanticSearchController.current?.abort();
+    const controller = new AbortController();
+    semanticSearchController.current = controller;
+    setSemanticSubmittedQuery(searchQuery);
+    setSemanticResults(null);
+    setSemanticError(null);
+    setSemanticLoading(true);
+    const request: PassageSearchRequest = {
+      query: searchQuery,
+      ...(caseId ? { caseId } : {}),
+      ...(mimeType ? { mimeType } : {}),
+    };
+    let failure: string | null = null;
+    try {
+      const response = await fetch("/api/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        failure = `Semantic passage search failed (HTTP ${response.status}). Your source browsing is still available.`;
+      } else {
+        const body: unknown = await response.json();
+        if (!controller.signal.aborted) {
+          if (!isPassageSearchResponse(body, passagesById, caseId, mimeType)) {
+            failure = "Semantic passage search returned unverified results. No results were shown.";
+          } else {
+            setSemanticResults(body.results);
+          }
+        }
+      }
+    } catch {
+      failure = "Semantic passage search could not be completed. Your source browsing is still available.";
+    } finally {
+      if (!controller.signal.aborted) {
+        setSemanticError(failure);
+        setSemanticLoading(false);
+        if (semanticSearchController.current === controller) semanticSearchController.current = null;
+      }
+    }
+  };
   return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow" aria-labelledby="sources-title">
     <div className="intro"><p className="eyebrow">Original Corpus</p><h1 id="sources-title">Sources</h1>
       <span className="title-accent-bar" aria-hidden="true" />
@@ -675,10 +765,46 @@ function SourcesPage() {
           <Field.Root name="source-search"><Field.Label>Search sources</Field.Label>
             <Input value={query} onValueChange={setQuery} placeholder="Source title or case name…" className="source-search" type="search" />
           </Field.Root>
-          <SourceFilter title="Case" value={caseId} onChange={setCaseId} options={[{ value: "", label: "All cases" }, ...caseOptions]} />
-          <SourceFilter title="File type" value={mimeType} onChange={setMimeType} options={[{ value: "", label: "All file types" }, ...typeOptions]} />
-          <Button className="secondary-button" type="button" onClick={() => { setQuery(""); setCaseId(""); setMimeType(""); }} disabled={!query && !caseId && !mimeType}>Clear filters</Button>
+          <SourceFilter title="Case" value={caseId} onChange={(next) => { if (next !== caseId) { cancelSemanticSearch(); setCaseId(next); } }} options={[{ value: "", label: "All cases" }, ...caseOptions]} />
+          <SourceFilter title="File type" value={mimeType} onChange={(next) => { if (next !== mimeType) { cancelSemanticSearch(); setMimeType(next); } }} options={[{ value: "", label: "All file types" }, ...typeOptions]} />
+          <Button className="secondary-button" type="button" onClick={() => { if (caseId || mimeType) cancelSemanticSearch(); setQuery(""); setCaseId(""); setMimeType(""); }} disabled={!query && !caseId && !mimeType}>Clear filters</Button>
         </div>
+        <form className="screen source-semantic-search" role="search" aria-labelledby="semantic-search-title" aria-busy={semanticLoading} onSubmit={submitSemanticSearch}>
+          <div>
+            <h2 id="semantic-search-title">Semantic passage search</h2>
+            <p id="semantic-search-privacy" className="field-hint">Only on submit, your query is sent to Cloudflare Workers AI for embedding. The app does not persist submitted queries; semantic search is separate from the checked assessment workflow.</p>
+            <p id="semantic-search-note" className="field-hint">Semantic similarity is not applicability and is not a checked recommendation.</p>
+          </div>
+          <div className="source-semantic-controls">
+            <Field.Root name="semantic-search"><Field.Label>Search passage meaning</Field.Label>
+              <Input value={semanticQuery} onValueChange={setSemanticQuery} placeholder="Describe the passage you need…" className="source-search" type="search" aria-describedby="semantic-search-privacy semantic-search-note" />
+            </Field.Root>
+            <Button className="primary-button" type="submit" disabled={!semanticQuery.trim()}>{semanticLoading ? "Search again" : "Search passages"}</Button>
+          </div>
+        </form>
+        {semanticError && <p className="notice notice-error" role="alert">{semanticError}</p>}
+        {semanticLoading && <p className="source-count muted" role="status">Searching passages by semantic similarity…</p>}
+        {!semanticLoading && semanticResults !== null && semanticResults.length === 0
+          && <p className="screen empty-state">No passages matched this semantic search. Try another phrase or change the case or file type filters.</p>}
+        {!semanticLoading && semanticResults && semanticResults.length > 0 && <section className="semantic-search-results" aria-labelledby="semantic-results-title">
+          <div className="section-heading"><h3 id="semantic-results-title">Passage matches</h3><p className="muted">Results for “{semanticSubmittedQuery}”</p></div>
+          <ol className="semantic-results-list">{semanticResults.map((passage) => {
+            const catalogPassage = passagesById.get(sourceRefKey(passage));
+            if (!catalogPassage) return null;
+            const source = catalogPassage.source;
+            return <li key={sourceRefKey(passage)}>
+              <article className="screen semantic-result">
+                <div className="card-heading">
+                  <div><p className="eyebrow">{source.caseTitle}</p><h3>{passage.title}</h3></div>
+                  <Badge>{label(passage.sourceKind)}</Badge>
+                </div>
+                <p className="record-id">Case {source.caseId} · Artifact {source.title} ({source.artifactId}) · Version {passage.versionId} · Passage {passage.passageId}</p>
+                <blockquote className="semantic-result-excerpt">{passage.excerpt}</blockquote>
+                <div className="action-row"><button className="secondary-button" type="button" onClick={() => setPassageRef(passage)}>Inspect exact passage</button></div>
+              </article>
+            </li>;
+          })}</ol>
+        </section>}
         <p className="source-count muted" role="status">{filtered.length} of {sources.length} retained source versions</p>
         {filtered.length === 0 ? <p className="screen empty-state">No sources match these filters. Clear the filters to browse the corpus.</p>
           : <div className="source-catalog">{filtered.map((source) => <article className="screen source-card" key={`${source.caseId}-${source.artifactId}-${source.versionId}`}>

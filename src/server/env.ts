@@ -22,6 +22,9 @@ export interface Env {
   ANTHROPIC_API_KEY?: string;
   OPERATOR_TOKEN?: string;
   HYPERDRIVE?: { connectionString: string };
+  AI?: Ai;
+  VECTORIZE?: Vectorize;
+  SEARCH_RATE_LIMITER?: RateLimit;
   ORIGINALS: R2Bucket;
   JOB_QUEUE: Queue<QueueMessage>;
   WORKFLOW: Workflow<WorkflowParams>;

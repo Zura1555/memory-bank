@@ -195,6 +195,16 @@ export interface PassageView extends SourceRef {
   sourceKind: "native" | "ocr_transcription" | "visual_observation" | "visual_interpretation";
   location: Record<string, string | number | boolean | null | string[]>;
 }
+export interface PassageSearchRequest {
+  query: string;
+  caseId?: string;
+  mimeType?: string;
+}
+
+export interface PassageSearchResponse {
+  results: PassageView[];
+}
+
 
 export interface SourceCatalogEntry {
   caseId: string;
@@ -215,6 +225,7 @@ export interface SourceCatalogEntry {
 // GET /api/jobs/:jobId (Authorization: Bearer <capability>) -> 200 JobView
 // POST /api/jobs/:jobId/brief (capability + StartBriefRequest) -> 202 StartBriefResponse
 // GET /api/jobs/:jobId/pack/:format (capability, ready checked brief) -> attachment; format = markdown | json
+// POST /api/search {query, caseId?, mimeType?} -> 200 PassageSearchResponse (ranked passages; relevance is not applicability)
 // GET /api/evidence/passages/:passageId -> 200 PassageView
 // GET /api/evidence/originals/:versionId -> exact retained original bytes
 // GET /api/sources -> 200 {sources: SourceCatalogEntry[]}
