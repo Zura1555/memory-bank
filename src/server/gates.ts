@@ -321,7 +321,17 @@ export function buildCheckedAssessment(
         return corpus.availableVersions.has(version.versionId) ? [] : ["Original unavailable or failed integrity verification."];
       }))];
       const work = workByArtifact.get(artifact.artifactId);
-      const accepted = work !== undefined && work.disposition !== null && keepAll(work.claimIds, checked.accepted)
+      // Work survives on its own disposition and classification claims, not on
+      // every sibling claim in its set: supportedClaims already withholds any
+      // claim whose declared dependencies were withheld, and each surviving
+      // claim was independently judged supported. Requiring the whole set
+      // (keepAll) let one peripheral withheld claim erase independently
+      // supported, selectable work; sibling claims are now filtered singly,
+      // exactly like case claimIds below. A withheld disposition or
+      // classification claim still removes the work entirely.
+      const accepted = work !== undefined && work.disposition !== null && work.dispositionClaimId !== null
+        && checked.accepted.has(work.dispositionClaimId)
+        && checked.accepted.has(`classification-${work.dispositionClaimId}`)
         && !(work.disposition === "reuse" && (work.blockerClaimIds.length > 0 || work.verificationClaimIds.length > 0));
       return {
         artifactId: artifact.artifactId,
@@ -329,9 +339,9 @@ export function buildCheckedAssessment(
         exclusionReasons,
         disposition: accepted ? work.disposition : null,
         dispositionClaimId: accepted ? work.dispositionClaimId : null,
-        claimIds: accepted ? work.claimIds : [],
-        blockerClaimIds: accepted ? work.blockerClaimIds : [],
-        verificationClaimIds: accepted ? work.verificationClaimIds : [],
+        claimIds: accepted ? work.claimIds.filter((id) => checked.accepted.has(id)) : [],
+        blockerClaimIds: accepted ? work.blockerClaimIds.filter((id) => checked.accepted.has(id)) : [],
+        verificationClaimIds: accepted ? work.verificationClaimIds.filter((id) => checked.accepted.has(id)) : [],
       };
     });
     return {
@@ -422,12 +432,16 @@ export function boundAssessmentQuotes(
     ...(work?.verificationClaimIds ?? []),
     ...(work?.dispositionClaimId ? [work.dispositionClaimId] : []),
   ]);
-  const requirementIds = new Set(assessment.comparisons.flatMap((row) =>
-    row.caseId === selection.caseId && row.requirementClaimId ? [row.requirementClaimId] : []));
+  // Only claims assigned to this artifact's own work floor its brief coverage.
+  // Comparison requirement claims state whole-request dimensions for the case;
+  // they are not relevance judgments for this artifact, and flooring from them
+  // forced one combined-brief item to carry another item's decisive quotation
+  // (a support-access sign-off sentence on a connector item) even though both
+  // the draft and the independent brief review judged it irrelevant there.
   const inventory = Object.values(assessment.requestConstraints).flat();
   const quotes = new Set<string>();
   for (const claim of assessment.claims) {
-    if (!sameSelectedVersion(claim, selection) || (!assigned.has(claim.claimId) && !requirementIds.has(claim.claimId))) continue;
+    if (!sameSelectedVersion(claim, selection) || !assigned.has(claim.claimId)) continue;
     for (const quote of claim.requestQuotes) quotes.add(quote);
     for (const quote of inventory) if (claim.text.includes(quote)) quotes.add(quote);
   }
@@ -480,16 +494,27 @@ export function buildCheckedBrief(
     }
   }
   const checked = supportedClaims(draft.claims, verdicts, rejected);
+  // An item survives on its own disposition claim, for the same reason
+  // artifact work does in buildCheckedAssessment: dependency closure in
+  // supportedClaims already withholds anything that actually depends on a
+  // withheld claim, and the coverage check above has already rejected every
+  // recommendation of an item missing a required quotation (including its
+  // disposition claim). One unrelated withheld claim therefore withholds
+  // only itself instead of erasing the whole selected item.
   const keep = (items: BriefDraft["reuse"], disposition: BriefDisposition) => items.flatMap((item) => {
-    if (!keepAll(item.claimIds, checked.accepted)) return [];
-    return [{ ...item, disposition }];
+    if (!item.claimIds.includes(item.dispositionClaimId) || !checked.accepted.has(item.dispositionClaimId)) return [];
+    return [{ ...item, disposition, claimIds: item.claimIds.filter((id) => checked.accepted.has(id)) }];
   });
-  return {
+  const kept = {
     reuse: keep(draft.reuse, "reuse"),
     adapt: keep(draft.adapt, "adapt"),
     verify: keep(draft.verify, "verify"),
+  };
+  const keptIdentities = new Set([...kept.reuse, ...kept.adapt, ...kept.verify].map(identity));
+  return {
+    ...kept,
     claims: checked.visible,
-    constraintReviews: reviews.data.filter((review) => items.some((item) => identity(item) === identity(review) && keepAll(item.claimIds, checked.accepted))),
+    constraintReviews: reviews.data.filter((review) => keptIdentities.has(identity(review))),
     withheldClaimCount: checked.withheld,
   };
 }

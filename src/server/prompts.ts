@@ -46,6 +46,69 @@ function compactReferences<T extends { claims: Claim[] }>(document: T, corpus: C
   return { ...context, claimFields: CLAIM_FIELDS, claimRows, sourceReferenceIndex };
 }
 
+// Brief stages may only cite and brief the exact selected artifact/versions, and
+// the server already supplies the complete source context for every selected
+// case separately. Sending the checked claims of the other, unselected cases
+// therefore adds provider input work without adding usable brief evidence:
+// brief claims citing a background artifact are rejected server-side. Scope the
+// checked-assessment background to the selected cases, retaining every claim
+// reachable from the retained case/comparison/lead/next-action structures
+// (transitively, so dependency meaning is not cut) plus the global request
+// inventory. Assessment stages keep the full eight-case document unchanged.
+export function selectedAssessment(assessment: AssessmentResult, selected: Selection[]): AssessmentResult {
+  const selectedCases = new Set(selected.map((item) => item.caseId));
+  const selectedArtifacts = new Set(selected.map((item) => `${item.caseId}/${item.artifactId}`));
+  const cases = assessment.cases
+    .filter((item) => selectedCases.has(item.caseId))
+    .map((item) => ({
+      ...item,
+      artifactWork: item.artifactWork.filter((work) => selectedArtifacts.has(`${item.caseId}/${work.artifactId}`)),
+    }));
+  const comparisons = assessment.comparisons.filter((row) => selectedCases.has(row.caseId));
+  const leads = assessment.leads.filter((item) => selectedCases.has(item.caseId));
+  const contrasts = assessment.contrasts.filter((item) => selectedCases.has(item.caseId));
+  const nextActions = assessment.nextActions.filter((item) => selectedArtifacts.has(`${item.caseId}/${item.artifactId}`));
+  const retained = new Set<string>(assessment.clarifyingClaimIds);
+  for (const item of cases) {
+    for (const claimId of [...item.claimIds, ...item.outcomeClaimIds]) retained.add(claimId);
+    for (const work of item.artifactWork) {
+      for (const claimId of [...work.claimIds, ...work.blockerClaimIds, ...work.verificationClaimIds]) retained.add(claimId);
+      if (work.dispositionClaimId) retained.add(work.dispositionClaimId);
+    }
+  }
+  for (const row of comparisons) {
+    for (const claimId of [row.requirementClaimId, row.evidenceClaimId, row.assessmentClaimId, row.implicationClaimId]) {
+      if (claimId) retained.add(claimId);
+    }
+  }
+  for (const item of [...leads, ...contrasts]) for (const claimId of item.reasonClaimIds) retained.add(claimId);
+  for (const item of nextActions) retained.add(item.claimId);
+  const byId = new Map(assessment.claims.map((claim) => [claim.claimId, claim]));
+  for (const claimId of [...retained]) {
+    const pending = [claimId];
+    while (pending.length) {
+      const claim = byId.get(pending.pop()!);
+      for (const dependency of claim?.dependsOnClaimIds ?? []) {
+        if (!retained.has(dependency)) {
+          retained.add(dependency);
+          pending.push(dependency);
+        }
+      }
+    }
+  }
+  return {
+    ...assessment,
+    clarifyingClaimIds: assessment.clarifyingClaimIds.filter((claimId) => retained.has(claimId)),
+    comparisons,
+    artifactReviews: assessment.artifactReviews.filter((item) => selectedArtifacts.has(`${item.caseId}/${item.artifactId}`)),
+    nextActions,
+    cases,
+    leads,
+    contrasts,
+    claims: assessment.claims.filter((claim) => retained.has(claim.claimId)),
+  };
+}
+
 function stagePrompt(instructions: string, untrustedData: { request: string; [key: string]: unknown }): StagePrompt {
   const { request, ...historicalContext } = untrustedData;
   return {
@@ -132,11 +195,13 @@ export function briefDraftPrompt(request: string, selected: Selection[], corpus:
   const selectedCases = new Set(selected.map((item) => item.caseId));
   const context = modelCorpus(corpus, assessmentPassageIds(corpus)).filter((item) => selectedCases.has(item.caseId));
   const responseSchema = briefDraftSchemaFor(request, selected, corpus);
-  const prompt = stagePrompt(`Stage: draft a brief only from the delivery lead's selected checked artifacts. Include complete context for every selected case, not just selected passages; keep artifact provenance and constraints distinct. Wire format ONLY: return items as a strict object with every exact required "caseId/artifactId/versionId" key from selected, plus claims. Each items value contains only disposition, dispositionClaimId, and claimIds. Choose exactly ONE disposition per selected identity; do not generate reuse/adapt/verify section arrays or repeat caseId/artifactId/versionId fields. The server derives the existing sections from that single decision. Each item must include a distinct dispositionClaimId referencing a recommendation-kind claim in claimIds that explains why that disposition fits the new request and full context. Reuse requires supported compatibility and no blocker or unresolved decisive constraint. Adapt must cite supported starting work and state changes/checks as recommendations. Verify separates client questions from historical gaps. Do not hide an unsupported claim under Verify. Do not invent an outcome or claim a cross-case combination has worked. All user-visible text belongs in claim objects.` + ` Include every selected item exactly once. Create NEW brief claims and IDs; do not copy the assessment's claim sets or dependency graph. Every claim assigned to an item, including any dependency claim, must cite at least one passage from that exact selected case, artifact, and version. Facts supported only by a different artifact or version are background context, not claims assigned to this item; omit them rather than attach an unrelated citation. A verify item's recommendation must state a concrete check. Every referenced claim ID must exist in this brief, and every emitted claim must be assigned to an item. Express blockers and verification checks as claims, not extra item fields. Keep each verification recommendation atomic and grounded in an accepted assessment blocker/check for this selected artifact and its exact original passages. Do not embellish it with new credentials, operators, test environments, or operating requirements absent from those sources and currentClientRequest. Preserve necessary checks and limits, but do not turn a missing fact into a demanded implementation choice. State a proposed check as a check, not as evidence that the new client already has that capability.`, { request, selected, completeSelectedCaseContext: context, checkedAssessment: compactReferences(assessment, corpus) });
+  const prompt = stagePrompt(`Stage: draft a brief only from the delivery lead's selected checked artifacts. Include complete context for every selected case, not just selected passages; keep artifact provenance and constraints distinct. Wire format ONLY: return items as a strict object with every exact required "caseId/artifactId/versionId" key from selected, plus claims. Each items value contains only disposition, dispositionClaimId, and claimIds. Choose exactly ONE disposition per selected identity; do not generate reuse/adapt/verify section arrays or repeat caseId/artifactId/versionId fields. The server derives the existing sections from that single decision. Each item must include a distinct dispositionClaimId referencing a recommendation-kind claim in claimIds that explains why that disposition fits the new request and full context. Reuse requires supported compatibility and no blocker or unresolved decisive constraint. Adapt must cite supported starting work and state changes/checks as recommendations. Verify separates client questions from historical gaps. Do not hide an unsupported claim under Verify. Do not invent an outcome or claim a cross-case combination has worked. All user-visible text belongs in claim objects.` + ` Include every selected item exactly once. Create NEW brief claims and IDs; do not copy the assessment's claim sets or dependency graph. Every claim assigned to an item, including any dependency claim, must cite at least one passage from that exact selected case, artifact, and version. Facts supported only by a different artifact or version are background context, not claims assigned to this item; omit them rather than attach an unrelated citation. A verify item's recommendation must state a concrete check. Every referenced claim ID must exist in this brief, and every emitted claim must be assigned to an item. Express blockers and verification checks as claims, not extra item fields. Keep each verification recommendation atomic and grounded in an accepted assessment blocker/check for this selected artifact and its exact original passages. Do not embellish it with new credentials, operators, test environments, or operating requirements absent from those sources and currentClientRequest. Preserve necessary checks and limits, but do not turn a missing fact into a demanded implementation choice. State a proposed check as a check, not as evidence that the new client already has that capability.`, { request, selected, completeSelectedCaseContext: context, checkedAssessment: compactReferences(selectedAssessment(assessment, selected), corpus) });
   prompt.instructions += "\nFor claims.sourceRefs return only the short passageId labels shown in completeSelectedCaseContext for the exact selected artifact/version. Never emit canonical SourceRef objects or references belonging only to background artifacts. The server expands each pinned label to its unchanged complete source identity.";
+  prompt.instructions += "\nThe supplied checkedAssessment is scoped to the selected cases/artifacts plus the global request inventory; unselected cases were checked separately and are not brief material. Their omission from this document is not missing assessment evidence and must not be briefed or cited.";
   prompt.instructions += "\nA quoted interpretation/recommendation carries exactly ONE complete current-request sentence/chunk offered by its schema, verbatim in both text and requestQuotes. Use separate atomic recommendation claims to cover multiple decisive constraints; do not merge several quotations into one claim or paraphrase away values/qualifiers. Standalone historical source_fact claims have requestQuotes: []; keep them separate from requested constraints and proposed checks. The existing independent reviewer chooses relevant constraint quotations separately from the same request-bound choices and still judges every claim's meaning and evidence.";
   prompt.instructions += "\nQuotation coverage procedure, applied independently to EACH selected item before writing any claim: (1) list every decisive complete current-request sentence/chunk that affects that item, using the checked assessment inventory and exact request, not historical request values; a sentence affecting two selected items belongs on BOTH items' lists. (2) For every sentence on an item's list, create exactly one dedicated atomic recommendation claim assigned only to that item: its text states the item-specific check or adaptation and contains that sentence verbatim, its requestQuotes is exactly that one sentence in a one-element array, and every sourceRef belongs to that item's exact case, artifact and version. Never append several quotations to one claim's requestQuotes, and never let one item's claim cover another item's quotation. (3) No claim's text may contain a verbatim complete request sentence/chunk other than its own sole requestQuotes entry; in particular, do not load the disposition claim's prose with several request sentences while its metadata can name only one of them — give the disposition claim at most one quotation and move every other quoted constraint into its own dedicated claim, or paraphrase it without quoting. A draft that leaves a decisive quotation in prose but out of the matching claim's metadata, or out of an item entirely, loses that item and all of its claims at the checked-brief gate. Before returning, audit each item: every sentence on its list has its dedicated claim in that item's claimIds with that item's references, and no claim text carries a stray verbatim request sentence.";
   prompt.instructions += "\nPreserve complete values, units and uncertainty qualifiers as exact request substrings INSIDE recommendation text and requestQuotes. Every recommendation requestQuotes entry must occur verbatim in its visible text; quote only the complete constraint it actually carries. A generic limit, configured expiry or time-bound check does not retain a specific requested value. The server also requires every current-request quotation already accepted on that selected artifact and version, including a checked assessment-inventory quotation stated by those claims. An empty brief-review inventory does not drop them. State these as requested constraints or proposed checks, never historical facts, provisioned capabilities or completed integrated acceptance. Keep checks for actual audit evidence and actual removal after expiry separate from configuration checks. Do not duplicate constraints unrelated to selected work.";
+  prompt.instructions += "\nDependency direction within each item: the disposition claim is the item's premise, not its conclusion. Its dependsOnClaimIds may list only source_fact or interpretation claims assigned to that same item that establish the starting work — never another recommendation, and never a capacity, identity, recovery or other verification/blocker check. Verification and blocker recommendations are consequences of the disposition: they may depend on the disposition claim or on its evidence facts, never the reverse, because a proposed check is not evidence that the disposition fits. Do not create a verification claim for an operation the selected artifact does not document (for example checkpoint/restart controls for a field map); it will be judged unsupported and, if the disposition depends on it, will take the whole item down with it.";
   return { ...prompt, responseSchema };
 }
 
@@ -148,10 +213,12 @@ export function briefReviewPrompt(request: string, selected: Selection[], corpus
     ...stagePrompt(
       `Stage: independently review the selected brief. FIRST identify from currentClientRequest and exact selected work every decisive explicit constraint affecting each selection, independently of what the draft retained. Return constraintQuotes as a strict object keyed by every exact selected caseId/artifactId/versionId; each value is an array of exact complete request substrings including values, units and uncertainty qualifiers. Use [] only when no explicit constraint affects that selection. [] does not erase a current-request quotation the checked assessment already accepted for that selected artifact and version. Assessment inventories are background cross-checks, not a limit on your independent inventory. Do not treat historical requests as current constraints.
 
-Choose constraintQuotes from the schema's complete current-request sentence/chunk choices. Those choices fix quotation identity only: decide relevance independently for each selected item, never inherit the draft's choice or populate unrelated constraints for coverage.
+Choose constraintQuotes from the schema's complete current-request sentence/chunk choices. Those choices fix quotation identity only: decide relevance independently for each selected item, never inherit the draft's choice or populate unrelated constraints for coverage. An interrogative or task-framing sentence that only asks what to inspect, assess, represent or advise — and states no client requirement, value, limit, deadline or required proof — is not a constraint and must not be inventoried, even though the schema offers every request sentence as a quotation choice. A sentence that both asks a question and states such a requirement still contributes its stated requirement.
+
+The supplied checkedAssessmentBackground is scoped to the selected cases/artifacts plus the global request inventory; unselected cases were checked separately and are not brief material, so their omission there is not missing evidence.
 
 Then review ONLY the claims encoded in completeBriefDraft.claimRows, using its claimFields header. Return claimVerdicts, a strict object keyed by every exact reviewTargets.claimIds value with one supported/unsupported/uncertain verdict, and NONE for background assessment IDs. Return ONLY constraintQuotes and claimVerdicts; no rewritten prose. Check each claim and dependency against the unchanged request, exact selections, full selected-case context/corrections and assessment. Each requested constraint must remain verbatim in a supported recommendation's text AND requestQuotes for the affected item. Metadata or a historical source fact alone does not preserve it. Reject recommendations that turn a requested value into historical success, already-provisioned capability or integrated acceptance. Generic wording cannot replace explicit values or qualifiers. Audit evidence and actual removal after expiry remain separate unverified checks unless original evidence establishes them. Dispositions must follow from supported starting work and actual constraints; conditional Adapt is valid without asserting new-client compatibility. Review all claim/outcome/disposition semantics independently; do not salvage missing useful work by relabeling it Verify.`,
-      { request, selected, completeSelectedCaseContext: context, checkedAssessmentBackground: compactReferences(assessment, corpus), completeBriefDraft: compactReferences(draft, corpus), reviewTargets },
+      { request, selected, completeSelectedCaseContext: context, checkedAssessmentBackground: compactReferences(selectedAssessment(assessment, selected), corpus), completeBriefDraft: compactReferences(draft, corpus), reviewTargets },
     ),
     reviewTargets,
   };

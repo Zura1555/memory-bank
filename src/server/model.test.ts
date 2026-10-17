@@ -467,3 +467,42 @@ test("unusable output retains reported usage and distinguishes safe failure cond
     globalThis.fetch = originalFetch;
   }
 });
+
+test("provider redirects are rejected without forwarding the request or retrying", async () => {
+  let status = 302;
+  let requests = 0;
+  let redirected = 0;
+  const server = createServer((request, response) => {
+    request.resume();
+    if (request.url === "/redirected") {
+      redirected++;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("{}");
+      return;
+    }
+    requests++;
+    response.writeHead(status, { location: "/redirected" });
+    response.end();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address() as AddressInfo;
+  try {
+    for (status of [302, 307]) {
+      await assert.rejects(callModel({
+        MODEL_BASE_URL: `http://127.0.0.1:${address.port}/v1`,
+        OPENROUTER_API_KEY: "synthetic-only",
+      } as Env, "assessment_review", {
+        instructions: "Synthetic redirect check", untrustedData: {},
+        reviewTargets: { claimIds: [], artifacts: [] },
+      }), {
+        code: "MODEL_PROVIDER_REJECTED", status, uncertain: false, failurePhase: "response_headers",
+      });
+    }
+    assert.equal(requests, 2, "Each call reaches only its configured endpoint once");
+    assert.equal(redirected, 0, "Neither credentials nor request content may reach a redirect target");
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

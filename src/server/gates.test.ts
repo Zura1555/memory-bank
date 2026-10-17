@@ -10,7 +10,7 @@ import { buildStarterPack } from "./packs.ts";
 import { validateSelections } from "./selections.ts";
 import { assessmentPassageIds, EvidenceUnavailable, type Artifact, type CorpusSnapshot, type ModelCaseContext, type PastCase, type SourceVersion } from "./corpus.ts";
 import { dispositionChanges } from "../ui/lineage.ts";
-import { assessmentDraftPrompt, briefDraftPrompt } from "./prompts.ts";
+import { assessmentDraftPrompt, briefDraftPrompt, briefReviewPrompt, selectedAssessment } from "./prompts.ts";
 import { callModel } from "./model.ts";
 import type { Env } from "./env.ts";
 
@@ -118,6 +118,35 @@ function assessmentDraft(corpus: CorpusSnapshot): AssessmentDraft {
   };
 }
 
+test("brief assessment background is scoped to selected work without cutting its dependencies", () => {
+  const corpus = fixture();
+  const draft = assessmentDraft(corpus);
+  const checked = buildCheckedAssessment(draft, new Map(draft.claims.map((item) => [item.claimId, "supported"])), new Set(), corpus, artifactRoles(draft), emptyRequirementReview);
+  const selected = [{ caseId: "case-1", artifactId: "handover", versionId: "handover-v1-case-1", passageIds: ["p-handover-v1-case-1"] }];
+  const scoped = selectedAssessment(checked, selected);
+  assert.deepEqual(scoped.cases.map((item) => item.caseId), ["case-1"], "Unselected cases are not brief background.");
+  assert.deepEqual(scoped.cases[0].artifactWork.map((item) => item.artifactId), ["handover"], "Only the selected artifact's checked work is retained.");
+  assert.ok(scoped.artifactReviews.every((item) => item.caseId === "case-1" && item.artifactId === "handover"));
+  const claimIds = new Set(scoped.claims.map((claim) => claim.claimId));
+  assert.ok(claimIds.has("decision-0-1") && claimIds.has("fact-0-1"), "The selected claim and its dependency survive scoping.");
+  assert.ok(!claimIds.has("fact-1-0") && !claimIds.has("decision-7-0"), "Claims belonging only to unselected cases are omitted.");
+  assert.ok(scoped.claims.length < checked.claims.length, "Scoping must actually reduce the brief provider document.");
+  assert.deepEqual(scoped.requestConstraints, checked.requestConstraints, "The global request inventory is retained in full.");
+  const prompt = briefDraftPrompt("current request", selected, corpus, checked);
+  const background = (prompt.untrustedData as { historicalContext: { checkedAssessment: { cases: { caseId: string }[] } } }).historicalContext.checkedAssessment;
+  assert.deepEqual(background.cases.map((item) => item.caseId), ["case-1"], "The brief draft prompt carries the scoped background, not all eight cases.");
+  assert.match(prompt.instructions, /the disposition claim is the item's premise, not its conclusion/);
+  assert.match(prompt.instructions, /never another recommendation, and never a capacity, identity, recovery or other verification\/blocker check/);
+  const reviewPrompt = briefReviewPrompt("current request", selected, corpus, checked, {
+    reuse: [], adapt: [], verify: [],
+    claims: [{ claimId: "brief-1", kind: "recommendation", text: "Check the current request.", sourceRefs: [], requestQuotes: [], dependsOnClaimIds: [] }],
+  });
+  assert.match(reviewPrompt.instructions, /interrogative or task-framing sentence that only asks what to inspect, assess, represent or advise/);
+  assert.match(reviewPrompt.instructions, /is not a constraint and must not be inventoried/);
+  const reviewBackground = (reviewPrompt.untrustedData as { historicalContext: { checkedAssessmentBackground: { cases: { caseId: string }[] } } }).historicalContext.checkedAssessmentBackground;
+  assert.deepEqual(reviewBackground.cases.map((item) => item.caseId), ["case-1"], "The brief review prompt carries the same scoped background.");
+});
+
 test("assessment rejects omitted artifacts even when all eight cases are present", () => {
   const corpus = fixture();
   const draft = assessmentDraft(corpus);
@@ -194,6 +223,52 @@ test("brief disposition is withheld when its recommendation claim is unsupported
   assert.deepEqual(checked.claims.map((claim) => claim.claimId), [factual.claimId]);
 });
 
+
+test("one withheld claim withholds only itself from checked work and brief items", () => {
+  const corpus = fixture();
+  const draft = assessmentDraft(corpus);
+  const roles = artifactRoles(draft);
+  // case-1/request is the first artifact; give its work one peripheral claim that
+  // independent review rejects while its disposition and classification pass.
+  const work = draft.cases[0].artifactWork[0];
+  draft.claims.push({ claimId: "peripheral-0-0", kind: "source_fact", text: "An unrelated recorded detail.", sourceRefs: draft.claims[0].sourceRefs, requestQuotes: [], dependsOnClaimIds: [] });
+  work.claimIds.push("peripheral-0-0");
+  const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
+  verdicts.set("peripheral-0-0", "unsupported");
+  const checked = buildCheckedAssessment(draft, verdicts, validateAssessmentDraft(draft, "current request", corpus), corpus, roles, emptyRequirementReview);
+  const surviving = checked.cases[0].artifactWork[0];
+  assert.equal(surviving.disposition, "adapt", "Supported disposition and classification keep the work selectable despite a withheld sibling claim.");
+  assert.ok(!surviving.claimIds.includes("peripheral-0-0"), "The withheld claim itself is removed from the work.");
+  assert.ok(surviving.claimIds.includes(work.dispositionClaimId), "The disposition claim survives.");
+  assert.equal(checked.withheldClaimCount, 1);
+  // The disposition claim itself failing still removes the work.
+  const doomedVerdicts = new Map(verdicts);
+  doomedVerdicts.set(work.dispositionClaimId, "unsupported");
+  const doomed = buildCheckedAssessment(draft, doomedVerdicts, validateAssessmentDraft(draft, "current request", corpus), corpus, roles, emptyRequirementReview);
+  assert.equal(doomed.cases[0].artifactWork[0].disposition, null, "A withheld disposition claim still removes the work.");
+
+  const sourceRefs = draft.claims[0].sourceRefs;
+  const briefDraft: BriefDraft = {
+    reuse: [], verify: [],
+    adapt: [{ caseId: "case-1", artifactId: "request", versionId: "request-v1", disposition: "adapt", dispositionClaimId: "brief-disposition", claimIds: ["brief-disposition", "brief-fact", "brief-peripheral"] }],
+    claims: [
+      { claimId: "brief-disposition", kind: "recommendation", text: "Adapt this work for the current request.", sourceRefs, requestQuotes: ["current request"], dependsOnClaimIds: [] },
+      { claimId: "brief-fact", kind: "source_fact", text: "Recorded work.", sourceRefs, requestQuotes: [], dependsOnClaimIds: [] },
+      { claimId: "brief-peripheral", kind: "recommendation", text: "Check an unrelated extra step for the current request.", sourceRefs, requestQuotes: ["current request"], dependsOnClaimIds: [] },
+    ],
+  };
+  const selections = [{ caseId: "case-1", artifactId: "request", versionId: "request-v1" }];
+  const briefVerdicts = new Map<string, SupportVerdict>(briefDraft.claims.map((claim) => [claim.claimId, "supported"]));
+  briefVerdicts.set("brief-peripheral", "unsupported");
+  const brief = buildCheckedBrief(briefDraft, briefVerdicts, validateBriefDraft(briefDraft, "current request", selections, corpus), {
+    request: "current request",
+    constraintReviews: selections.map((item) => ({ ...item, requestQuotes: [] })),
+  });
+  assert.equal(brief.adapt.length, 1, "A brief item survives a withheld peripheral claim.");
+  assert.deepEqual(brief.adapt[0].claimIds, ["brief-disposition", "brief-fact"], "Only the withheld claim is removed from the item.");
+  assert.equal(brief.withheldClaimCount, 1);
+  assert.equal(brief.constraintReviews.length, 1, "The surviving item keeps its constraint review.");
+});
 
 test("checked brief survives only when each item carries its own atomic quotation claims", () => {
   const corpus = fixture();
@@ -727,8 +802,13 @@ test("attached dispositions are independently checked for lead and non-lead work
   assert.equal(revalidateAssessment(changedLabel, "current request", corpus).cases[0].artifactWork[1].disposition, null);
   const handover = draft.cases[0].artifactWork[1];
   verdicts.set(handover.verificationClaimIds[0], "unsupported");
-  assert.deepEqual(build().leads, []);
+  // Only the withheld verification claim is lost: the independently supported
+  // disposition, classification and lead survive, but no next action may be
+  // manufactured from the withheld check.
+  assert.deepEqual(build().leads.map((lead) => lead.usefulArtifactIds), [["handover"]]);
   assert.deepEqual(build().nextActions, []);
+  assert.equal(build().cases[0].artifactWork[1].disposition, "adapt");
+  assert.deepEqual(build().cases[0].artifactWork[1].verificationClaimIds, []);
 });
 
 test("independent request constraints block false absence even when every claim is supported", () => {
