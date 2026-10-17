@@ -258,7 +258,7 @@ export async function callModel(env: Env, stage: ModelStage, prompt: StagePrompt
     response = await fetch(config.url, {
       method: "POST",
       signal: deadline,
-      redirect: "error",
+      redirect: "manual",
       headers: {
         ...(config.api === "messages"
           ? { "x-api-key": config.apiKey, "anthropic-version": "2023-06-01" }
