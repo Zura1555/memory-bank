@@ -432,12 +432,16 @@ export function boundAssessmentQuotes(
     ...(work?.verificationClaimIds ?? []),
     ...(work?.dispositionClaimId ? [work.dispositionClaimId] : []),
   ]);
-  const requirementIds = new Set(assessment.comparisons.flatMap((row) =>
-    row.caseId === selection.caseId && row.requirementClaimId ? [row.requirementClaimId] : []));
+  // Only claims assigned to this artifact's own work floor its brief coverage.
+  // Comparison requirement claims state whole-request dimensions for the case;
+  // they are not relevance judgments for this artifact, and flooring from them
+  // forced one combined-brief item to carry another item's decisive quotation
+  // (a support-access sign-off sentence on a connector item) even though both
+  // the draft and the independent brief review judged it irrelevant there.
   const inventory = Object.values(assessment.requestConstraints).flat();
   const quotes = new Set<string>();
   for (const claim of assessment.claims) {
-    if (!sameSelectedVersion(claim, selection) || (!assigned.has(claim.claimId) && !requirementIds.has(claim.claimId))) continue;
+    if (!sameSelectedVersion(claim, selection) || !assigned.has(claim.claimId)) continue;
     for (const quote of claim.requestQuotes) quotes.add(quote);
     for (const quote of inventory) if (claim.text.includes(quote)) quotes.add(quote);
   }

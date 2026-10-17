@@ -205,6 +205,34 @@ test("an assessment-accepted duration stays in the checked brief and both export
   assert.equal(markdown.includes("configured expiry"), false);
 });
 
+test("case-level requirement claims do not floor another item's brief coverage", async () => {
+  const { job } = await fixture();
+  const duration = "seven business days";
+  const unrelated = "Security sign-off requires demonstrated removal.";
+  const adapt = job.brief_result!.adapt[0];
+  job.request_text = `Check client scope for ${duration}. ${unrelated}`;
+  const recommendation = job.assessment_result!.claims.find((claim) => claim.claimId === adapt.dispositionClaimId)!;
+  recommendation.requestQuotes = [duration];
+  recommendation.text = `The request asks for ${duration} of named access.`;
+  job.assessment_result!.requestConstraints.identity_access = [duration];
+  job.assessment_result!.requestConstraints.recovery_operations = [unrelated];
+  job.assessment_result!.claims.push({
+    claimId: "unrelated-requirement", kind: "interpretation",
+    text: `The current request states: ${unrelated}`,
+    sourceRefs: recommendation.sourceRefs, requestQuotes: [], dependsOnClaimIds: [],
+  });
+  job.assessment_result!.comparisons.push({
+    caseId: adapt.caseId, dimension: "recovery_operations", requirementClaimId: "unrelated-requirement",
+    evidenceClaimId: recommendation.claimId, relation: "unknown",
+    assessmentClaimId: recommendation.claimId, implicationClaimId: recommendation.claimId,
+  });
+  const reviews = job.brief_result!.constraintReviews.map((review) => ({ ...review, requestQuotes: [] as string[] }));
+  const floored = withAssessmentConstraintFloor(reviews, job.assessment_result!, job.request_text);
+  const adaptQuotes = floored.find((review) => review.versionId === adapt.versionId)?.requestQuotes ?? [];
+  assert.ok(adaptQuotes.includes(duration), "The item's own assessment-accepted quotation still floors its coverage.");
+  assert.ok(!adaptQuotes.includes(unrelated), "A case-level requirement statement is not this artifact's relevance judgment.");
+});
+
 test("expiry, incomplete jobs, changed corpus and unavailable selected originals block a new pack", async () => {
   const { corpus, job } = await fixture();
   assert.throws(() => buildStarterPack({ ...job, expires_at: new Date(0) }, corpus, "https://demo.example"), (error) => error instanceof HttpFailure && error.status === 410);
