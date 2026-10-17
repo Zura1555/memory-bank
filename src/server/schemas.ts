@@ -63,6 +63,11 @@ const briefItem = z.strictObject({
 export const requestSchema = z.strictObject({
   request: z.string().trim().min(1).max(16 * 1024),
 });
+export const passageSearchSchema = z.strictObject({
+  query: z.string().trim().min(1).max(1024),
+  caseId: id.optional(),
+  mimeType: z.string().trim().min(1).max(128).optional(),
+});
 export const selectionSchema = z.strictObject({
   caseId: id,
   artifactId: id,

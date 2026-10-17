@@ -6,8 +6,9 @@ import { capabilityHash } from "./auth.ts";
 import { exactOriginal, exactPassage, EvidenceUnavailable, knowledgeCards, loadCorpus } from "./corpus.ts";
 import { HttpFailure } from "./errors.ts";
 import { getOwnedJob } from "./jobs.ts";
-import { requestSchema, startBriefSchema } from "./schemas.ts";
+import { requestSchema, startBriefSchema, passageSearchSchema } from "./schemas.ts";
 import { exportStarterPack, starterPackMarkdown } from "./packs.ts";
+import { searchPassages } from "./search.ts";
 import { modelConfig } from "./model.ts";
 import {
   operatorBudgetSchema,
@@ -106,6 +107,22 @@ app.get("/api/health", (c) => c.json({ status: "ok" as const }));
 app.get("/api/model-info", (c) => {
   const { provider, model, url } = modelConfig(c.env);
   return c.json({ provider, model, endpoint: new URL(url).origin });
+});
+
+app.post("/api/search", async (c) => {
+  const body = passageSearchSchema.safeParse(await readJsonBody(c.req.raw));
+  if (!body.success) throw new HttpFailure(400, "INVALID_REQUEST");
+  const limiter = c.env.SEARCH_RATE_LIMITER;
+  const clientIp = c.req.header("CF-Connecting-IP");
+  if (!limiter || !clientIp) throw new HttpFailure(503, "SEARCH_UNAVAILABLE", true);
+  let allowed: boolean;
+  try {
+    allowed = (await limiter.limit({ key: clientIp })).success;
+  } catch {
+    throw new HttpFailure(503, "SEARCH_UNAVAILABLE", true);
+  }
+  if (!allowed) throw new HttpFailure(429, "SEARCH_RATE_LIMITED");
+  return c.json({ results: await searchPassages(c.env, body.data) });
 });
 
 app.get("/api/sources", async (c) => {

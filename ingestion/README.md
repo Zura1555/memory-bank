@@ -57,3 +57,28 @@ Run `npm run ingest` and `npm test`, then `npm run publish:corpus` for local cf 
 Cards appear in case details and on the independent `/?knowledge` page; `/?knowledge=<recordId>` and `GET /api/knowledge/<recordId>` address one card without a job capability. `GET /api/knowledge?caseId=<caseId>` lists a case's available cards. Supporting passage and exact-original links reuse the existing evidence routes.
 
 Human review approves a historical record, not its application to a new client. Model context includes cards, their assertion basis, exact evidence, and supersession markers alongside full originals. Applying a lesson must remain a request-specific recommendation claim with relevant original evidence and constraints, checked by the existing draft/reference/support-review pipeline. Superseded choices are history only. No new model-output schema, paid stage, extraction job, approval dashboard, or automatic session-to-knowledge promotion is introduced. Corpus retention is independent of seven-day job expiry.
+
+## Semantic passage vectors
+
+Install the pinned project dependencies and authenticate the pinned `cf` CLI using its existing auth profile. Before indexing, provision each external Vectorize index and both string metadata indexes once:
+
+```sh
+./node_modules/.bin/cf vectorize create --name memory-bank-search-development --index-config-dimensions 768 --index-config-metric cosine
+./node_modules/.bin/cf vectorize metadata-index create memory-bank-search-development --property-name caseId --index-type string
+./node_modules/.bin/cf vectorize metadata-index create memory-bank-search-development --property-name mimeType --index-type string
+
+./node_modules/.bin/cf vectorize create --name memory-bank-search-production --index-config-dimensions 768 --index-config-metric cosine
+./node_modules/.bin/cf vectorize metadata-index create memory-bank-search-production --property-name caseId --index-type string
+./node_modules/.bin/cf vectorize metadata-index create memory-bank-search-production --property-name mimeType --index-type string
+```
+
+Run the repeatable indexer from the repository root, selecting exactly one environment:
+
+```sh
+npm run index:vectors -- --environment development
+npm run index:vectors -- --environment production
+```
+
+The command verifies every complete local original against its manifest SHA-256 before making provider calls, then embeds the manifest's exact passage excerpts with `@cf/baai/bge-base-en-v1.5` (mean pooling) and upserts them in batches. Vector IDs are manifest passage IDs; metadata contains `caseId` and `mimeType`; the namespace is the SHA-256 of the exact active manifest bytes. Re-running the same manifest upserts the same IDs in the same namespace. Old manifest namespaces are not queried but remain in the index; cleanup is manual. The script uses the existing `cf` auth profile and stores no credentials. It does not provision indexes or deploy anything. Workers AI calls may incur charges.
+
+`POST /api/search` embeds a query only on explicit submit, then retrieves ranked passage IDs and rehydrates excerpts from the current hash-verified corpus. The application does not persist submitted queries. Search is limited to 20 requests per 60 seconds per IP by Cloudflare's per-location rate limiter; this is an abuse guard, not a global spend cap. Workers AI query embeddings may incur charges.

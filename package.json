@@ -14,7 +14,8 @@
     "test": "node --experimental-strip-types --test src/**/*.test.ts && python3 -m unittest discover -s ingestion -p '*_test.py'",
     "ingest": "python3 ingestion/build_manifest.py",
     "publish:corpus": "python3 ingestion/publish_corpus.py",
-    "publish:corpus:production": "python3 ingestion/publish_corpus.py --production"
+    "publish:corpus:production": "python3 ingestion/publish_corpus.py --production",
+    "index:vectors": "python3 ingestion/index_vectors.py"
   },
   "engines": {
     "node": ">=22.18"

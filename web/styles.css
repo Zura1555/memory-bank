@@ -686,6 +686,24 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .source-passages { flex: 1 1 100%; }
 .source-passages .passage-cards { padding-top: .85rem; }
 
+.source-semantic-search { display: grid; gap: .85rem; padding: 1.25rem; margin-top: .85rem; }
+.source-semantic-search h2 { margin: 0 0 .25rem; font-size: 1.05rem; }
+.source-semantic-search .field-hint { margin: 0; }
+.source-semantic-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 1rem; }
+.source-semantic-controls > div { display: grid; gap: .45rem; min-width: 0; }
+.semantic-search-results { margin-top: 1.25rem; }
+.semantic-results-list { display: grid; gap: .75rem; margin: 0; padding: 0; list-style: none; }
+.semantic-result { min-width: 0; padding: 1.1rem; overflow-wrap: anywhere; }
+.semantic-result h3 { margin: 0; font-size: 1rem; }
+.semantic-result .record-id { margin-bottom: .75rem; }
+.semantic-result-excerpt { margin: 0; padding: .9rem 1rem; border-left: 3px solid var(--accent-bright); border-radius: 0 .5rem .5rem 0; background: var(--accent-pale); color: var(--body-ink); font-size: .88rem; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.semantic-result .action-row { margin-top: .75rem; }
+
+@media (max-width: 650px) {
+  .source-semantic-controls { grid-template-columns: minmax(0, 1fr); }
+  .source-semantic-controls > button { width: 100%; }
+}
+
 @media (max-width: 1100px) {
   .source-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .step-one-grid, .anduin-overview-grid { grid-template-columns: minmax(0, 1fr); }
