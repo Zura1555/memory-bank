@@ -4,6 +4,9 @@ import test from "node:test";
 import type { ArtifactRole, AssessmentResult, Claim, RequestConstraints, Selection, SupportVerdict } from "../shared/protocol.ts";
 import { assessmentDraftSchema, assessmentReviewSchema, briefDraftSchema, openRouterSchema, parseAssessmentDraft, reviewSchema, type AssessmentDraft, type AssessmentOutput, type BriefDraft } from "./schemas.ts";
 import { buildCheckedAssessment, buildCheckedBrief, GateFailure, revalidateAssessment, revalidateBrief, validateAssessmentDraft, validateBriefDraft, validateArtifactReview, validateSupportReview } from "./gates.ts";
+import { HttpFailure } from "./errors.ts";
+import { jobView, type JobRecord } from "./jobs.ts";
+import { buildStarterPack } from "./packs.ts";
 import { validateSelections } from "./selections.ts";
 import { assessmentPassageIds, EvidenceUnavailable, type Artifact, type CorpusSnapshot, type ModelCaseContext, type PastCase, type SourceVersion } from "./corpus.ts";
 import { dispositionChanges } from "../ui/lineage.ts";
@@ -84,7 +87,7 @@ function assessmentDraft(corpus: CorpusSnapshot): AssessmentDraft {
     const suffix = `${caseIndex}-${artifactIndex}`;
     return [
       { claimId: `fact-${suffix}`, text: "Recorded work", kind: "source_fact", sourceRefs, requestQuotes: [], dependsOnClaimIds: [] },
-      { claimId: `decision-${suffix}`, text: "Adapt the recorded work after checking the client's capabilities.", kind: "recommendation", sourceRefs, requestQuotes: ["current request"], dependsOnClaimIds: [`fact-${suffix}`] },
+      { claimId: `decision-${suffix}`, text: "Adapt the recorded work after checking the client's capabilities for the current request.", kind: "recommendation", sourceRefs, requestQuotes: ["current request"], dependsOnClaimIds: [`fact-${suffix}`] },
     ];
   }));
   claims.push(...claims.filter((claim) => claim.kind === "recommendation").map((claim): Claim => ({
@@ -186,7 +189,7 @@ test("brief disposition is withheld when its recommendation claim is unsupported
   const checked = buildCheckedBrief(draft, new Map<string, SupportVerdict>([
     [factual.claimId, "supported"],
     [recommendation.claimId, "unsupported"],
-  ]), invalidRefs);
+  ]), invalidRefs, { request: "current request", constraintReviews: selections.map((item) => ({ ...item, requestQuotes: [] })) });
   assert.deepEqual(checked.reuse, []);
   assert.deepEqual(checked.claims.map((claim) => claim.claimId), [factual.claimId]);
 });
@@ -477,6 +480,7 @@ test("persisted assessments and briefs lose claims transitively when original ev
     reuse: [], verify: [],
     adapt: [{ caseId: "case-1", artifactId: "handover", versionId: dependent.sourceRefs[0].versionId, disposition: "adapt" as const, dispositionClaimId: dependent.claimId, claimIds: [base.claimId, dependent.claimId] }],
     claims: [base, dependent], withheldClaimCount: 0,
+    constraintReviews: [{ caseId: "case-1", artifactId: "handover", versionId: dependent.sourceRefs[0].versionId, requestQuotes: [] }],
   };
   validateBriefDraft(brief, "current request", [{ caseId: "case-1", artifactId: "handover", versionId: dependent.sourceRefs[0].versionId }], corpus);
   assert.equal(revalidateBrief(brief, "current request", corpus).adapt[0].disposition, "adapt");
@@ -851,6 +855,53 @@ test("explicit artifact exclusion is reviewed and explained without fabricating 
   assert.equal(assessmentDraftSchema.safeParse(danglingExclusion).success, false);
 });
 
+test("operational acceptance conflicts block negative proof even without comparison rows", () => {
+  const corpus = fixture();
+  const constraints: RequestConstraints = {
+    ...emptyRequirementReview.constraints,
+    recovery_operations: [
+      "The client's operating deadline is six hours.",
+      "Acceptance needs a signed receipt for each processed item, although that capability is unconfirmed.",
+      "An aggregate count is not an acceptable substitute.",
+    ],
+  };
+  const request = ["Assess the available evidence.", ...constraints.recovery_operations].join(" ");
+  const ids = assessmentPassageIds(corpus);
+  const draft = parseAssessmentDraft({
+    requestConstraints: constraints, leads: [], contrasts: [], clarifyingClaimIds: [], claims: [],
+    cases: corpus.manifest.cases.map((item) => ({
+      caseId: item.caseId, outcome: "unknown",
+      artifactWork: item.artifacts.map((artifact) => ({
+        artifactId: artifact.artifactId, disposition: null, usefulForLead: false,
+        recommendation: { text: "This record does not establish the requested operating procedure.", sourceRefs: [ids.get(artifact.versions[0].passages[0].passageId)!], requestQuotes: constraints.recovery_operations, dependsOnClaimIds: [] },
+        supportingClaims: [], blockerClaims: [], verificationClaims: [],
+      })),
+    })),
+  }, corpus);
+  const verdicts = new Map(draft.claims.map((claim) => [claim.claimId, "supported" as SupportVerdict]));
+  const roles = artifactRoles(draft, "context_only");
+  const build = (reviewed: RequestConstraints) => buildCheckedAssessment(draft, verdicts, validateAssessmentDraft(draft, request, corpus), corpus, roles, { request, constraints: reviewed });
+  const checked = build(constraints);
+  assert.equal(checked.conclusion, "no_useful_precedent");
+  assert.deepEqual(revalidateAssessment(checked, request, corpus).requestConstraints.recovery_operations, constraints.recovery_operations);
+  assert.deepEqual(checked.leads, []);
+  assert.deepEqual(checked.nextActions, []);
+  assert.ok(checked.cases.every((item) => item.outcome === "unknown" && item.artifactWork.every((work) => work.disposition === null)));
+  assert.equal(build(emptyRequirementReview.constraints).conclusion, "cannot_be_established", "An omitted acceptance inventory cannot prove absence merely because no comparison was generated.");
+  draft.requestConstraints = emptyRequirementReview.constraints;
+  assert.equal(build(constraints).conclusion, "cannot_be_established", "A review-only constraint also conflicts with draft absence.");
+  draft.requestConstraints = constraints;
+  roles.set("case-1/request", "unresolved");
+  assert.equal(build(constraints).conclusion, "cannot_be_established");
+  roles.set("case-1/request", "context_only");
+  for (const claim of draft.claims) if (!claim.claimId.startsWith("classification-")) verdicts.set(claim.claimId, "unsupported");
+  assert.equal(build(constraints).conclusion, "cannot_be_established", "Rejected explanations withhold their classifications through dependencies.");
+  for (const claim of draft.claims) verdicts.set(claim.claimId, "supported");
+  corpus.availableVersions.delete("request-v1");
+  corpus.caseAvailability.set("case-1", "partial");
+  assert.equal(revalidateAssessment(checked, request, corpus).conclusion, "cannot_be_established");
+});
+
 test("provider generation binds request inventories and each case claim to their actual sources", async () => {
   const corpus = fixture();
   const request = "Named operators need recovery evidence. New target authorization remains unconfirmed.";
@@ -996,4 +1047,120 @@ test("brief generation cannot add an unselected background artifact", async () =
   const foreignClaim = structuredClone(wireOutput);
   foreignClaim.claims[0].sourceRefs[0] = ids.get("p-request-v1")!;
   assert.equal(validate(foreignClaim), false, "Brief claims must preserve selected-source ownership.");
+});
+
+test("agreed operational acceptance constraints establish no useful precedent and fail closed when agreement or evidence is lost", () => {
+  const corpus = fixture();
+  const request = "The operation must finish within the stated window, with proof for each record. A restored copy does not count as completion. Please assess whether past records help.";
+  const deadline = "The operation must finish within the stated window, with proof for each record.";
+  const rejectedSubstitute = "A restored copy does not count as completion.";
+  const quotes = [deadline, rejectedSubstitute];
+  const draft = assessmentDraft(corpus);
+  for (const item of draft.cases) for (const work of item.artifactWork) {
+    work.disposition = null;
+    const explanation = draft.claims.find((claim) => claim.claimId === work.dispositionClaimId)!;
+    explanation.kind = "interpretation";
+    explanation.text = "This record supplies background requirements, not an implementation procedure.";
+    item.claimIds.push(work.dispositionClaimId);
+    draft.claims.find((claim) => claim.claimId === `classification-${work.dispositionClaimId}`)!.text = "Artifact disposition: excluded.";
+  }
+  for (const claim of draft.claims) claim.requestQuotes = claim.requestQuotes.filter((quote) => request.includes(quote));
+  const sourceRefs = draft.claims.find((claim) => claim.claimId === "fact-0-0")!.sourceRefs;
+  draft.claims.push(
+    { claimId: "recovery-requirement", kind: "interpretation", text: "The current request states a completion window and required proof.", sourceRefs, requestQuotes: [deadline], dependsOnClaimIds: [] },
+    { claimId: "recovery-assessment", kind: "interpretation", text: "The recorded work does not establish this completion window.", sourceRefs, requestQuotes: [deadline], dependsOnClaimIds: ["fact-0-0", "recovery-requirement"] },
+    { claimId: "recovery-implication", kind: "recommendation", text: "Do not treat the recorded work as meeting the stated completion rule.", sourceRefs, requestQuotes: [deadline], dependsOnClaimIds: ["recovery-assessment"] },
+  );
+  draft.contrasts = [{ caseId: "case-1", state: "partial", usefulArtifactIds: [], reasonClaimIds: ["fact-0-0"] }];
+  draft.comparisons = [{
+    caseId: "case-1",
+    dimension: "recovery_operations",
+    requirementClaimId: "recovery-requirement",
+    evidenceClaimId: "fact-0-0",
+    relation: "unknown",
+    assessmentClaimId: "recovery-assessment",
+    implicationClaimId: "recovery-implication",
+  }];
+  const constraints = {
+    product_version: [],
+    environment: [],
+    scale: [],
+    identity_access: [],
+    recovery_operations: quotes,
+  };
+  draft.requestConstraints = {
+    product_version: [],
+    environment: [],
+    scale: [],
+    identity_access: [],
+    recovery_operations: [...quotes],
+  };
+  const roles = artifactRoles(draft, "context_only");
+  const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
+  const invalid = validateAssessmentDraft(draft, request, corpus);
+  const checked = buildCheckedAssessment(draft, verdicts, invalid, corpus, roles, { request, constraints });
+  assert.equal(checked.conclusion, "no_useful_precedent");
+  assert.deepEqual(checked.leads, []);
+  assert.ok(checked.cases.every((item) => item.artifactWork.every((work) => work.disposition === null)));
+  assert.deepEqual(checked.requestConstraints.recovery_operations, quotes);
+  for (const pastCase of corpus.manifest.cases) for (const artifact of pastCase.artifacts) {
+    const version = artifact.versions[0];
+    assert.throws(() => validateSelections([{
+      caseId: pastCase.caseId,
+      artifactId: artifact.artifactId,
+      versionId: version.versionId,
+      passageIds: [version.passages[0].passageId],
+    }], checked, corpus));
+  }
+  const reread = revalidateAssessment(checked, request, corpus);
+  assert.equal(reread.conclusion, "no_useful_precedent");
+  assert.deepEqual(reread.requestConstraints.recovery_operations, quotes);
+  const job: JobRecord = {
+    id: "00000000-0000-4000-8000-000000000035",
+    request_text: request,
+    corpus_version: corpus.manifest.corpusVersion,
+    corpus_sha256: corpus.manifestSha256,
+    stage: "ready",
+    assessment_state: "ready",
+    brief_state: "not_started",
+    assessment_result: reread,
+    brief_result: null,
+    brief_selections: null,
+    error_code: null,
+    created_at: new Date("2026-10-15T00:00:00Z"),
+    expires_at: new Date("2099-10-22T00:00:00Z"),
+    assessment_queued_at: new Date("2026-10-15T00:00:00Z"),
+    assessment_processing_started_at: null,
+    assessment_finished_at: null,
+    brief_queued_at: null,
+    brief_processing_started_at: null,
+    brief_finished_at: null,
+  };
+  job.assessment_result = revalidateAssessment(job.assessment_result!, job.request_text, corpus);
+  const view = jobView(job);
+  assert.equal(view.assessment?.conclusion, "no_useful_precedent");
+  assert.deepEqual(view.assessment?.requestConstraints.recovery_operations, quotes);
+  assert.throws(
+    () => buildStarterPack(job, corpus, "https://demo.example"),
+    (error: unknown) => error instanceof HttpFailure && error.status === 409 && error.code === "CHECKED_BRIEF_REQUIRED",
+  );
+  assert.equal(buildCheckedAssessment(draft, verdicts, invalid, corpus, roles, {
+    request,
+    constraints: { ...constraints, recovery_operations: [] },
+  }).conclusion, "cannot_be_established");
+  const unresolved = new Map(roles);
+  unresolved.set("case-1/request", "unresolved");
+  assert.equal(buildCheckedAssessment(draft, verdicts, invalid, corpus, unresolved, { request, constraints }).conclusion, "cannot_be_established");
+  const unsupported = new Map(verdicts);
+  for (const claimId of unsupported.keys()) {
+    if (claimId.startsWith("classification-") || claimId === "recovery-assessment" || claimId === "recovery-implication" || claimId === "recovery-requirement") {
+      unsupported.set(claimId, "unsupported");
+    }
+  }
+  assert.equal(buildCheckedAssessment(draft, unsupported, invalid, corpus, roles, { request, constraints }).conclusion, "cannot_be_established");
+  const preserved: AssessmentResult = { ...checked, conclusion: "cannot_be_established" };
+  assert.equal(revalidateAssessment(preserved, request, corpus).conclusion, "cannot_be_established");
+  corpus.passages.delete("p-request-v1");
+  corpus.availableVersions.delete("request-v1");
+  assert.equal(revalidateAssessment(checked, request, corpus).conclusion, "cannot_be_established");
 });

@@ -78,13 +78,15 @@ export function buildStarterPack(job: JobRecord, corpus: CorpusSnapshot, origin:
   const claims = selectedClaims(rechecked.claims, selected);
   const claimIds = new Set(claims.map((claim) => claim.claimId));
   const keep = (items: BriefItem[]) => items.filter((item) => selected.has(identity(item)) && claimIds.has(item.dispositionClaimId) && item.claimIds.every((id) => claimIds.has(id)));
+  const reuse = keep(rechecked.reuse), adapt = keep(rechecked.adapt), verify = keep(rechecked.verify);
+  const items = [...reuse, ...adapt, ...verify];
   const brief = {
-    reuse: keep(rechecked.reuse), adapt: keep(rechecked.adapt), verify: keep(rechecked.verify), claims,
+    reuse, adapt, verify, claims,
+    constraintReviews: rechecked.constraintReviews.filter((review) => items.some((item) => identity(item) === identity(review))),
     withheldClaimCount: rechecked.withheldClaimCount + rechecked.claims.length - claims.length,
   };
   const assessmentClaims = selectedClaims(assessment.claims, selected);
   const assessmentIds = new Set(assessmentClaims.map((claim) => claim.claimId));
-  const items = [...brief.reuse, ...brief.adapt, ...brief.verify];
   const inventory: PackArtifact[] = selections.map((selection) => {
     const { version, artifact } = sourceVersion(corpus, selection.versionId);
     const item = items.find((candidate) => identity(candidate) === identity(selection));

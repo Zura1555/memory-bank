@@ -1,7 +1,7 @@
-import type { ArtifactRole, AssessmentResult, BriefResult, BriefDisposition, Claim, CaseAssessment, Lead, RequestConstraints, SupportVerdict } from "../shared/protocol.ts";
+import type { ArtifactRole, AssessmentResult, BriefConstraintReview, BriefResult, BriefDisposition, Claim, CaseAssessment, Lead, RequestConstraints, SupportVerdict } from "../shared/protocol.ts";
 import { EvidenceUnavailable, type CorpusSnapshot } from "./corpus.ts";
 import type { AssessmentDraft, AssessmentReview, BriefDraft, SupportReview } from "./schemas.ts";
-import { artifactReviewsSchema, requestConstraintsSchema } from "./schemas.ts";
+import { artifactReviewsSchema, briefSupportReviewSchema, requestConstraintsSchema } from "./schemas.ts";
 
 export class GateFailure extends Error {
   readonly code: string;
@@ -274,7 +274,8 @@ export function buildCheckedAssessment(
     || draft.cases.some((item) => item.artifactWork.some((work) => !artifactRoles.has(`${item.caseId}/${work.artifactId}`)))) {
     throw new GateFailure("INCOMPLETE_ARTIFACT_REVIEW", "Missing or unknown artifact-role review.");
   }
-  let requirementConflict = false;
+  let requirementConflict = (Object.keys(constraints.data) as (keyof RequestConstraints)[])
+    .some((dimension) => (constraints.data[dimension].length === 0) !== (draftConstraints.data[dimension].length === 0));
   for (const row of draft.comparisons) {
     if ((row.requirementClaimId === null) !== (constraints.data[row.dimension].length === 0)
       || (row.requirementClaimId === null) !== (draftConstraints.data[row.dimension].length === 0)) {
@@ -404,8 +405,38 @@ function deterministicOrder(leads: Lead[], cases: CaseAssessment[]): Lead[] {
     || a.caseId.localeCompare(b.caseId));
 }
 
-export function buildCheckedBrief(draft: BriefDraft, verdicts: Map<string, SupportVerdict>, invalidRefs: Set<string>): BriefResult {
-  const checked = supportedClaims(draft.claims, verdicts, invalidRefs);
+export function buildCheckedBrief(
+  draft: BriefDraft,
+  verdicts: Map<string, SupportVerdict>,
+  invalidRefs: Set<string>,
+  requirementReview: { request: string; constraintReviews: BriefConstraintReview[] },
+): BriefResult {
+  const reviews = briefSupportReviewSchema.shape.constraintReviews.safeParse(requirementReview.constraintReviews);
+  const identity = (item: { caseId: string; artifactId: string; versionId: string }) => `${item.caseId}/${item.artifactId}/${item.versionId}`;
+  const items = [...draft.reuse, ...draft.adapt, ...draft.verify];
+  const inventory = new Map(reviews.success ? reviews.data.map((item) => [identity(item), item.requestQuotes]) : []);
+  if (!reviews.success || inventory.size !== reviews.data.length || inventory.size !== items.length
+    || items.some((item) => !inventory.has(identity(item)))
+    || reviews.data.some((item) => item.requestQuotes.some((quote) => !requirementReview.request.includes(quote)))) {
+    throw new GateFailure("INVALID_BRIEF_CONSTRAINT_REVIEW", "Every selected brief item requires an independent exact request-constraint inventory.");
+  }
+  const rejected = new Set(invalidRefs);
+  const supported = supportedClaims(draft.claims, verdicts, rejected);
+  const claims = new Map(draft.claims.map((claim) => [claim.claimId, claim]));
+  for (const item of items) {
+    const recommendations = item.claimIds.flatMap((id) => {
+      const claim = claims.get(id);
+      return claim?.kind === "recommendation" ? [claim] : [];
+    });
+    const quotes = new Set([...inventory.get(identity(item))!, ...recommendations.flatMap((claim) => claim.requestQuotes)]);
+    if ([...quotes].some((quote) => !requirementReview.request.includes(quote)
+      || !recommendations.some((claim) => supported.accepted.has(claim.claimId)
+        && claim.requestQuotes.includes(quote) && claim.text.includes(quote)))) {
+      // A true source fact or hidden requestQuotes metadata cannot stand in for a visible requested check.
+      for (const claim of recommendations) rejected.add(claim.claimId);
+    }
+  }
+  const checked = supportedClaims(draft.claims, verdicts, rejected);
   const keep = (items: BriefDraft["reuse"], disposition: BriefDisposition) => items.flatMap((item) => {
     if (!keepAll(item.claimIds, checked.accepted)) return [];
     return [{ ...item, disposition }];
@@ -415,6 +446,7 @@ export function buildCheckedBrief(draft: BriefDraft, verdicts: Map<string, Suppo
     adapt: keep(draft.adapt, "adapt"),
     verify: keep(draft.verify, "verify"),
     claims: checked.visible,
+    constraintReviews: reviews.data.filter((review) => items.some((item) => identity(item) === identity(review) && keepAll(item.claimIds, checked.accepted))),
     withheldClaimCount: checked.withheld,
   };
 }
@@ -455,7 +487,15 @@ export function revalidateAssessment(result: AssessmentResult, request: string, 
 
 export function revalidateBrief(result: BriefResult, request: string, corpus: CorpusSnapshot): BriefResult {
   const verdicts = new Map(result.claims.map((claim) => [claim.claimId, "supported" as const]));
-  const checked = buildCheckedBrief(result, verdicts, validClaimReferences(result.claims, request, corpus));
+  let checked: BriefResult;
+  try {
+    checked = buildCheckedBrief(result, verdicts, validClaimReferences(result.claims, request, corpus), { request, constraintReviews: result.constraintReviews });
+  } catch (error) {
+    if (error instanceof GateFailure && error.code === "INVALID_BRIEF_CONSTRAINT_REVIEW") {
+      throw new EvidenceUnavailable("Required independent brief-constraint review is unavailable; a new checked brief is needed.");
+    }
+    throw error;
+  }
   checked.withheldClaimCount += result.withheldClaimCount;
   return checked;
 }

@@ -8,6 +8,8 @@ import type { JobRecord } from "./jobs.ts";
 import type { Env } from "./env.ts";
 import { buildStarterPack, starterPackMarkdown } from "./packs.ts";
 import { app } from "./http.ts";
+import { buildCheckedBrief, revalidateBrief, validateBriefDraft, validateSupportReview } from "./gates.ts";
+import { briefSupportReviewSchema, reviewSchema } from "./schemas.ts";
 
 async function fixture() {
   const manifest: CorpusManifest = JSON.parse(await readFile(new URL("../../corpus/manifest.json", import.meta.url), "utf8"));
@@ -30,7 +32,7 @@ async function fixture() {
     ];
   });
   const items: BriefItem[] = selections.map((selection, index) => ({ ...selection, disposition: index === 0 ? "reuse" : index === 1 ? "adapt" : "verify", dispositionClaimId: `check-${index}`, claimIds: [`fact-${index}`, `check-${index}`] }));
-  const brief: BriefResult = { reuse: items.filter((item) => item.disposition === "reuse"), adapt: items.filter((item) => item.disposition === "adapt"), verify: items.filter((item) => item.disposition === "verify"), claims, withheldClaimCount: 2 };
+  const brief: BriefResult = { reuse: items.filter((item) => item.disposition === "reuse"), adapt: items.filter((item) => item.disposition === "adapt"), verify: items.filter((item) => item.disposition === "verify"), claims, constraintReviews: selections.map(({ caseId, artifactId, versionId }) => ({ caseId, artifactId, versionId, requestQuotes: ["client scope"] })), withheldClaimCount: 2 };
   const assessment: AssessmentResult = {
     conclusion: "cannot_be_established", clarifyingClaimIds: [], comparisons: [], nextActions: [], leads: [], contrasts: [], claims: [...claims], withheldClaimCount: 0,
     requestConstraints: { product_version: [], environment: [], scale: [], identity_access: [], recovery_operations: [] },
@@ -105,6 +107,67 @@ test("export excludes unselected source claims and dependent recommendations ins
   assert.equal(pack.inventory[0].disposition, "withheld");
   assert.match(pack.inventory[0].status, /^BLOCKED/);
   assert.equal(pack.evidence.some((passage) => passage.caseId === foreign.caseId), false);
+});
+
+test("checked briefs and both portable formats retain independently reviewed exact constraints, not hidden metadata or historical facts", async () => {
+  const { corpus, job } = await fixture();
+  const item = job.brief_result!.adapt[0];
+  const selection = job.brief_selections!.find((selected) => selected.versionId === item.versionId)!;
+  const quotes = ["seven business days", "at most 1,200 records", "audit and removal remain unverified"];
+  job.request_text = `Check client scope for ${quotes.join("; ")}.`;
+  const original = job.brief_result!.claims.find((claim) => claim.claimId === item.dispositionClaimId)!;
+  const recommendation: Claim = {
+    ...original, requestQuotes: quotes,
+    text: `Before adaptation, check the requested constraints: ${quotes.join("; ")}.`,
+  };
+  const fact = job.brief_result!.claims.find((claim) => claim.claimId === original.dependsOnClaimIds[0])!;
+  const draft = { reuse: [], adapt: [item], verify: [], claims: [fact, recommendation] };
+  const key = `${selection.caseId}/${selection.artifactId}/${selection.versionId}`;
+  const schema = reviewSchema({ claimIds: draft.claims.map((claim) => claim.claimId), selections: [selection] }, job.request_text);
+  const wireReview = { constraintQuotes: { [key]: quotes }, claimVerdicts: Object.fromEntries(draft.claims.map((claim) => [claim.claimId, "supported"])) };
+  const review = briefSupportReviewSchema.parse(schema.parse(wireReview));
+  const requirements = { request: job.request_text, constraintReviews: review.constraintReviews };
+  const check = (candidate = draft, verdicts = validateSupportReview(candidate.claims, review)) =>
+    buildCheckedBrief(candidate, verdicts, validateBriefDraft(candidate, job.request_text, [selection], corpus), requirements);
+  const checked = check();
+  assert.equal(checked.adapt[0]?.versionId, selection.versionId);
+  job.brief_result = checked;
+  const pack = buildStarterPack(job, corpus, "https://demo.example");
+  const json = JSON.parse(JSON.stringify(pack));
+  const markdown = starterPackMarkdown(pack).split("## Checked brief claims / adaptation and verification checklist")[1]
+    .split("## Blocking questions")[0].split("\n").filter((line) => !line.startsWith("Request quote:")).join("\n");
+  for (const quote of quotes) {
+    assert.ok(json.brief.claims.find((claim: Claim) => claim.claimId === recommendation.claimId).text.includes(quote));
+    assert.ok(markdown.includes(quote));
+  }
+  assert.deepEqual(revalidateBrief(checked, job.request_text, corpus), checked);
+  for (const text of [
+    "Check configured expiry for a time-bound period before adaptation.",
+    "Check seven days, at most 1,200 records; audit and removal remain unverified.",
+    "Check seven business days, at most 1,200 records; audit and removal verified.",
+  ]) {
+    const lost = { ...draft, claims: [fact, { ...recommendation, text }] };
+    const withheld = check(lost);
+    assert.deepEqual(withheld.adapt, []);
+    assert.equal(withheld.claims.some((claim) => claim.claimId === recommendation.claimId), false);
+  }
+  const historicalOnly = { ...draft, claims: [{ ...fact, text: quotes.join("; ") }, { ...recommendation, text: "Check configured expiry." }] };
+  assert.deepEqual(check(historicalOnly).adapt, []);
+  const unsupported = validateSupportReview(draft.claims, review);
+  unsupported.set(fact.claimId, "uncertain");
+  assert.deepEqual(check(draft, unsupported).adapt, []);
+  const invented = { ...requirements, constraintReviews: [{ ...review.constraintReviews[0], requestQuotes: ["eight business days"] }] };
+  assert.throws(() => buildCheckedBrief(draft, validateSupportReview(draft.claims, review), new Set(), invented), /independent exact request-constraint inventory/);
+  assert.equal(schema.safeParse({ claimVerdicts: wireReview.claimVerdicts }).success, false);
+  assert.equal(schema.safeParse({ ...wireReview, constraintQuotes: { "foreign/artifact/version": quotes } }).success, false);
+  const { constraintReviews: _, ...legacy } = checked;
+  assert.throws(() => revalidateBrief(legacy as BriefResult, job.request_text, corpus), EvidenceUnavailable);
+  // Draft metadata is a second coverage signal when the independent reviewer misses a value.
+  assert.deepEqual(buildCheckedBrief(
+    { ...draft, claims: [fact, { ...recommendation, text: "Check configured expiry." }] },
+    validateSupportReview(draft.claims, review), new Set(),
+    { request: job.request_text, constraintReviews: [{ ...review.constraintReviews[0], requestQuotes: [] }] },
+  ).adapt, []);
 });
 
 test("expiry, incomplete jobs, changed corpus and unavailable selected originals block a new pack", async () => {
