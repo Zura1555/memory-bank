@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import Ajv from "ajv";
 import test from "node:test";
 import type { ArtifactRole, AssessmentResult, Claim, RequestConstraints, Selection, SupportVerdict } from "../shared/protocol.ts";
-import { assessmentDraftSchema, assessmentReviewSchema, openRouterSchema, parseAssessmentDraft, reviewSchema, type AssessmentDraft, type AssessmentOutput, type BriefDraft } from "./schemas.ts";
+import { assessmentDraftSchema, assessmentReviewSchema, briefDraftSchema, openRouterSchema, parseAssessmentDraft, reviewSchema, type AssessmentDraft, type AssessmentOutput, type BriefDraft } from "./schemas.ts";
 import { buildCheckedAssessment, buildCheckedBrief, GateFailure, revalidateAssessment, revalidateBrief, validateAssessmentDraft, validateBriefDraft, validateArtifactReview, validateSupportReview } from "./gates.ts";
 import { validateSelections } from "./selections.ts";
-import { assessmentPassageIds, EvidenceUnavailable, type Artifact, type CorpusSnapshot, type PastCase, type SourceVersion } from "./corpus.ts";
+import { assessmentPassageIds, EvidenceUnavailable, type Artifact, type CorpusSnapshot, type ModelCaseContext, type PastCase, type SourceVersion } from "./corpus.ts";
 import { dispositionChanges } from "../ui/lineage.ts";
 import { assessmentDraftPrompt, briefDraftPrompt } from "./prompts.ts";
 import { callOpenRouter } from "./openrouter.ts";
@@ -421,7 +421,7 @@ test("true historical facts cannot promote an incompatible artifact into a usefu
     artifactReviews: [...artifactRoles(draft, "not_relevant")].map(([key, role]) => ({ caseId: key.split("/")[0], artifactId: key.split("/")[1], role })),
   };
   const checked = buildCheckedAssessment(draft, validateSupportReview(draft.claims, review), new Set(), corpus, validateArtifactReview(draft, review), emptyRequirementReview);
-  assert.equal(checked.conclusion, "no_useful_precedent");
+  assert.equal(checked.conclusion, "cannot_be_established", "Negative roles alone do not supply an accepted explanation.");
   assert.deepEqual(checked.leads, []);
   assert.equal(checked.cases[0].artifactWork[0].disposition, null);
   assert.ok(checked.claims.some((claim) => claim.claimId === "fact-0-0"));
@@ -560,13 +560,15 @@ test("assessment passage labels never rebind after source availability changes",
 
 test("the independent review cannot override artifact decisions with an aggregate label", () => {
   const schema = reviewSchema({ claimIds: ["checked-claim"], artifacts: [] }, "current request");
-  const response = { requestConstraints: emptyRequirementReview.constraints, claimReviews: [{ claimId: "checked-claim", verdict: "supported" }], artifactReviews: [], conclusion: "precedent_found" };
+  const response = { requestConstraints: emptyRequirementReview.constraints, claimVerdicts: { "checked-claim": "supported" }, artifactReviews: [], conclusion: "precedent_found" };
   const validate = new Ajv({ strict: false }).compile(openRouterSchema("assessment_review", schema).json_schema.schema);
   assert.equal(validate(response), false);
   assert.equal(schema.safeParse(response).success, false);
   const { conclusion: _, ...validReview } = response;
   assert.equal(validate(validReview), true);
-  assert.deepEqual(schema.parse(validReview), validReview);
+  assert.deepEqual(schema.parse(validReview), { requestConstraints: emptyRequirementReview.constraints, artifactReviews: [], claimReviews: [{ claimId: "checked-claim", verdict: "supported" }] });
+  assert.equal(validate({ ...validReview, claimVerdicts: {} }), false, "The reviewer cannot omit a claim verdict.");
+  assert.equal(validate({ ...validReview, claimVerdicts: { ...validReview.claimVerdicts, "foreign-claim": "supported" } }), false, "Background or foreign IDs cannot enter the review inventory.");
 });
 
 test("attached dispositions are independently checked for lead and non-lead work", () => {
@@ -740,6 +742,14 @@ test("implementation roles preserve conditional starting work but block context-
 test("full negative artifact coverage establishes no precedent without inventing uncertain case outcomes", () => {
   const corpus = fixture();
   const draft = assessmentDraft(corpus);
+  for (const item of draft.cases) for (const work of item.artifactWork) {
+    work.disposition = null;
+    const explanation = draft.claims.find((claim) => claim.claimId === work.dispositionClaimId)!;
+    explanation.kind = "interpretation";
+    explanation.text = "This historical record does not establish implementation material for the current request.";
+    item.claimIds.push(work.dispositionClaimId);
+    draft.claims.find((claim) => claim.claimId === `classification-${work.dispositionClaimId}`)!.text = "Artifact disposition: excluded.";
+  }
   const roles = artifactRoles(draft, "context_only");
   const review = assessmentReviewSchema.parse({
     requestConstraints: emptyRequirementReview.constraints,
@@ -795,6 +805,9 @@ test("explicit artifact exclusion is reviewed and explained without fabricating 
   assert.ok(checked.cases.every((item) => item.artifactWork.every((work) => work.disposition === null && work.dispositionClaimId === null && work.claimIds.length === 0)));
   assert.ok(checked.cases.every((item) => item.claimIds.some((id) => checked.claims.find((claim) => claim.claimId === id)?.text.includes("not an implementation procedure"))));
   assert.equal(revalidateAssessment(checked, "current request", corpus).conclusion, "no_useful_precedent");
+  const rejectedExplanations = new Map(draft.claims.map((claim) => [claim.claimId, "unsupported" as const]));
+  const unexplained = buildCheckedAssessment(draft, rejectedExplanations, new Set(), corpus, artifactRoles(draft, "context_only"), emptyRequirementReview);
+  assert.equal(unexplained.conclusion, "cannot_be_established", "Negative roles cannot establish no precedent after every supported exclusion explanation is lost.");
   const invalid = structuredClone(output);
   invalid.cases[0].artifactWork[0].usefulForLead = true;
   assert.equal(assessmentDraftSchema.safeParse(invalid).success, false);
@@ -821,18 +834,28 @@ test("provider generation binds request inventories and each case claim to their
     claims: [{ claimId: "source-fact", caseId: "case-1", outcomeEvidence: false, kind: "source_fact", text: "Recorded evidence.", sourceRefs: [ids.get("p-request-v1")!], requestQuotes: [], dependsOnClaimIds: [] }],
   };
   const { leads: _, contrasts: __, ...content } = output;
-  const wireOutput = { ...content, cases: content.cases.map((item) => ({ ...item, tier: "context" })) };
+  const wireOutput = {
+    ...content,
+    cases: Object.fromEntries(content.cases.map(({ caseId, outcome, artifactWork }) => [caseId, {
+      outcome, tier: "context",
+      artifactWork: Object.fromEntries(artifactWork.map(({ artifactId, ...work }) => [artifactId, work])),
+    }])),
+  };
   const originalFetch = globalThis.fetch;
   let providerSchema: object | undefined;
+  let normalized: AssessmentOutput | undefined;
   globalThis.fetch = async (_input, init) => {
     providerSchema = JSON.parse(init!.body as string).response_format.json_schema.schema;
     return Response.json({ id: "gen-source-bound-schema", model: "openai/gpt-6-luna", provider: "OpenAI", choices: [{ finish_reason: "stop", message: { content: JSON.stringify(wireOutput) } }] });
   };
   try {
-    await callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_draft", assessmentDraftPrompt(request, corpus));
+    normalized = assessmentDraftSchema.parse((await callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_draft", assessmentDraftPrompt(request, corpus))).output);
   } finally {
     globalThis.fetch = originalFetch;
   }
+  assert.ok(normalized);
+  const normalizedDraft = parseAssessmentDraft(normalized, corpus);
+  assert.equal(validateAssessmentDraft(normalizedDraft, request, corpus).size, 0, "Derived inventory identities must preserve every claim's actual evidence ownership.");
   const validate = new Ajv({ strict: false }).compile(providerSchema!);
   const valid = structuredClone(wireOutput);
   valid.requestConstraints.recovery_operations = ["Named operators need recovery evidence."];
@@ -843,10 +866,52 @@ test("provider generation binds request inventories and each case claim to their
   assert.equal(validate(historicalRequest), false, "A historical client request cannot become a current-request quotation.");
   const wrongCase = structuredClone(valid);
   wrongCase.claims[0].caseId = "case-2";
-  assert.equal(validate(wrongCase), false, "The model cannot pair another case's identity with this source.");
+  assert.equal(validate(wrongCase), false, "A claim cannot pair another case's identity with this source.");
   wrongCase.claims[0].sourceRefs = [ids.get("p-request-v1-case-2")!];
   assert.equal(validate(wrongCase), true);
-  assert.equal(validate({ ...valid, leads: [], contrasts: [] }), false, "The provider cannot nominate the same case again in an independent tier list.");
+  const siblingArtifact = structuredClone(valid);
+  siblingArtifact.cases["case-1"].artifactWork.handover.recommendation.sourceRefs = [ids.get("p-request-v1")!];
+  assert.equal(validate(siblingArtifact), false, "A keyed artifact cannot borrow its sibling's passages.");
+  const reason = { kind: "interpretation", text: "The historical scope does not establish the new environment.", sourceRefs: [ids.get("p-request-v1")!], requestQuotes: [], dependsOnClaimIds: [] };
+  const cell = { text: "Historical scope remains bounded.", sourceRefs: [ids.get("p-request-v1")!], requestQuotes: [] };
+  const ownContrast = structuredClone(valid);
+  Object.assign(ownContrast.cases["case-1"], { tier: "contrast", state: "partial", reasons: [reason], comparisons: [{ dimension: "environment", requirementQuote: null, relation: "unknown", evidence: cell, assessment: cell, implication: cell }] });
+  assert.equal(validate(ownContrast), true);
+  const normalizedContrast = assessmentDraftPrompt(request, corpus).responseSchema!.parse(ownContrast) as AssessmentOutput;
+  assert.equal(normalizedContrast.claims.find((claim) => claim.claimId === normalizedContrast.contrasts[0].reasonClaimIds[0])?.caseId, "case-1");
+  const foreignReason = structuredClone(ownContrast);
+  Object.assign(foreignReason.cases["case-1"], { reasons: [{ ...reason, sourceRefs: [ids.get("p-request-v1-case-2")!] }] });
+  assert.equal(validate(foreignReason), false, "A lead/contrast reason cannot borrow another case's evidence.");
+  const foreignComparison = structuredClone(ownContrast);
+  Object.assign(foreignComparison.cases["case-1"], { comparisons: [{ dimension: "environment", requirementQuote: null, relation: "unknown", evidence: { ...cell, sourceRefs: [ids.get("p-request-v1-case-2")!] }, assessment: cell, implication: cell }] });
+  assert.equal(validate(foreignComparison), false, "An inline comparison cannot borrow another case's evidence.");
+  const omittedCase = structuredClone(valid);
+  delete omittedCase.cases["case-8"];
+  assert.equal(validate(omittedCase), false, "Every supplied case key is required.");
+  const extraCase = structuredClone(valid);
+  extraCase.cases["extra-case"] = structuredClone(extraCase.cases["case-8"]);
+  assert.equal(validate(extraCase), false, "Case keys outside the supplied inventory are rejected.");
+  const omittedArtifact = structuredClone(valid);
+  delete omittedArtifact.cases["case-1"].artifactWork.handover;
+  assert.equal(validate(omittedArtifact), false, "Every available artifact key is required.");
+  const renamedArtifact = structuredClone(valid);
+  renamedArtifact.cases["case-1"].artifactWork["renamed-handover"] = structuredClone(renamedArtifact.cases["case-1"].artifactWork.handover);
+  delete renamedArtifact.cases["case-1"].artifactWork.handover;
+  assert.equal(validate(renamedArtifact), false, "Renamed artifact keys cannot satisfy the supplied inventory.");
+  const redundantIdentity = structuredClone(valid);
+  Object.assign(redundantIdentity.cases["case-1"], { caseId: "case-1" });
+  Object.assign(redundantIdentity.cases["case-1"].artifactWork.request, { artifactId: "request" });
+  assert.equal(validate(redundantIdentity), false, "Case and artifact identities are carried only by their keys.");
+  const noAvailableArtifact = fixture();
+  noAvailableArtifact.availableVersions.delete("request-v1-case-2");
+  const noArtifactPrompt = assessmentDraftPrompt(request, noAvailableArtifact);
+  const noArtifactSchema = new Ajv({ strict: false }).compile(openRouterSchema("assessment", noArtifactPrompt.responseSchema!).json_schema.schema);
+  const emptyArtifactWork = structuredClone(valid);
+  emptyArtifactWork.cases["case-2"].artifactWork = {};
+  assert.equal(noArtifactSchema(emptyArtifactWork), true, "Cases remain required when no artifacts have available versions.");
+  const unavailableArtifact = structuredClone(emptyArtifactWork);
+  unavailableArtifact.cases["case-2"].artifactWork.request = structuredClone(wireOutput.cases["case-2"].artifactWork.request);
+  assert.equal(noArtifactSchema(unavailableArtifact), false, "Unavailable artifacts are not accepted into the inventory.");
 });
 
 test("brief generation cannot add an unselected background artifact", async () => {
@@ -854,29 +919,46 @@ test("brief generation cannot add an unselected background artifact", async () =
   const draft = assessmentDraft(corpus);
   const checked = buildCheckedAssessment(draft, new Map(draft.claims.map((item) => [item.claimId, "supported"])), new Set(), corpus, artifactRoles(draft), emptyRequirementReview);
   const selected = [{ caseId: "case-1", artifactId: "handover", versionId: "handover-v1-case-1", passageIds: ["p-handover-v1-case-1"] }];
+  const ids = assessmentPassageIds(corpus);
+  const prompt = briefDraftPrompt("current request", selected, corpus, checked);
+  // StagePrompt erases this in-process modelCorpus return type; no external data is asserted here.
+  const data = prompt.untrustedData as { historicalContext: { completeSelectedCaseContext: ModelCaseContext[] } };
+  const suppliedPassage = data.historicalContext.completeSelectedCaseContext.find((item) => item.caseId === selected[0].caseId)!.artifacts.find((item) => item.artifactId === selected[0].artifactId)!.versions.find((item) => item.versionId === selected[0].versionId)!.passages[0];
   const output: BriefDraft = {
     reuse: [], verify: [],
     adapt: [{ caseId: selected[0].caseId, artifactId: selected[0].artifactId, versionId: selected[0].versionId, disposition: "adapt", dispositionClaimId: "choose", claimIds: ["choose"] }],
     claims: [{ claimId: "choose", kind: "recommendation", text: "Adapt the selected procedure after checking compatibility.", sourceRefs: [{ caseId: selected[0].caseId, artifactId: selected[0].artifactId, versionId: selected[0].versionId, passageId: selected[0].passageIds[0] }], requestQuotes: ["current request"], dependsOnClaimIds: [] }],
   };
+  const selectedKey: string = "case-1/handover/handover-v1-case-1";
+  const wireOutput = {
+    items: { [selectedKey]: { disposition: "adapt", dispositionClaimId: "choose", claimIds: ["choose"] } },
+    claims: output.claims.map((claim) => ({ ...claim, sourceRefs: [suppliedPassage.passageId] })),
+  };
+  let normalized: BriefDraft | undefined;
   let providerSchema: object | undefined;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_input, init) => {
     providerSchema = JSON.parse(init!.body as string).response_format.json_schema.schema;
-    return Response.json({ id: "gen-selected-only", model: "openai/gpt-6-luna", provider: "OpenAI", choices: [{ finish_reason: "stop", message: { content: JSON.stringify(output) } }] });
+    return Response.json({ id: "gen-selected-only", model: "openai/gpt-6-luna", provider: "OpenAI", choices: [{ finish_reason: "stop", message: { content: JSON.stringify(wireOutput) } }] });
   };
   try {
-    await callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", briefDraftPrompt("current request", selected, corpus, checked));
+    normalized = briefDraftSchema.parse((await callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt)).output);
   } finally {
     globalThis.fetch = originalFetch;
   }
+  assert.ok(normalized);
+  assert.equal(validateBriefDraft(normalized, "current request", selected, corpus).size, 0, "Derived selected identities must preserve actual claim ownership.");
+  assert.deepEqual(normalized.claims, output.claims, "A supplied context label must resolve to its unchanged canonical identity.");
   const validate = new Ajv({ strict: false }).compile(providerSchema!);
-  assert.equal(validate(output), true);
-  const unselected = structuredClone(output);
-  unselected.adapt[0].artifactId = "request";
-  unselected.adapt[0].versionId = "request-v1";
+  assert.equal(validate(wireOutput), true);
+  const unselected = structuredClone(wireOutput);
+  unselected.items["case-1/request/request-v1"] = structuredClone(unselected.items[selectedKey]);
   assert.equal(validate(unselected), false, "Full case background cannot add an unselected brief item.");
-  const foreignClaim = structuredClone(output);
-  Object.assign(foreignClaim.claims[0].sourceRefs[0], { artifactId: "request", versionId: "request-v1", passageId: "p-request-v1" });
+  const omitted = structuredClone(wireOutput);
+  delete omitted.items[selectedKey];
+  assert.equal(validate(omitted), false, "Every selected identity requires exactly one disposition.");
+  assert.equal(validate({ ...wireOutput, adapt: output.adapt, verify: output.adapt }), false, "Independent section arrays cannot classify the same selected work twice.");
+  const foreignClaim = structuredClone(wireOutput);
+  foreignClaim.claims[0].sourceRefs[0] = ids.get("p-request-v1")!;
   assert.equal(validate(foreignClaim), false, "Brief claims must preserve selected-source ownership.");
 });

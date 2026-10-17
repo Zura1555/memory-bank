@@ -271,6 +271,7 @@ function JobTimings({ job }: { job: JobView }) {
           {job.assessmentQueueWaitMs !== null && <div><dt>Observed queue wait</dt><dd>{formatDuration(job.assessmentQueueWaitMs)}</dd></div>}
           {job.assessmentProcessingMs !== null && <div><dt>Observed processing time</dt><dd>{formatDuration(job.assessmentProcessingMs)}</dd></div>}
         </dl>
+        {job.assessmentState !== "not_started" && job.assessmentQueueWaitMs === null && job.assessmentProcessingMs === null && <p className="timing-target">Observed timing unavailable: timestamps are missing or inconsistent.</p>}
       </div>
       <div className="timing-phase">
         <h3>Brief</h3>
@@ -279,6 +280,7 @@ function JobTimings({ job }: { job: JobView }) {
           {job.briefQueueWaitMs !== null && <div><dt>Observed queue wait</dt><dd>{formatDuration(job.briefQueueWaitMs)}</dd></div>}
           {job.briefProcessingMs !== null && <div><dt>Observed processing time</dt><dd>{formatDuration(job.briefProcessingMs)}</dd></div>}
         </dl>
+        {job.briefState !== "not_started" && job.briefQueueWaitMs === null && job.briefProcessingMs === null && <p className="timing-target">Observed timing unavailable: timestamps are missing or inconsistent.</p>}
       </div>
     </section>
   );

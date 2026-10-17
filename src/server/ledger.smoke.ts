@@ -9,6 +9,8 @@ import { Pool } from "pg";
 import { ReconciliationRequired, runPaidStage } from "./calls.ts";
 import type { Env } from "./env.ts";
 import { operatorStatus } from "./operator.ts";
+import { startBrief } from "./admission.ts";
+import type { Selection } from "../shared/protocol.ts";
 
 // Never reads .dev.vars, accepts a target database, or uses an existing Compose project.
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -25,6 +27,9 @@ function compose(args: string[], input?: Buffer): Buffer {
 const [jobId, reservationId, settledJobId, settledReservationId, settledAttemptId] =
   Array.from({ length: 5 }, () => randomUUID());
 let attemptId: string;
+const readyJobId = randomUUID();
+const readyCapabilityHash = Buffer.alloc(32, 1);
+const readySelections: Selection[] = [{ caseId: "case-1", artifactId: "procedure", versionId: "procedure-v1", passageIds: ["passage-b", "passage-a"] }];
 let providerRequests = 0;
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => {
@@ -50,6 +55,9 @@ async function verify(connectionString: string, expected: unknown): Promise<void
       }, 1, "assessment_draft", { instructions: "No dispatch permitted", untrustedData: {} }),
       (error: unknown) => error instanceof ReconciliationRequired && error.attemptId === attempt);
     }
+    assert.deepEqual(await startBrief(env, readyJobId, readyCapabilityHash, readySelections), {
+      jobId: readyJobId, briefState: "ready",
+    }, "A persisted JSONB selection must resume the ready brief regardless of object or passage order");
     assert.equal(providerRequests, 1, "Replay must not add to the single synthetic provider request");
     for (const [table, rows] of Object.entries(snapshot)) {
       assert.deepEqual((await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows, rows,
@@ -87,6 +95,13 @@ try {
       INSERT INTO operator_reconciliations (id, reservation_id, actual_micro_usd, note, operator_subject)
         VALUES ('${randomUUID()}', '${settledReservationId}', 12345, 'Synthetic smoke only; not provider billing', 'ledger-smoke');
       COMMIT;`);
+    await pool.query(
+      `INSERT INTO jobs (id, capability_hash, request_text, corpus_version, corpus_sha256, stage,
+         assessment_state, assessment_result, brief_state, brief_selections, expires_at)
+       VALUES ($1, $2, 'Synthetic ready brief', 'ledger-smoke', repeat('a', 64), 'ready',
+         'ready', '{}'::jsonb, 'ready', $3::jsonb, now() + interval '1 day')`,
+      [readyJobId, readyCapabilityHash, JSON.stringify(readySelections)],
+    );
     const env = { APP_ENV: "development", LOCAL_DATABASE_URL: connectionString, OPENROUTER_API_KEY: "synthetic-only" } as Env;
     await assert.rejects(runPaidStage(env, {
       jobId, attemptId: reservationId, phase: "assessment", workflowId: `${jobId}-assessment-1`,

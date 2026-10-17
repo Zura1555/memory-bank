@@ -352,7 +352,14 @@ export function buildCheckedAssessment(
   });
   const contrasts = draft.contrasts.filter((item) => keepAll(item.reasonClaimIds, checked.accepted));
   const complete = [...corpus.caseAvailability.values()].every((state) => state === "available");
-  const noUsefulPrecedent = complete && invalidRefs.size === 0 && !requirementConflict
+  const negativeExplanation = draft.comparisons.some((row) => row.relation !== "match"
+    && keepAll([row.evidenceClaimId, row.assessmentClaimId, row.implicationClaimId, ...(row.requirementClaimId === null ? [] : [row.requirementClaimId])], checked.accepted))
+    || checked.visible.some((claim) => claim.kind === "interpretation"
+      && claim.claimId.startsWith("classification-")
+      && claim.text === "Artifact disposition: excluded."
+      && claim.dependsOnClaimIds.length > 0
+      && keepAll(claim.dependsOnClaimIds, checked.accepted));
+  const noUsefulPrecedent = complete && invalidRefs.size === 0 && !requirementConflict && negativeExplanation
     && artifactRoles.size === knownArtifacts.size
     && [...artifactRoles.values()].every((role) => role === "context_only" || role === "not_relevant");
   const conclusion = leads.length > 0 ? "precedent_found" : noUsefulPrecedent ? "no_useful_precedent" : "cannot_be_established";
