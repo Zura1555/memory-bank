@@ -242,8 +242,16 @@ function isBrief(value: unknown): value is BriefResult {
     || !Array.isArray(value.adapt) || !value.adapt.every(isBriefItem)
     || !Array.isArray(value.verify) || !value.verify.every(isBriefItem)
     || !Array.isArray(value.claims) || !value.claims.every(isClaim)
+    || !Array.isArray(value.constraintReviews) || !value.constraintReviews.every((review: unknown) =>
+      isRecord(review) && isText(review.caseId) && isText(review.artifactId) && isText(review.versionId) && isTextList(review.requestQuotes))
     || !isCount(value.withheldClaimCount)) return false;
   const claims = new Map<string, Claim>(value.claims.map((claim: Claim) => [claim.claimId, claim]));
+  const items = [...value.reuse, ...value.adapt, ...value.verify];
+  const reviews = value.constraintReviews;
+  const identity = (item: { caseId: string; artifactId: string; versionId: string }) => `${item.caseId}/${item.artifactId}/${item.versionId}`;
+  if (reviews.length !== items.length
+    || new Set(reviews.map(identity)).size !== items.length
+    || items.some((item: BriefItem) => !reviews.some((review: BriefResult["constraintReviews"][number]) => identity(item) === identity(review)))) return false;
   return [...value.reuse, ...value.adapt, ...value.verify].every((item: BriefItem) =>
     item.claimIds.every((claimId) => claims.has(claimId))
       && claims.get(item.dispositionClaimId)?.kind === "recommendation");

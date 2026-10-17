@@ -219,6 +219,14 @@ export const supportReviewSchema = z.strictObject({
     verdict: z.enum(["supported", "unsupported", "uncertain"]),
   })).max(400),
 });
+export const briefSupportReviewSchema = supportReviewSchema.extend({
+  constraintReviews: z.array(z.strictObject({
+    caseId: id,
+    artifactId: id,
+    versionId: id,
+    requestQuotes: claim.shape.requestQuotes,
+  })).max(32),
+});
 export const artifactReviewsSchema = z.array(z.strictObject({
   caseId: id,
   artifactId: id,
@@ -233,13 +241,25 @@ export const assessmentReviewSchema = z.strictObject({
 export interface ReviewTargets {
   claimIds: string[];
   artifacts?: { caseId: string; artifactId: string }[];
+  selections?: Pick<Selection, "caseId" | "artifactId" | "versionId">[];
 }
 
 export function reviewSchema(targets: ReviewTargets, request: string) {
   const claimVerdicts = z.strictObject(Object.fromEntries(targets.claimIds.map((claimId) => [claimId, z.enum(["supported", "unsupported", "uncertain"])])));
   const normalizeClaims = (verdicts: z.infer<typeof claimVerdicts>) => targets.claimIds.map((claimId) => ({ claimId, verdict: verdicts[claimId] }));
-  if (!targets.artifacts) return z.strictObject({ claimVerdicts })
-    .transform(({ claimVerdicts }) => ({ claimReviews: normalizeClaims(claimVerdicts) })).pipe(supportReviewSchema);
+  if (targets.selections) {
+    const entries = targets.selections.map((item) => ({ item, key: `${item.caseId}/${item.artifactId}/${item.versionId}` }));
+    return z.strictObject({
+      constraintQuotes: z.strictObject(Object.fromEntries(entries.map(({ key }) => [key, claim.shape.requestQuotes]))),
+      claimVerdicts,
+    }).transform(({ constraintQuotes, claimVerdicts }) => ({
+      constraintReviews: entries.map(({ item, key }) => ({
+        caseId: item.caseId, artifactId: item.artifactId, versionId: item.versionId, requestQuotes: constraintQuotes[key],
+      })),
+      claimReviews: normalizeClaims(claimVerdicts),
+    })).pipe(briefSupportReviewSchema);
+  }
+  if (!targets.artifacts) throw new Error("REVIEW_TARGETS_REQUIRED");
   return z.strictObject({
     requestConstraints: requestInventoryFor(request),
     artifactReviews: artifactReviewsSchema.length(targets.artifacts.length),

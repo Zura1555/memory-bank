@@ -16,7 +16,7 @@ import {
   parseAssessmentDraft,
   assessmentReviewSchema,
   briefDraftSchema,
-  supportReviewSchema,
+  briefSupportReviewSchema,
 } from "./schemas.ts";
 import {
   buildCheckedAssessment,
@@ -197,9 +197,9 @@ export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> 
         const reviewPrompt = briefReviewPrompt(request, selections, corpus, assessment, draft);
         await setStage(this.env, params, "support_review");
         const reviewAttemptId = await paidStep(this.env, params, step, "brief-support-review", 2, "brief_review", reviewPrompt);
-        const review = supportReviewSchema.parse(await loadStageOutput(this.env, reviewAttemptId));
+        const review = briefSupportReviewSchema.parse(await loadStageOutput(this.env, reviewAttemptId));
         const verdicts = validateSupportReview(draft.claims, review);
-        const checked = buildCheckedBrief(draft, verdicts, invalidRefs);
+        const checked = buildCheckedBrief(draft, verdicts, invalidRefs, { request, constraintReviews: review.constraintReviews });
         await finishPhase(this.env, params, checked);
       }
     } catch (error) {

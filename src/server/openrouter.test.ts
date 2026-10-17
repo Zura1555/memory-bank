@@ -45,7 +45,7 @@ test("brief review cannot accept a verdict for a background assessment claim", a
     await assert.rejects(
       callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_review", {
         instructions: "Review the brief", untrustedData: {},
-        reviewTargets: { claimIds: ["brief-only"] },
+        reviewTargets: { claimIds: ["brief-only"], selections: [{ caseId: "case", artifactId: "artifact", versionId: "version" }] },
       }),
       (error: unknown) => {
         assert.ok(error instanceof ModelCallError);

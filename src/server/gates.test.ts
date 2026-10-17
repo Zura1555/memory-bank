@@ -84,7 +84,7 @@ function assessmentDraft(corpus: CorpusSnapshot): AssessmentDraft {
     const suffix = `${caseIndex}-${artifactIndex}`;
     return [
       { claimId: `fact-${suffix}`, text: "Recorded work", kind: "source_fact", sourceRefs, requestQuotes: [], dependsOnClaimIds: [] },
-      { claimId: `decision-${suffix}`, text: "Adapt the recorded work after checking the client's capabilities.", kind: "recommendation", sourceRefs, requestQuotes: ["current request"], dependsOnClaimIds: [`fact-${suffix}`] },
+      { claimId: `decision-${suffix}`, text: "Adapt the recorded work after checking the client's capabilities for the current request.", kind: "recommendation", sourceRefs, requestQuotes: ["current request"], dependsOnClaimIds: [`fact-${suffix}`] },
     ];
   }));
   claims.push(...claims.filter((claim) => claim.kind === "recommendation").map((claim): Claim => ({
@@ -186,7 +186,7 @@ test("brief disposition is withheld when its recommendation claim is unsupported
   const checked = buildCheckedBrief(draft, new Map<string, SupportVerdict>([
     [factual.claimId, "supported"],
     [recommendation.claimId, "unsupported"],
-  ]), invalidRefs);
+  ]), invalidRefs, { request: "current request", constraintReviews: selections.map((item) => ({ ...item, requestQuotes: [] })) });
   assert.deepEqual(checked.reuse, []);
   assert.deepEqual(checked.claims.map((claim) => claim.claimId), [factual.claimId]);
 });
@@ -442,6 +442,7 @@ test("persisted assessments and briefs lose claims transitively when original ev
     reuse: [], verify: [],
     adapt: [{ caseId: "case-1", artifactId: "handover", versionId: dependent.sourceRefs[0].versionId, disposition: "adapt" as const, dispositionClaimId: dependent.claimId, claimIds: [base.claimId, dependent.claimId] }],
     claims: [base, dependent], withheldClaimCount: 0,
+    constraintReviews: [{ caseId: "case-1", artifactId: "handover", versionId: dependent.sourceRefs[0].versionId, requestQuotes: [] }],
   };
   validateBriefDraft(brief, "current request", [{ caseId: "case-1", artifactId: "handover", versionId: dependent.sourceRefs[0].versionId }], corpus);
   assert.equal(revalidateBrief(brief, "current request", corpus).adapt[0].disposition, "adapt");
