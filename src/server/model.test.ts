@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createServer } from "node:http";
+import type { IncomingHttpHeaders } from "node:http";
+import type { AddressInfo } from "node:net";
+import { once } from "node:events";
 import type { Env } from "./env.ts";
-import { callOpenRouter, ModelCallError } from "./openrouter.ts";
+import { callModel, ModelCallError, modelConfig } from "./model.ts";
 
 test("an interrupted provider body keeps its generation ID and cannot be treated as a free failure", async () => {
   const originalFetch = globalThis.fetch;
@@ -13,7 +17,7 @@ test("an interrupted provider body keeps its generation ID and cannot be treated
   }), { headers: { "content-type": "application/json", "x-generation-id": "gen-interrupted" } });
   try {
     await assert.rejects(
-      callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_review", {
+      callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_review", {
         instructions: "Review fictional evidence", untrustedData: {},
         reviewTargets: { claimIds: ["claim-one"], artifacts: [] },
       }),
@@ -43,7 +47,7 @@ test("brief review cannot accept a verdict for a background assessment claim", a
   }, { headers: { "x-generation-id": "gen-wrong-inventory" } });
   try {
     await assert.rejects(
-      callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_review", {
+      callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_review", {
         instructions: "Review the brief", untrustedData: {},
         reviewTargets: { claimIds: ["brief-only"], selections: [{ caseId: "case", artifactId: "artifact", versionId: "version" }] },
       }),
@@ -80,7 +84,7 @@ test("transport diagnostics distinguish the observed deadline from other failure
         if (scenario.phase === "fetch") throw scenario.error;
         return new Response(new ReadableStream({ start(controller) { controller.error(scenario.error); } }));
       };
-      await assert.rejects(callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_draft", {
+      await assert.rejects(callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_draft", {
         instructions: "Synthetic failure check", untrustedData: {},
       }), (error: unknown) => {
         assert.ok(error instanceof ModelCallError);
@@ -108,7 +112,7 @@ test("provider rejections retain a safe generation ID without changing billing u
       globalThis.fetch = async () => new Response("private provider payload", {
         status, headers: { "x-generation-id": "gen-rejected" },
       });
-      await assert.rejects(callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_draft", {
+      await assert.rejects(callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_draft", {
         instructions: "Synthetic rejection check", untrustedData: {},
       }), (error: unknown) => {
         assert.ok(error instanceof ModelCallError);
@@ -134,7 +138,7 @@ test("invalid output preserves an envelope-only generation ID but rejects arbitr
       globalThis.fetch = async () => Response.json({
         id, choices: [{ finish_reason: "stop", message: { content: "invalid JSON" } }],
       });
-      await assert.rejects(callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_draft", {
+      await assert.rejects(callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_draft", {
         instructions: "Synthetic output check", untrustedData: {},
       }), (error: unknown) => {
         assert.ok(error instanceof ModelCallError);
@@ -150,6 +154,216 @@ test("invalid output preserves an envelope-only generation ID but rejects arbitr
   }
 });
 
+test("compatible providers normalize reviews but reject foreign claims and truncated results", async () => {
+  const originalFetch = globalThis.fetch;
+  const prompt = {
+    instructions: "Review the brief", untrustedData: {},
+    reviewTargets: { claimIds: ["brief-claim"], selections: [] },
+  };
+  try {
+    for (const provider of ["openai", "anthropic"]) {
+      const env = {
+        MODEL_PROVIDER: provider, MODEL_NAME: "compatible-model",
+        OPENAI_API_KEY: "local-openai-only", ANTHROPIC_API_KEY: "local-anthropic-only",
+      } as Env;
+      for (const scenario of ["valid", "foreign-claim", "truncated"]) {
+        const output = {
+          claimVerdicts: { [scenario === "foreign-claim" ? "foreign" : "brief-claim"]: "supported" },
+          constraintQuotes: {},
+        };
+        const id = provider === "anthropic" ? "msg_review" : "chatcmpl-review";
+        globalThis.fetch = async () => Response.json(provider === "anthropic" ? {
+          id, model: "served-model", stop_reason: scenario === "truncated" ? "max_tokens" : "tool_use",
+          content: [{ type: "tool_use", name: "submit_result", input: output }],
+          usage: { input_tokens: 123, output_tokens: 45 },
+        } : {
+          id, model: "served-model",
+          choices: [{ finish_reason: scenario === "truncated" ? "length" : "stop", message: { content: JSON.stringify(output) } }],
+          usage: { prompt_tokens: 123, completion_tokens: 45 },
+        });
+        if (scenario === "valid") {
+          const result = await callModel(env, "brief_review", prompt);
+          assert.deepEqual(result.output, {
+            claimReviews: [{ claimId: "brief-claim", verdict: "supported" }], constraintReviews: [],
+          });
+          assert.deepEqual(result.usage, {
+            promptTokens: 123, completionTokens: 45, reportedCostUsd: null,
+            responseId: id, requestedModel: "compatible-model", returnedModel: "served-model",
+            provider: provider === "anthropic" ? "api.anthropic.com" : "api.openai.com",
+          });
+        } else {
+          await assert.rejects(callModel(env, "brief_review", prompt), (error: unknown) => {
+            assert.ok(error instanceof ModelCallError);
+            assert.equal(error.code, scenario === "foreign-claim" ? "MODEL_OUTPUT_SCHEMA_INVALID"
+              : provider === "anthropic" ? "MODEL_OUTPUT_INCOMPLETE_OR_REFUSED" : "MODEL_OUTPUT_TOKEN_LIMIT");
+            assert.equal(error.uncertain, true);
+            assert.equal(error.generationId, id);
+            return true;
+          });
+        }
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("invalid endpoint configuration and missing selected credentials fail before dispatch", async () => {
+  const originalFetch = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async () => { requests++; throw new Error("must not dispatch"); };
+  try {
+    for (const invalid of [
+      { MODEL_PROVIDER: "unknown" },
+      { MODEL_PROVIDER: "openai" },
+      { MODEL_PROVIDER: "opencode-go", MODEL_NAME: "gpt-6-luna" },
+      { MODEL_PROVIDER: "opencode-go", MODEL_API: "unknown", MODEL_NAME: "gpt-6-luna" },
+      { MODEL_PROVIDER: "opencode-go", MODEL_API: "responses" },
+      { MODEL_BASE_URL: "https://user:secret@example.com/v1" },
+      { MODEL_BASE_URL: "http://example.com/v1" },
+      { MODEL_BASE_URL: "https://example.com/v1?api_key=secret" },
+      { MODEL_BASE_URL: "not a URL" },
+    ]) {
+      assert.throws(() => modelConfig(invalid as Env), { code: "MODEL_CONFIGURATION_INVALID" });
+    }
+    for (const provider of ["openai", "anthropic"]) {
+      await assert.rejects(callModel({
+        MODEL_PROVIDER: provider, MODEL_NAME: "model", OPENROUTER_API_KEY: "wrong-provider-key",
+      } as Env, "assessment_draft", { instructions: "No dispatch", untrustedData: {} }), {
+        code: "MODEL_CREDENTIAL_UNAVAILABLE", uncertain: false,
+      });
+    }
+    const go = { MODEL_PROVIDER: "opencode-go", MODEL_API: "responses", MODEL_NAME: "gpt-6-luna" };
+    await assert.rejects(callModel({
+      ...go, OPENAI_API_KEY: "wrong-provider-key",
+    } as Env, "assessment_draft", { instructions: "No dispatch", untrustedData: {} }, "job-one"), {
+      code: "MODEL_CREDENTIAL_UNAVAILABLE", uncertain: false,
+    });
+    for (const session of [undefined, "", "private\r\nheader", "x".repeat(129)]) {
+      await assert.rejects(callModel({
+        ...go, OPENCODE_API_KEY: "synthetic-only",
+      } as Env, "assessment_draft", { instructions: "No dispatch", untrustedData: {} }, session), {
+        code: "MODEL_SESSION_INVALID", uncertain: false,
+      });
+    }
+    assert.equal(requests, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Go protocols preserve review validation, usage, and per-job identity over HTTP", async () => {
+  let reply: unknown;
+  const requests: { path: string; headers: IncomingHttpHeaders }[] = [];
+  const server = createServer(async (request, response) => {
+    request.resume();
+    requests.push({ path: request.url!, headers: request.headers });
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(reply));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address() as AddressInfo;
+  const base = `http://127.0.0.1:${address.port}/gateway/v1/`;
+  const prompt = {
+    instructions: "Review fictional evidence", untrustedData: { request: "Untrusted request" },
+    reviewTargets: { claimIds: ["brief-claim"], selections: [] },
+  };
+  try {
+    for (const api of ["chat-completions", "messages", "responses"]) {
+      const model = api === "responses" ? "gpt-6-luna" : api === "messages" ? "minimax-m3" : "kimi-k3";
+      const env = {
+        MODEL_PROVIDER: "opencode-go", MODEL_API: api, MODEL_NAME: model, MODEL_BASE_URL: base,
+        OPENCODE_API_KEY: "synthetic-go-only", OPENAI_API_KEY: "wrong-provider-key", ANTHROPIC_API_KEY: "wrong-provider-key",
+      } as Env;
+      const defaultConfig = modelConfig({ ...env, MODEL_BASE_URL: undefined });
+      assert.equal(defaultConfig.url, `https://opencode.ai/inference/go/${api === "messages" ? "anthropic" : "openai"}/v1/${api === "chat-completions" ? "chat/completions" : api}`);
+      for (const scenario of ["valid", "foreign-claim", "truncated"]) {
+        const output = { claimVerdicts: { [scenario === "foreign-claim" ? "foreign" : "brief-claim"]: "supported" }, constraintQuotes: {} };
+        const id = api === "responses" ? "resp_review" : api === "messages" ? "msg_review" : "chatcmpl-review";
+        reply = api === "messages" ? {
+          id, model, stop_reason: scenario === "truncated" ? "max_tokens" : "tool_use",
+          content: [{ type: "tool_use", name: "submit_result", input: output }],
+          usage: { input_tokens: 123, output_tokens: 45 },
+        } : api === "responses" ? {
+          id, model, status: scenario === "truncated" ? "incomplete" : "completed",
+          output: [
+            { type: "reasoning", summary: [] },
+            { type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: JSON.stringify(output) }] },
+          ],
+          usage: { input_tokens: 123, output_tokens: 45 },
+        } : {
+          id, model, choices: [{ finish_reason: scenario === "truncated" ? "length" : "stop", message: { content: JSON.stringify(output) } }],
+          usage: { prompt_tokens: 123, completion_tokens: 45 },
+        };
+        const session = scenario === "foreign-claim" ? "job-two" : "job-one";
+        if (scenario === "valid") {
+          const result = await callModel(env, "brief_review", prompt, session);
+          assert.deepEqual(result.output, { claimReviews: [{ claimId: "brief-claim", verdict: "supported" }], constraintReviews: [] });
+          assert.deepEqual(result.usage, {
+            promptTokens: 123, completionTokens: 45, reportedCostUsd: null, responseId: id,
+            requestedModel: model, returnedModel: model, provider: `127.0.0.1:${address.port}`,
+          });
+        } else {
+          await assert.rejects(callModel(env, "brief_review", prompt, session), {
+            code: scenario === "foreign-claim" ? "MODEL_OUTPUT_SCHEMA_INVALID"
+              : api === "chat-completions" ? "MODEL_OUTPUT_TOKEN_LIMIT" : "MODEL_OUTPUT_INCOMPLETE_OR_REFUSED",
+            generationId: id, uncertain: true,
+          });
+        }
+        const request = requests.at(-1)!;
+        assert.equal(requests.length, ["chat-completions", "messages", "responses"].indexOf(api) * 3 + ["valid", "foreign-claim", "truncated"].indexOf(scenario) + 1,
+          "No automatic retry is allowed after a billed response");
+        assert.equal(request.path, `/gateway/v1/${api === "chat-completions" ? "chat/completions" : api}`);
+        assert.equal(request.headers["x-opencode-session"], session);
+        assert.match(request.headers["user-agent"]!, /^memory-bank\//);
+        assert.equal(request.headers[api === "messages" ? "x-api-key" : "authorization"],
+          api === "messages" ? "synthetic-go-only" : "Bearer synthetic-go-only");
+        assert.ok(!JSON.stringify(request).includes("wrong-provider-key"));
+      }
+    }
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("Responses refuses partial, refused, ambiguous, or non-JSON outputs and preserves billing diagnostics", async () => {
+  const originalFetch = globalThis.fetch;
+  const message = {
+    type: "message", role: "assistant", status: "completed",
+    content: [{ type: "output_text", text: '{"claimVerdicts":{},"constraintQuotes":{}}' }],
+  };
+  const scenarios = [
+    { status: "failed" },
+    { incomplete_details: { reason: "max_output_tokens" } },
+    { error: { code: "server_error" } },
+    { output: [{ ...message, status: "incomplete" }] },
+    { output: [{ ...message, content: [...message.content, { type: "refusal" }] }] },
+    { output: [] },
+    { output: [message, message] },
+    { output: [message, { type: "function_call" }] },
+    { output: [{ ...message, content: [{ type: "output_text", text: "invalid JSON" }] }], code: "MODEL_OUTPUT_INVALID_JSON" },
+    { output: "malformed envelope", code: "MODEL_RESPONSE_INVALID" },
+  ];
+  try {
+    for (const { code = "MODEL_OUTPUT_INCOMPLETE_OR_REFUSED", ...override } of scenarios) {
+      let requests = 0;
+      globalThis.fetch = async () => {
+        requests++;
+        return Response.json({ id: "resp_diagnostic", status: "completed", output: [message], ...override });
+      };
+      await assert.rejects(callModel({
+        MODEL_PROVIDER: "opencode-go", MODEL_API: "responses", MODEL_NAME: "gpt-6-luna", OPENCODE_API_KEY: "synthetic-only",
+      } as Env, "brief_review", {
+        instructions: "Review fictional evidence", untrustedData: {}, reviewTargets: { claimIds: [], selections: [] },
+      }, "job-one"), { code, generationId: "resp_diagnostic", uncertain: true, status: 200 });
+      assert.equal(requests, 1);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 test("brief provider grammar omits sentence patterns while runtime parsing still requires the visible quotation", async () => {
   const { briefDraftSchemaFor } = await import("./schemas.ts");
   const request = "Check the target window first.";
@@ -179,7 +393,7 @@ test("brief provider grammar omits sentence patterns while runtime parsing still
       capturedSchema = JSON.stringify(JSON.parse(init!.body as string).response_format.json_schema.schema);
       return Response.json({ id: "gen-brief-visible-quote", choices: [{ finish_reason: "stop", message: { content: wire(`Adapt only after this check: ${request}`) } }] });
     };
-    const accepted = await callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt);
+    const accepted = await callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt);
     assert.equal((accepted.output as { adapt: unknown[] }).adapt.length, 1);
     const patterns: string[] = [];
     const collect = (node: unknown): void => {
@@ -194,7 +408,7 @@ test("brief provider grammar omits sentence patterns while runtime parsing still
     globalThis.fetch = async () => Response.json({
       id: "gen-brief-hidden-quote", choices: [{ finish_reason: "stop", message: { content: wire("Adapt after checking compatibility.") } }],
     });
-    await assert.rejects(callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt), (error: unknown) => {
+    await assert.rejects(callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt), (error: unknown) => {
       assert.ok(error instanceof ModelCallError);
       assert.equal(error.code, "MODEL_OUTPUT_SCHEMA_INVALID", "Hidden quotation metadata is still rejected before any brief is accepted");
       return true;
@@ -228,7 +442,7 @@ test("unusable output retains reported usage and distinguishes safe failure cond
           ...("unpriced" in scenario ? {} : { usage: { prompt_tokens: 100, completion_tokens: 20, cost: 0.001 } }),
         });
       };
-      await assert.rejects(callOpenRouter({ OPENROUTER_API_KEY: "synthetic-only" } as Env, "assessment_review", {
+      await assert.rejects(callModel({ OPENROUTER_API_KEY: "synthetic-only" } as Env, "assessment_review", {
         instructions: "Synthetic output failure", untrustedData: {},
         reviewTargets: { claimIds: ["claim-one"], artifacts: [] },
       }), (error: unknown) => {

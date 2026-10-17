@@ -33,7 +33,7 @@ const readyCapabilityHash = Buffer.alloc(32, 1);
 const readySelections: Selection[] = [{ caseId: "case-1", artifactId: "procedure", versionId: "procedure-v1", passageIds: ["passage-b", "passage-a"] }];
 let providerRequests = 0;
 const originalFetch = globalThis.fetch;
-globalThis.fetch = async () => {
+globalThis.fetch = async (_input, init) => {
   providerRequests++;
   if (providerRequests === 2) return Response.json({
     id: "gen-synthetic-truncated", model: "openai/gpt-6-luna", provider: "OpenAI",
@@ -41,6 +41,9 @@ globalThis.fetch = async () => {
     usage: { prompt_tokens: 100, completion_tokens: 20, cost: 0.001 },
   });
   if (providerRequests !== 1) throw new Error("PROVIDER_REPLAY_FORBIDDEN_IN_SMOKE");
+  const headers = new Headers(init?.headers);
+  assert.equal(headers.get("x-opencode-session"), jobId);
+  assert.match(headers.get("user-agent")!, /^memory-bank\//);
   return new Response(new ReadableStream({
     start(controller) { controller.error(new TypeError("PRIVATE_SYNTHETIC_TRANSPORT_DETAIL")); },
   }), { headers: { "x-generation-id": "gen-synthetic-interrupted" } });
@@ -113,7 +116,10 @@ try {
          'ready', '{}'::jsonb, 'ready', $3::jsonb, now() + interval '1 day')`,
       [readyJobId, readyCapabilityHash, JSON.stringify(readySelections)],
     );
-    const env = { APP_ENV: "development", LOCAL_DATABASE_URL: connectionString, OPENROUTER_API_KEY: "synthetic-only" } as Env;
+    const env = {
+      APP_ENV: "development", LOCAL_DATABASE_URL: connectionString,
+      MODEL_PROVIDER: "opencode-go", MODEL_API: "responses", MODEL_NAME: "synthetic-model", OPENCODE_API_KEY: "synthetic-only",
+    } as Env;
     await assert.rejects(runPaidStage(env, {
       jobId, attemptId: reservationId, phase: "assessment", workflowId: `${jobId}-assessment-1`,
     }, 1, "assessment_draft", { instructions: "Synthetic interrupted-body smoke", untrustedData: {} }),
@@ -124,12 +130,13 @@ try {
       return true;
     });
     const diagnostic = (await pool.query(
-      `SELECT state, error_code, generation_id, http_status, failure_phase, failure_cause
+      `SELECT state, error_code, generation_id, http_status, failure_phase, failure_cause, requested_model, provider
        FROM model_attempts WHERE id = $1`, [attemptId!],
     )).rows[0];
     assert.deepEqual(diagnostic, {
       state: "uncertain", error_code: "MODEL_DISPATCH_UNCERTAIN", generation_id: "gen-synthetic-interrupted",
       http_status: 200, failure_phase: "response_body", failure_cause: "transport_error",
+      requested_model: "synthetic-model", provider: "opencode.ai",
     });
     const status = await operatorStatus(env) as { recentModelAttempts: { id: string }[] };
     assert.deepEqual(
@@ -137,7 +144,9 @@ try {
         .filter(([key]) => key in diagnostic)), diagnostic,
     );
     assert.ok(!JSON.stringify(status).includes("PRIVATE_SYNTHETIC_TRANSPORT_DETAIL"));
-    await assert.rejects(runPaidStage(env, {
+    await assert.rejects(runPaidStage({
+      APP_ENV: "development", LOCAL_DATABASE_URL: connectionString, OPENROUTER_API_KEY: "synthetic-only",
+    } as Env, {
       jobId: outputJobId, attemptId: outputReservationId, phase: "assessment", workflowId: `${outputJobId}-assessment-1`,
     }, 1, "assessment_draft", { instructions: "Synthetic incomplete output smoke", untrustedData: {} }),
     (error: unknown) => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { Dialog } from "@base-ui/react/dialog";
 import { Select } from "@base-ui/react/select";
@@ -39,6 +39,7 @@ import type {
 import { dispositionChanges } from "../src/ui/lineage";
 import { readLocalJobs, writeLocalJobs, reopenedJobMode, type LocalJob } from "../src/ui/local-jobs";
 import { checkedArtifactRefs } from "../src/ui/checked-sources";
+import { isPassage } from "../src/ui/passage";
 import "./styles.css";
 
 const phaseStates: PhaseState[] = ["not_started", "queued", "running", "ready", "failed", "reconciliation_required"];
@@ -290,26 +291,43 @@ function formatDuration(milliseconds: number): string {
   return milliseconds < 1000 ? `${Math.round(milliseconds)} ms` : `${(milliseconds / 1000).toFixed(1)} s`;
 }
 
+const avatarTones = ["blue", "sky", "amber", "coral", "navy"] as const;
+type AvatarTone = (typeof avatarTones)[number];
+function avatarTone(seed: string): AvatarTone {
+  let hash = 7;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 37 + seed.charCodeAt(i)) >>> 0;
+  return avatarTones[hash % avatarTones.length];
+}
+
+function AvatarCircle({ name, tone }: { name: string; tone?: AvatarTone }) {
+  const initial = (name.trim()[0] ?? "M").toUpperCase();
+  return <span className={`avatar-circle avatar-${tone ?? avatarTone(name)}`} aria-hidden="true">{initial}</span>;
+}
+
 function JobTimings({ job }: { job: JobView }) {
   return (
     <section className="job-timings" aria-label="Job time targets and observed timings">
       <div className="timing-phase">
-        <h3>Assessment</h3>
-        <p className="timing-target">Target: 90 s processing; queue wait is reported separately</p>
+        <div className="timing-header">
+          <h3>Assessment</h3>
+          <span className="timing-target">Target ≤ 90 s</span>
+        </div>
         <dl>
-          {job.assessmentQueueWaitMs !== null && <div><dt>Observed queue wait</dt><dd>{formatDuration(job.assessmentQueueWaitMs)}</dd></div>}
-          {job.assessmentProcessingMs !== null && <div><dt>Observed processing time</dt><dd>{formatDuration(job.assessmentProcessingMs)}</dd></div>}
+          {job.assessmentQueueWaitMs !== null && <div><dt>Queue</dt><dd>{formatDuration(job.assessmentQueueWaitMs)}</dd></div>}
+          {job.assessmentProcessingMs !== null && <div><dt>Processing</dt><dd>{formatDuration(job.assessmentProcessingMs)}</dd></div>}
         </dl>
-        {job.assessmentState !== "not_started" && job.assessmentQueueWaitMs === null && job.assessmentProcessingMs === null && <p className="timing-target">Observed timing unavailable: timestamps are missing or inconsistent.</p>}
+        {job.assessmentState !== "not_started" && job.assessmentQueueWaitMs === null && job.assessmentProcessingMs === null && <p className="timing-target">Timing unavailable</p>}
       </div>
       <div className="timing-phase">
-        <h3>Brief</h3>
-        <p className="timing-target">Target: 30 s processing; queue wait is reported separately</p>
+        <div className="timing-header">
+          <h3>Brief</h3>
+          <span className="timing-target">Target ≤ 30 s</span>
+        </div>
         <dl>
-          {job.briefQueueWaitMs !== null && <div><dt>Observed queue wait</dt><dd>{formatDuration(job.briefQueueWaitMs)}</dd></div>}
-          {job.briefProcessingMs !== null && <div><dt>Observed processing time</dt><dd>{formatDuration(job.briefProcessingMs)}</dd></div>}
+          {job.briefQueueWaitMs !== null && <div><dt>Queue</dt><dd>{formatDuration(job.briefQueueWaitMs)}</dd></div>}
+          {job.briefProcessingMs !== null && <div><dt>Processing</dt><dd>{formatDuration(job.briefProcessingMs)}</dd></div>}
         </dl>
-        {job.briefState !== "not_started" && job.briefQueueWaitMs === null && job.briefProcessingMs === null && <p className="timing-target">Observed timing unavailable: timestamps are missing or inconsistent.</p>}
+        {job.briefState !== "not_started" && job.briefQueueWaitMs === null && job.briefProcessingMs === null && <p className="timing-target">Timing unavailable</p>}
       </div>
     </section>
   );
@@ -321,25 +339,6 @@ function isCreateJobResponse(value: unknown): value is CreateJobResponse {
     && Number.isFinite(Date.parse(value.expiresAt)) && Date.parse(value.expiresAt) > Date.now();
 }
 
-function isLocation(value: unknown): value is PassageView["location"] {
-  return isRecord(value) && Object.values(value).every((item) =>
-    item === null || typeof item === "string" || typeof item === "number" || typeof item === "boolean"
-      || (Array.isArray(item) && item.every((entry) => typeof entry === "string")));
-}
-
-function isPassage(value: unknown, expected: SourceRef): value is PassageView {
-  return isRecord(value)
-    && value.caseId === expected.caseId
-    && value.artifactId === expected.artifactId
-    && value.versionId === expected.versionId
-    && value.passageId === expected.passageId
-    && isText(value.title)
-    && value.fictional === true
-    && (value.statedDate === null || isText(value.statedDate))
-    && isText(value.excerpt)
-    && ["native", "ocr_transcription", "visual_observation", "visual_interpretation"].includes(value.sourceKind as string)
-    && isLocation(value.location);
-}
 
 const labels: Record<string, string> = {
   not_started: "Not started",
@@ -407,22 +406,36 @@ function StringList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function SourceLinks({ refs, inspect, compact = false }: { refs: SourceRef[]; inspect: InspectPassage; compact?: boolean }) {
-  if (refs.length === 0) return <p className="muted">No checked source references are available.</p>;
+function SourceLinks({ refs, inspect, compact = false, previews = false }: { refs: SourceRef[]; inspect: InspectPassage; compact?: boolean; previews?: boolean }) {
+  if (refs.length === 0) return <p className="muted">No source references are available.</p>;
   const uniqueRefs = Array.from(new Map(refs.map((ref) => [`${ref.versionId}\u0000${ref.passageId}`, ref])).values());
   if (compact) return <div className="source-links" aria-label="Checked comparison evidence">{uniqueRefs.map((ref, index) =>
     <button key={`${ref.versionId}-${ref.passageId}`} className="text-button" type="button" onClick={() => inspect(ref)}>Inspect evidence{uniqueRefs.length > 1 ? ` ${index + 1}` : ""}</button>)}</div>;
-  return (
-    <div className="source-links" aria-label="Checked source records">
-      {uniqueRefs.map((ref) => (
-        <div className="source-link" key={`${ref.versionId}-${ref.passageId}`}>
-          <span className="record-id">Case {ref.caseId} · Artifact {ref.artifactId} · Passage {ref.passageId} · Version {ref.versionId}</span>
-          <button className="text-button" type="button" onClick={() => inspect(ref)}>Inspect checked passage</button>
-          <a href={`/api/evidence/originals/${encodeURIComponent(ref.versionId)}`}>Download exact fictional original</a>
-        </div>
-      ))}
+  if (previews) return <div className="passage-cards" aria-label="Source passages">{uniqueRefs.map((ref) =>
+    <PassageCard key={`${ref.caseId}-${ref.artifactId}-${ref.versionId}-${ref.passageId}`} sourceRef={ref} inspect={inspect} />)}</div>;
+  return <div className="source-links" aria-label="Source records">{uniqueRefs.map((ref) =>
+    <div className="source-link" key={`${ref.versionId}-${ref.passageId}`}>
+      <span className="token-pill">[{ref.caseId} / {ref.artifactId} · {ref.passageId}]</span>
+      <button className="text-button" type="button" onClick={() => inspect(ref)}>Inspect passage</button>
+      <a href={`/api/evidence/originals/${encodeURIComponent(ref.versionId)}`} title={`Download ${ref.versionId}`}>Original ({ref.versionId})</a>
+    </div>)}</div>;
+}
+
+function PassageCard({ sourceRef, inspect }: { sourceRef: SourceRef; inspect: InspectPassage }) {
+  const [expanded, setExpanded] = useState(false);
+  return <Collapsible.Root className="passage-card" open={expanded} onOpenChange={setExpanded}>
+    <div className="passage-card-heading">
+      <div className="passage-card-meta">
+        <span className="token-pill">[{sourceRef.artifactId} · {sourceRef.passageId}]</span>
+        <span className="record-id">{sourceRef.versionId}</span>
+      </div>
+      <div className="passage-card-actions">
+        <Collapsible.Trigger render={<Button className="text-button" />}>{expanded ? "Hide preview" : "Preview"}</Collapsible.Trigger>
+        <button className="text-button" type="button" onClick={() => inspect(sourceRef)}>Inspect ›</button>
+      </div>
     </div>
-  );
+    <Collapsible.Panel>{expanded && <EvidencePassage sourceRef={sourceRef} preview />}</Collapsible.Panel>
+  </Collapsible.Root>;
 }
 
 function ClaimCard({ claim, inspect }: { claim: Claim; inspect: InspectPassage }) {
@@ -547,7 +560,7 @@ function CuratedCard({ record, inspect }: { record: KnowledgeCard; inspect: Insp
     </>}
     <h4>Applicability</h4><p>{record.applicability}</p>
     <p className="field-hint">Historical evidence is not approval for a new request. Applying this record requires a checked recommendation against relevant passages and the client's constraints.</p>
-    <SourceLinks refs={record.evidence} inspect={inspect} />
+    <SourceLinks refs={record.evidence} inspect={inspect} previews />
     <a href={`?knowledge=${encodeURIComponent(record.recordId)}`}>Permanent record link</a>
   </article>;
 }
@@ -585,13 +598,13 @@ function CuratedKnowledge({ caseId, recordId, inspect }: { caseId?: string; reco
 
 function KnowledgePage({ recordId }: { recordId?: string }) {
   const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
-  return <section className="workflow" aria-labelledby="knowledge-title">
-    <div className="intro"><p className="eyebrow">Human-reviewed context</p><h1 id="knowledge-title">Reviewed knowledge</h1>
-      <p>Decisions and lessons from fictional past work, independent of expiring assessment jobs.</p></div>
-    {recordId && <a href="/?knowledge" className="back-link">All reviewed records</a>}
+  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow" aria-labelledby="knowledge-title">
+    <div className="intro"><p className="eyebrow">Curated Context</p><h1 id="knowledge-title">Reviewed knowledge</h1>
+      <span className="title-accent-bar" aria-hidden="true" />
+      <p>Human-reviewed decisions and lessons from fictional past work.</p></div>
+    {recordId && <a href="/?knowledge" className="back-link">← All reviewed records</a>}
     <div className="screen"><CuratedKnowledge recordId={recordId} inspect={setPassageRef} /></div>
-    <EvidenceDialog sourceRef={passageRef} onClose={() => setPassageRef(null)} />
-  </section>;
+  </section></EvidenceWorkspace>;
 }
 
 function isSourceCatalogEntry(value: unknown): value is SourceCatalogEntry {
@@ -652,14 +665,15 @@ function SourcesPage() {
   const filtered = (sources ?? []).filter((source) => (!caseId || source.caseId === caseId)
     && (!mimeType || source.mimeType === mimeType)
     && (!needle || `${source.title} ${source.caseTitle}`.toLocaleLowerCase().includes(needle)));
-  return <section className="workflow" aria-labelledby="sources-title">
-    <div className="intro"><p className="eyebrow">The original work, not a summary</p><h1 id="sources-title">Sources</h1>
-      <p>Browse the fictional corpus. Inspect exact retained passages and download their originals. This is not an AI relevance assessment.</p></div>
+  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow" aria-labelledby="sources-title">
+    <div className="intro"><p className="eyebrow">Original Corpus</p><h1 id="sources-title">Sources</h1>
+      <span className="title-accent-bar" aria-hidden="true" />
+      <p>Browse fictional source versions, inspect retained passages, and download verified originals.</p></div>
     {error ? <p className="notice notice-error" role="alert">The source inventory could not be verified. Reload to try again.</p>
       : sources === null ? <p role="status">Loading source inventory…</p> : <>
         <div className="screen source-controls" role="search" aria-label="Search the source corpus">
           <Field.Root name="source-search"><Field.Label>Search sources</Field.Label>
-            <Input value={query} onValueChange={setQuery} placeholder="Source title or case name" className="source-search" type="search" />
+            <Input value={query} onValueChange={setQuery} placeholder="Source title or case name…" className="source-search" type="search" />
           </Field.Root>
           <SourceFilter title="Case" value={caseId} onChange={setCaseId} options={[{ value: "", label: "All cases" }, ...caseOptions]} />
           <SourceFilter title="File type" value={mimeType} onChange={setMimeType} options={[{ value: "", label: "All file types" }, ...typeOptions]} />
@@ -668,22 +682,34 @@ function SourcesPage() {
         <p className="source-count muted" role="status">{filtered.length} of {sources.length} retained source versions</p>
         {filtered.length === 0 ? <p className="screen empty-state">No sources match these filters. Clear the filters to browse the corpus.</p>
           : <div className="source-catalog">{filtered.map((source) => <article className="screen source-card" key={`${source.caseId}-${source.artifactId}-${source.versionId}`}>
-            <div className="card-heading"><div><p className="eyebrow">{source.caseTitle}</p><h2>{source.title}</h2></div><Badge tone={source.availability}>{label(source.availability)}</Badge></div>
-            <p className="record-id">Case {source.caseId} · Artifact {source.artifactId} · Retained version {source.versionId}</p>
-            <div className="badge-row"><Badge tone="fictional">Fictional source</Badge><Badge>{source.mimeType}</Badge>
-              {[...new Set(source.passages.map((ref) => ref.sourceKind))].map((kind) => <Badge key={kind}>{label(kind)}</Badge>)}</div>
-            <p className="muted source-date">{source.statedDate ? `Stated date: ${source.statedDate}` : "No stated date"}</p>
-            {source.availability === "available" ? <>
-              <a href={`/api/evidence/originals/${encodeURIComponent(source.versionId)}`}>Download exact fictional original</a>
+            <div className="card-heading">
+              <div className="avatar-title-row">
+                <AvatarCircle name={source.caseTitle} />
+                <div>
+                  <p className="eyebrow">{source.caseTitle}</p>
+                  <h2>{source.title}</h2>
+                </div>
+              </div>
+              <Badge tone={source.availability}>{label(source.availability)}</Badge>
+            </div>
+            <div className="badge-row">
+              <span className="token-pill">[{source.caseId} / {source.artifactId}]</span>
+              <span className="token-pill">[{source.versionId}]</span>
+              <Badge tone="fictional">Fictional source</Badge>
+              <Badge>{source.mimeType}</Badge>
+              {[...new Set(source.passages.map((ref) => ref.sourceKind))].map((kind) => <Badge key={kind}>{label(kind)}</Badge>)}
+              <span className="muted small">{source.statedDate ? `Stated: ${source.statedDate}` : "No stated date"}</span>
+            </div>
+            {source.availability === "available" ? <div className="source-card-footer">
+              <a className="download-link" href={`/api/evidence/originals/${encodeURIComponent(source.versionId)}`}>Download exact fictional original</a>
               {source.passages.length > 0 ? <Collapsible.Root className="source-passages">
                 <Collapsible.Trigger render={<Button className="secondary-button" />}>Inspect passages ({source.passages.length})</Collapsible.Trigger>
-                <Collapsible.Panel><SourceLinks refs={source.passages} inspect={setPassageRef} /></Collapsible.Panel>
+                <Collapsible.Panel><SourceLinks refs={source.passages} inspect={setPassageRef} previews /></Collapsible.Panel>
               </Collapsible.Root> : <p className="muted">No inspectable passages are retained.</p>}
-            </> : <StringList title="Source unavailable for use" items={source.exclusionReasons} />}
+            </div> : <StringList title="Source unavailable for use" items={source.exclusionReasons} />}
           </article>)}</div>}
       </>}
-    <EvidenceDialog sourceRef={passageRef} onClose={() => setPassageRef(null)} />
-  </section>;
+  </section></EvidenceWorkspace>;
 }
 
 function CaseCard({ item, claims, inspect }: { item: CaseAssessment; claims: ClaimMap; inspect: InspectPassage }) {
@@ -691,7 +717,10 @@ function CaseCard({ item, claims, inspect }: { item: CaseAssessment; claims: Cla
   return (
     <article className="case-card">
       <div className="card-heading">
-        <span className="record-id">Case {item.caseId}</span>
+        <div className="avatar-title-row">
+          <AvatarCircle name={item.caseId} />
+          <span className="record-id">Case {item.caseId}</span>
+        </div>
         <div className="badge-row">
           <Badge tone={item.availability}>{label(item.availability === "partial" ? "partial_evidence" : item.availability)}</Badge>
           <Badge tone={outcomeHasSupport ? item.outcome : "unknown"}>{outcomeHasSupport ? label(item.outcome) : "Outcome not established"}</Badge>
@@ -733,34 +762,43 @@ function WorkCard({
   ).values());
   const canSelect = item.disposition !== null && item.availability !== "unavailable" && (availability === "available" || availability === "partial") && hasSupportedWorkClaim && versions.length > 0;
   const blocked = item.availability === "unavailable" || availability === "failed" || availability === "unavailable";
+  const secondaryCount = otherClaimIds.length + item.blockerClaimIds.length + item.verificationClaimIds.length;
   return (
     <article className={`work-card${draft.selected ? " work-card-selected" : ""}`}>
       <div className="card-heading">
-        <div>
-          <p className="eyebrow">Fictional work artifact</p>
-          <h3>Artifact {item.artifactId}</h3>
+        <div className="avatar-title-row">
+          <AvatarCircle name={caseId} />
+          <div>
+            <p className="eyebrow">Case {caseId}</p>
+            <h3>Artifact {item.artifactId}</h3>
+          </div>
         </div>
-        {item.availability === "unavailable"
-          ? <Badge tone="unavailable">Not assessed</Badge>
-          : hasSupportedWorkClaim && item.disposition
-            ? <Badge tone={item.disposition}>{label(item.disposition)}</Badge>
-            : reviewRole === "context_only" || reviewRole === "not_relevant"
-              ? <Badge tone="neutral">{reviewRole === "context_only" ? "Context only" : "Not applicable"}</Badge>
-            : <Badge tone="unknown">Disposition withheld</Badge>}
-      </div>
-      <div className="badge-row status-row">
-        <Badge tone={item.availability}>{`Artifact: ${label(item.availability)}`}</Badge>
+        <div className="badge-row">
+          <Badge tone={item.availability}>{`Artifact: ${label(item.availability)}`}</Badge>
+          {item.availability === "unavailable"
+            ? <Badge tone="unavailable">Not assessed</Badge>
+            : hasSupportedWorkClaim && item.disposition
+              ? <Badge tone={item.disposition}>{label(item.disposition)}</Badge>
+              : reviewRole === "context_only" || reviewRole === "not_relevant"
+                ? <Badge tone="neutral">{reviewRole === "context_only" ? "Context only" : "Not applicable"}</Badge>
+              : <Badge tone="unknown">Disposition withheld</Badge>}
+        </div>
       </div>
       <ClaimGroup title="Reviewed disposition recommendation" ids={item.dispositionClaimId ? [item.dispositionClaimId] : []} claims={claims} inspect={inspect} />
-      <ClaimGroup title="Checked work claims" ids={otherClaimIds} claims={claims} inspect={inspect} />
-      <ClaimGroup title="Blockers" ids={item.blockerClaimIds} claims={claims} inspect={inspect} />
-      <ClaimGroup title="Verification claims" ids={item.verificationClaimIds} claims={claims} inspect={inspect} />
+      {secondaryCount > 0 && (
+        <details className="claims-disclosure">
+          <summary>Supporting work claims, blockers &amp; checks ({secondaryCount})</summary>
+          <ClaimGroup title="Checked work claims" ids={otherClaimIds} claims={claims} inspect={inspect} />
+          <ClaimGroup title="Blockers" ids={item.blockerClaimIds} claims={claims} inspect={inspect} />
+          <ClaimGroup title="Verification claims" ids={item.verificationClaimIds} claims={claims} inspect={inspect} />
+        </details>
+      )}
       {item.exclusionReasons.length > 0 && (
         <ul className="inline-blocker" aria-label="Excluded source versions">
           {item.exclusionReasons.map((reason, index) => <li key={`${index}-${reason}`}>{reason}</li>)}
         </ul>
       )}
-      <SourceLinks refs={refs} inspect={inspect} />
+      <SourceLinks refs={refs} inspect={inspect} previews />
       {blocked && <p className="inline-blocker">{item.availability === "unavailable" ? "No usable source version is available; this artifact was not assessed and cannot be selected." : `This case is ${label(availability).toLowerCase()}; this work cannot be selected.`}</p>}
       {!canSelect && !blocked && <p className="inline-blocker">{hasSupportedWorkClaim ? "No checked passage is available for selection." : "No supported work claim is available; this artifact cannot be selected."}</p>}
       <label className="select-work">
@@ -773,56 +811,59 @@ function WorkCard({
         <span>Include this work in the brief</span>
       </label>
       {draft.selected && canSelect && (
-        <div className="passage-picker">
-          {versions.length > 1 && (
-            <div>
-              <Select.Root value={selectedVersion} onValueChange={(versionId) => {
-                if (versionId !== null) onChange({ ...draft, versionId, passageIds: [] });
-              }}>
-                <Select.Label className="field-label">Retained version</Select.Label>
-                <Select.Trigger className="version-select-trigger">
-                  <Select.Value />
-                  <Select.Icon aria-hidden="true">▾</Select.Icon>
-                </Select.Trigger>
-                <Select.Portal>
-                  <Select.Positioner className="version-select-positioner" sideOffset={4} alignItemWithTrigger={false}>
-                    <Select.Popup className="version-select-popup">
-                      <Select.List className="version-select-list">
-                        {versions.map((versionId) => (
-                          <Select.Item className="version-select-item" key={versionId} value={versionId}>
-                            <Select.ItemIndicator className="version-select-indicator" aria-hidden="true">✓</Select.ItemIndicator>
-                            <Select.ItemText>{versionId}</Select.ItemText>
-                          </Select.Item>
-                        ))}
-                      </Select.List>
-                    </Select.Popup>
-                  </Select.Positioner>
-                </Select.Portal>
-              </Select.Root>
-            </div>
-          )}
-          {versions.length === 1 && <p className="muted small">Retained version: <span className="record-id">{selectedVersion}</span></p>}
-          <fieldset>
-            <legend>Select checked passages to include</legend>
-            {passageRefs.length === 0 ? <p className="muted">No passages are available for this retained version.</p> : passageRefs.map((ref) => (
-              <div className="passage-option" key={ref.passageId}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={draft.passageIds.includes(ref.passageId)}
-                    onChange={(event) => {
-                      const passageIds = event.currentTarget.checked
-                        ? [...new Set([...draft.passageIds, ref.passageId])]
-                        : draft.passageIds.filter((id) => id !== ref.passageId);
-                      onChange({ ...draft, versionId: selectedVersion, passageIds });
-                    }}
-                  />
-                  <span>Passage <span className="record-id">{ref.passageId}</span></span>
-                </label>
-                <button className="text-button" type="button" onClick={() => inspect(ref)}>Inspect</button>
+        <div className="passage-picker-connector">
+          <span className="connector-node" aria-hidden="true" />
+          <div className="passage-picker">
+            {versions.length > 1 && (
+              <div>
+                <Select.Root value={selectedVersion} onValueChange={(versionId) => {
+                  if (versionId !== null) onChange({ ...draft, versionId, passageIds: [] });
+                }}>
+                  <Select.Label className="field-label">Retained version <span className="required-star" aria-hidden="true">*</span></Select.Label>
+                  <Select.Trigger className="version-select-trigger">
+                    <Select.Value />
+                    <Select.Icon aria-hidden="true">▾</Select.Icon>
+                  </Select.Trigger>
+                  <Select.Portal>
+                    <Select.Positioner className="version-select-positioner" sideOffset={4} alignItemWithTrigger={false}>
+                      <Select.Popup className="version-select-popup">
+                        <Select.List className="version-select-list">
+                          {versions.map((versionId) => (
+                            <Select.Item className="version-select-item" key={versionId} value={versionId}>
+                              <Select.ItemIndicator className="version-select-indicator" aria-hidden="true">✓</Select.ItemIndicator>
+                              <Select.ItemText>{versionId}</Select.ItemText>
+                            </Select.Item>
+                          ))}
+                        </Select.List>
+                      </Select.Popup>
+                    </Select.Positioner>
+                  </Select.Portal>
+                </Select.Root>
               </div>
-            ))}
-          </fieldset>
+            )}
+            {versions.length === 1 && <p className="muted small">Retained version: <span className="token-pill">[{selectedVersion}]</span></p>}
+            <fieldset>
+              <legend>Which checked passages apply? <span className="required-star" aria-hidden="true">*</span></legend>
+              {passageRefs.length === 0 ? <p className="muted">No passages are available for this retained version.</p> : passageRefs.map((ref) => (
+                <div className="passage-option" key={ref.passageId}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={draft.passageIds.includes(ref.passageId)}
+                      onChange={(event) => {
+                        const passageIds = event.currentTarget.checked
+                          ? [...new Set([...draft.passageIds, ref.passageId])]
+                          : draft.passageIds.filter((id) => id !== ref.passageId);
+                        onChange({ ...draft, versionId: selectedVersion, passageIds });
+                      }}
+                    />
+                    <span>Passage <span className="token-pill">[{ref.passageId}]</span></span>
+                  </label>
+                  <button className="text-button" type="button" onClick={() => inspect(ref)}>Inspect</button>
+                </div>
+              ))}
+            </fieldset>
+          </div>
         </div>
       )}
     </article>
@@ -833,9 +874,12 @@ function BriefCard({ item, claims, inspect }: { item: BriefItem; claims: ClaimMa
   return (
     <article className="brief-card">
       <div className="card-heading">
-        <div>
-          <p className="eyebrow">Fictional work artifact · Case {item.caseId} · Version {item.versionId}</p>
-          <h3>Artifact {item.artifactId}</h3>
+        <div className="avatar-title-row">
+          <AvatarCircle name={item.caseId} />
+          <div>
+            <p className="eyebrow">Case {item.caseId} · <span className="token-pill">[{item.versionId}]</span></p>
+            <h3>Artifact {item.artifactId}</h3>
+          </div>
         </div>
         <Badge tone={item.disposition}>{label(item.disposition)}</Badge>
       </div>
@@ -885,12 +929,16 @@ function PackExport({ session, expiresAt }: { session: Session; expiresAt: strin
       if (!request.signal.aborted) setBusy(false);
     }
   }
-  return <section className="content-section" aria-labelledby="pack-title">
-    <h3 id="pack-title">Export evidence-linked starter pack</h3>
-    <p>Review reusable material, required adaptations, and blocked verification below. Export preserves the checked brief, selected version inventory, hashes, reviewed context, and cited excerpts without another model call.</p>
-    <p>Fictional data only; not production approval. Excerpts remain readable offline. Originals are linked, not bundled or changed; live links are not guaranteed indefinitely. New exports stop at the application job expiry shown above.</p>
+  return <section className="pack-export-card" aria-labelledby="pack-title">
+    <div className="pack-export-info">
+      <div className="card-icon-title">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+        <h3 id="pack-title">Export evidence-linked starter pack</h3>
+      </div>
+      <p className="field-hint">Deterministic export of the checked brief, selected version hashes, and verbatim excerpts. Fictional data only; originals are linked, not bundled.</p>
+    </div>
     <div className="action-row">
-      <button className="secondary-button" type="button" disabled={busy || expired} onClick={() => void download("markdown")}>Download Markdown pack</button>
+      <button className="primary-button" type="button" disabled={busy || expired} onClick={() => void download("markdown")}>Download Markdown pack</button>
       <button className="secondary-button" type="button" disabled={busy || expired} onClick={() => void download("json")}>Download JSON manifest</button>
     </div>
     {busy && <p role="status">Validating selected sources and preparing export…</p>}
@@ -914,7 +962,7 @@ function readBrowserJobs() {
   catch { return { entries: [] as LocalJob[], error: "Local History/Saved persistence failed. Browser storage may be unavailable or full; use browser settings to clear retained data. The main workflow still works in this tab." }; }
 }
 
-function EvidencePassage({ sourceRef }: { sourceRef: SourceRef }) {
+function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef; preview?: boolean }) {
   const [passage, setPassage] = useState<PassageView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -934,13 +982,13 @@ function EvidencePassage({ sourceRef }: { sourceRef: SourceRef }) {
       .then((body) => {
         if (!active) return;
         if (!isPassage(body, sourceRef)) {
-          setError("This passage could not be verified as fictional checked evidence.");
+          setError("This passage could not be verified as the requested fictional source.");
           return;
         }
         setPassage(body);
       })
       .catch(() => {
-        if (active && !controller.signal.aborted) setError("The checked passage could not be retrieved. Try again later.");
+        if (active && !controller.signal.aborted) setError("The source passage could not be retrieved. Try again later.");
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -949,21 +997,21 @@ function EvidencePassage({ sourceRef }: { sourceRef: SourceRef }) {
       active = false;
       controller.abort();
     };
-  }, [sourceRef]);
+  }, [sourceRef.caseId, sourceRef.artifactId, sourceRef.versionId, sourceRef.passageId]);
 
   return (
     <>
-      {loading && <p role="status" className="muted">Retrieving the checked passage…</p>}
+      {loading && <p role="status" className="muted">Loading source passage…</p>}
       {error && <p role="alert" className="notice notice-error">{error}</p>}
       {passage && (
-        <div className="passage-content">
+        <div className={`passage-content${preview ? " passage-preview" : ""}`}>
           <div className="badge-row"><Badge tone="fictional">Fictional record</Badge><Badge>{label(passage.sourceKind)}</Badge></div>
           <h3>{passage.title}</h3>
           <p className="muted">{passage.statedDate ? `Stated date: ${passage.statedDate}` : "No stated date"}</p>
           <blockquote>{passage.excerpt}</blockquote>
           {Object.keys(passage.location).length > 0 && (
             <dl className="location-list">
-              {Object.entries(passage.location).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{Array.isArray(value) ? value.join(", ") : value === null ? "Not stated" : String(value)}</dd></div>)}
+              {Object.entries(passage.location).map(([key, value]) => <div key={key}><dt>{key.replace(/([a-z])([A-Z])/g, "$1 $2")}</dt><dd>{Array.isArray(value) ? value.join(", ") : value === null ? "Not stated" : String(value)}</dd></div>)}
             </dl>
           )}
           <div className="source-links"><a href={`/api/evidence/originals/${encodeURIComponent(passage.versionId)}`}>Download exact fictional original</a></div>
@@ -973,39 +1021,80 @@ function EvidencePassage({ sourceRef }: { sourceRef: SourceRef }) {
   );
 }
 
-function EvidenceDialog({ sourceRef, onClose }: { sourceRef: SourceRef | null; onClose: () => void }) {
-  return (
-    <Dialog.Root open={sourceRef !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+function EvidenceWorkspace({ sourceRef, onInspect, children }: {
+  sourceRef: SourceRef | null;
+  onInspect: (ref: SourceRef | null) => void;
+  children: ReactNode;
+}) {
+  const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
+  const pane = useRef<HTMLElement>(null);
+  const open = sourceRef !== null;
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1280px)");
+    const update = () => setDesktop(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
+    if (!open || !desktop) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const panel = pane.current;
+    panel?.focus({ preventScroll: true });
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        event.preventDefault();
+        onInspect(null);
+      }
+    };
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("keydown", escape);
+      if (opener?.isConnected && !opener.closest("[hidden], [inert]")
+        && (panel?.contains(document.activeElement) || document.activeElement === document.body)) {
+        opener.focus({ preventScroll: true });
+      }
+    };
+  }, [sourceRef, desktop, onInspect]);
+  const content = sourceRef && <>
+    <p className="field-hint">Inspecting a source does not select work or establish its applicability to this request.</p>
+    <p className="record-id">Case {sourceRef.caseId} · Artifact {sourceRef.artifactId} · Retained version {sourceRef.versionId} · Passage {sourceRef.passageId}</p>
+    <EvidencePassage key={JSON.stringify(sourceRef)} sourceRef={sourceRef} />
+  </>;
+  return <div className="evidence-workspace" data-inspecting={open && desktop ? "" : undefined}>
+    <div className="evidence-main">{children}</div>
+    {desktop ? open && <aside className="evidence-pane" aria-label="Source inspection" tabIndex={-1} ref={pane}>
+      <div className="dialog-header"><div><p className="eyebrow">Source inspection · Fictional</p><h2>Exact passage</h2></div>
+        <button className="icon-button" type="button" onClick={() => onInspect(null)} aria-label="Close passage">Close</button></div>
+      {content}
+    </aside> : <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onInspect(null); }}>
       <Dialog.Portal>
         <Dialog.Backdrop className="evidence-backdrop" />
         <Dialog.Popup className="evidence-dialog" aria-modal="true">
-          <div className="dialog-header">
-            <div>
-              <Dialog.Description className="eyebrow">Checked evidence · Fictional source</Dialog.Description>
-              <Dialog.Title>Exact passage</Dialog.Title>
-            </div>
-            <Dialog.Close className="icon-button" aria-label="Close passage">Close</Dialog.Close>
-          </div>
-          {sourceRef && <p className="record-id">Requested source: Case {sourceRef.caseId} · Artifact {sourceRef.artifactId} · Retained version {sourceRef.versionId} · Passage {sourceRef.passageId}</p>}
-          {sourceRef && <EvidencePassage key={JSON.stringify(sourceRef)} sourceRef={sourceRef} />}
+          <div className="dialog-header"><div>
+            <Dialog.Description className="eyebrow">Source inspection · Fictional</Dialog.Description>
+            <Dialog.Title>Exact passage</Dialog.Title>
+          </div><Dialog.Close className="icon-button" aria-label="Close passage">Close</Dialog.Close></div>
+          {content}
         </Dialog.Popup>
       </Dialog.Portal>
-    </Dialog.Root>
-  );
+    </Dialog.Root>}
+  </div>;
 }
 
 const stepNames = ["Client request", "Checked examples", "Selected work", "Checked brief"];
 
 // Authored from public fictional corpus requests, never held-out evaluation requests.
-const suggestedRequests = [
-  { title: "Plan a sandbox CSV import", basis: "Cedar Supply", request: "Plan a sandbox import of active supplier records from a UTF-8 CSV. Preserve source keys and reconcile accepted, rejected, and duplicate rows. What past mapping and reconciliation work could help, and what must we verify for a new target? No production writes are authorized." },
-  { title: "Scope temporary support access", basis: "Grove Clinic", request: "Two external support engineers need temporary read-only access to import errors in a test workspace. Require named accounts, MFA, expiry, and an access log; exclude patient charts and configuration changes. Find useful prior access work and identify unverified lifecycle or audit controls." },
-  { title: "Prepare an operator handover", basis: "Ibis Foods", request: "Prepare a test-environment handover of a nightly inventory import to a primary and backup operator. We need a runbook, escalation contact, recovery procedure, and witnessed recovery exercise. Which past work is useful, and which acceptance gaps remain? Production scheduling is out of scope." },
+const suggestedRequests: { title: string; basis: string; focus: string; tone: AvatarTone; request: string }[] = [
+  { title: "Plan a sandbox CSV import", basis: "Cedar Supply", focus: "CSV mapping & reconciliation", tone: "blue", request: "Plan a sandbox import of active supplier records from a UTF-8 CSV. Preserve source keys and reconcile accepted, rejected, and duplicate rows. What past mapping and reconciliation work could help, and what must we verify for a new target? No production writes are authorized." },
+  { title: "Scope temporary support access", basis: "Grove Clinic", focus: "Read-only access & MFA log", tone: "sky", request: "Two external support engineers need temporary read-only access to import errors in a test workspace. Require named accounts, MFA, expiry, and an access log; exclude patient charts and configuration changes. Find useful prior access work and identify unverified lifecycle or audit controls." },
+  { title: "Prepare an operator handover", basis: "Ibis Foods", focus: "Runbook & recovery drill", tone: "amber", request: "Prepare a test-environment handover of a nightly inventory import to a primary and backup operator. We need a runbook, escalation contact, recovery procedure, and witnessed recovery exercise. Which past work is useful, and which acceptance gaps remain? Production scheduling is out of scope." },
 ];
 
 function App({ active }: { active: boolean }) {
   const [step, setStep] = useState(1);
   const [request, setRequest] = useState("");
+  const [modelInfo, setModelInfo] = useState<{ provider: string; model: string; endpoint: string } | null>(null);
+  const [modelInfoError, setModelInfoError] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [job, setJob] = useState<JobView | null>(null);
   const [previousJob, setPreviousJob] = useState<PreviousAssessment | null>(null);
@@ -1024,6 +1113,24 @@ function App({ active }: { active: boolean }) {
   const requestController = useRef<AbortController | null>(null);
   const briefController = useRef<AbortController | null>(null);
   const pollController = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/model-info", { signal: controller.signal });
+        const body: unknown = await response.json();
+        if (!response.ok || !isRecord(body) || !isText(body.model) || !isText(body.endpoint)
+          || !["openrouter", "openai", "anthropic", "opencode-go"].includes(body.provider as string)) throw new Error("Invalid model configuration");
+        const endpoint = new URL(body.endpoint);
+        if (!["https:", "http:"].includes(endpoint.protocol)) throw new Error("Invalid model endpoint");
+        if (!controller.signal.aborted) setModelInfo({ provider: body.provider as string, model: body.model, endpoint: endpoint.origin });
+      } catch {
+        if (!controller.signal.aborted) setModelInfoError(true);
+      }
+    })();
+    return () => controller.abort();
+  }, []);
 
   function changeLocalJobs(change: (entries: LocalJob[]) => LocalJob[]) {
     try {
@@ -1206,7 +1313,7 @@ function App({ active }: { active: boolean }) {
 
   async function createAssessment(requestText: string, clarification = false) {
     const trimmed = requestText.trim();
-    if (!trimmed || submittingRequest) return;
+    if (!trimmed || submittingRequest || !modelInfo) return;
     if (clarification && job?.assessment && job.assessmentState === "ready" && Date.parse(job.expiresAt) > Date.now()) {
       setPreviousJob({ request: job.request, expiresAt: job.expiresAt, assessment: job.assessment });
     } else if (!clarification) {
@@ -1397,34 +1504,60 @@ function App({ active }: { active: boolean }) {
   const rechecking = submittingRequest || pollMode === "assessment" || pollMode === "restore";
   const questions = assessmentAvailable ? assessment : previousJob?.assessment;
   const questionClaims = assessmentAvailable ? assessmentClaims : new Map((questions?.claims ?? []).map((claim) => [claim.claimId, claim]));
+  const selectableWorkChoices = useMemo(() => workChoices.filter(({ availability, item, sourceRefs }) =>
+    item.disposition !== null && item.availability !== "unavailable" && (availability === "available" || availability === "partial")
+    && claimsFor(item.claimIds, assessmentClaims).length > 0 && sourceRefs.length > 0), [workChoices, assessmentClaims]);
+  const nonSelectableWorkChoices = useMemo(() => {
+    const eligibleKeys = new Set(selectableWorkChoices.map((w) => w.key));
+    return workChoices.filter((w) => !eligibleKeys.has(w.key));
+  }, [workChoices, selectableWorkChoices]);
+  const supportedClaimsCount = assessment?.claims.length ?? 0;
+  const withheldClaimsCount = assessment?.withheldClaimCount ?? 0;
+  const totalEvaluatedClaims = supportedClaimsCount + withheldClaimsCount;
+  const supportedPct = totalEvaluatedClaims > 0 ? Math.round((supportedClaimsCount / totalEvaluatedClaims) * 100) : 100;
+  const withheldPct = 100 - supportedPct;
 
   return (
-    <>
+    <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}>
       <section className="workflow" aria-labelledby="workflow-title">
-        {(session || previousJob || step > 1) && <div className="workflow-actions"><Button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</Button></div>}
-        <div className="intro">
-          <p className="eyebrow">Ask Memory Bank · fictional evidence</p>
-          <h1 id="workflow-title">What can past work help you deliver?</h1>
-          <p>Bring a client request. Find checked leads, inspect the sources, and choose the work for an evidence-backed reuse brief.</p>
+        <div className="intro-toolbar">
+          <div className="intro">
+            <p className="eyebrow">Ask Memory Bank · Fictional Evidence</p>
+            <h1 id="workflow-title">What can past work help you deliver?</h1>
+            <span className="title-accent-bar" aria-hidden="true" />
+            <p>Match client constraints against verified past examples and assemble an evidence-grounded reuse brief.</p>
+          </div>
+          {(session || previousJob || step > 1) && <div className="workflow-actions"><Button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</Button></div>}
         </div>
         <details className="local-library">
-          <summary>History and Saved</summary>
-          <h2 id="local-library-title">History and Saved</h2>
-          <p className="field-hint">This browser/device only — no account sync or durable archive. Accepted jobs are recorded locally with a short request label and access capability. Do not retain them on a shared browser. Saving never extends the original seven-day expiry. No results, source bodies, or packs are stored here; downloaded packs remain independent offline files.</p>
-          <div className="action-row" role="group" aria-label="Local job lists">
-            <button className="secondary-button" type="button" aria-pressed={library === "History"} onClick={() => setLibrary("History")}>History</button>
-            <button className="secondary-button" type="button" aria-pressed={library === "Saved"} onClick={() => setLibrary("Saved")}>Saved</button>
-            <button className="text-button" type="button" onClick={() => changeLocalJobs((entries) => library === "History" ? [] : entries.map((entry) => ({ ...entry, saved: false })))}>Clear {library === "History" ? "History and Saved" : "Saved"}</button>
+          <summary>
+            <span>History and Saved</span>
+            <Badge>{`${localData.entries.length}`}</Badge>
+          </summary>
+          <div className="local-library-header">
+            <div>
+              <h2 id="local-library-title">History and Saved</h2>
+              <p className="field-hint">This browser/device only — bookmarks expire 7 days after job creation. Reopen checks live server status without regenerating.</p>
+            </div>
+            <div className="action-row" role="group" aria-label="Local job lists">
+              <button className="secondary-button" type="button" aria-pressed={library === "History"} onClick={() => setLibrary("History")}>History</button>
+              <button className="secondary-button" type="button" aria-pressed={library === "Saved"} onClick={() => setLibrary("Saved")}>Saved</button>
+              <button className="text-button" type="button" onClick={() => changeLocalJobs((entries) => library === "History" ? [] : entries.map((entry) => ({ ...entry, saved: false })))}>Clear {library === "History" ? "History and Saved" : "Saved"}</button>
+            </div>
           </div>
           {localData.error && <p role="alert" className="notice notice-error">{localData.error}</p>}
-          <p className="field-hint">Reopen validates the live job with the server; it does not regenerate an assessment. Remove/clear only changes this browser, never remote jobs.</p>
           <ul className="local-job-list" aria-label={library}>
             {localData.entries.filter((entry) => library === "History" || entry.saved).map((entry) => (
-              <li key={entry.jobId}>
-                <p>{entry.label} {entry.saved && <Badge>Saved</Badge>}</p>
-                <p className="field-hint">Expires <time dateTime={entry.expiresAt}>{new Date(entry.expiresAt).toLocaleString()}</time></p>
+              <li key={entry.jobId} className="local-job-row">
+                <div className="avatar-title-row">
+                  <AvatarCircle name={entry.label} />
+                  <div className="local-job-meta">
+                    <p className="local-job-label">{entry.label} {entry.saved && <Badge tone="useful">Saved</Badge>}</p>
+                    <p className="field-hint">Expires <time dateTime={entry.expiresAt}>{new Date(entry.expiresAt).toLocaleString()}</time></p>
+                  </div>
+                </div>
                 <div className="action-row">
-                  <button className="secondary-button" type="button" onClick={() => reopen(entry)} aria-label={`Reopen ${entry.label}`}>Reopen</button>
+                  <button className="secondary-button" type="button" onClick={() => reopen(entry)} aria-label={`Reopen ${entry.label}`}>Reopen ›</button>
                   {entry.saved && <button className="text-button" type="button" onClick={() => changeLocalJobs((entries) => entries.map((item) => item.jobId === entry.jobId ? { ...item, saved: false } : item))} aria-label={`Unsave ${entry.label}`}>Unsave</button>}
                   <button className="text-button" type="button" onClick={() => changeLocalJobs((entries) => entries.filter((item) => item.jobId !== entry.jobId))} aria-label={`Remove ${entry.label}`}>Remove</button>
                 </div>
@@ -1443,54 +1576,104 @@ function App({ active }: { active: boolean }) {
 
         {serviceError && <p role="alert" className="notice notice-error">{serviceError}</p>}
         {step > 1 && (request.trim() || submittedClarification) && <section className="submitted-request" aria-label="Submitted request">
-          <h2>Client request</h2><p>{submittedClarification?.context ?? request.trim()}</p>
-          {submittedClarification && <><h3>Submitted clarification</h3><p>{submittedClarification.answers}</p></>}
-        </section>}
-        {step > 1 && job && <p className="field-hint">Application job access expires: <time dateTime={job.expiresAt}>{new Date(job.expiresAt).toLocaleString()}</time> (seven days after creation). Provider/platform and backup retention is separate; downloaded packs remain on your device.</p>}
-        {step > 1 && job && <JobTimings job={job} />}
-        {session && job && (assessmentAvailable || (job.briefState === "ready" && job.brief)) && (
-          <div className="action-row">
-            <button className="secondary-button" type="button" aria-pressed={localData.entries.some((entry) => entry.jobId === session.jobId && entry.saved)} onClick={toggleSaved}>
-              {localData.entries.some((entry) => entry.jobId === session.jobId && entry.saved) ? "Unsave checked job" : "Save checked job"}
-            </button>
-            <span className="field-hint">Bookmark this live assessment / brief until its original expiry.</span>
+          <div className="submitted-request-top">
+            <div>
+              <h2>Client request</h2>
+              <p>{submittedClarification?.context ?? request.trim()}</p>
+            </div>
+            {session && job && (assessmentAvailable || (job.briefState === "ready" && job.brief)) && (
+              <button className="secondary-button" type="button" aria-pressed={localData.entries.some((entry) => entry.jobId === session.jobId && entry.saved)} onClick={toggleSaved}>
+                {localData.entries.some((entry) => entry.jobId === session.jobId && entry.saved) ? "Unsave checked job" : "Save checked job"}
+              </button>
+            )}
           </div>
-        )}
+          {submittedClarification && <div className="submitted-clarification-box"><h3>Submitted clarification</h3><p>{submittedClarification.answers}</p></div>}
+          {job && <p className="field-hint job-expiry-line">Expires <time dateTime={job.expiresAt}>{new Date(job.expiresAt).toLocaleString()}</time> (7-day job window · downloaded packs stay on your device).</p>}
+        </section>}
+        {step > 1 && job && <JobTimings job={job} />}
 
         {step === 1 && (
-          <section className="screen" aria-labelledby="request-title">
-            <div className="screen-heading"><span className="step-kicker">Step 1 of 4</span><h2 id="request-title">What does the client need?</h2><p>Describe the request and constraints. This is sent to the service to check against fictional past examples.</p></div>
-            <form onSubmit={submitRequest} className="request-form">
-              <Field.Root name="request">
-                <Field.Label htmlFor="client-request">Client request</Field.Label>
-                <Field.Control render={<textarea id="client-request" aria-describedby="request-hint request-processing request-retention" rows={8} maxLength={6000} required placeholder="Describe the requested work, relevant constraints, and what a useful outcome would look like." />} value={request} onValueChange={setRequest} />
-                <Field.Description id="request-hint" className="field-hint">Do not include sensitive personal information.</Field.Description>
-                <p id="request-processing" className="field-hint">Requests, fictional evidence, and generated drafts/reviews are sent through <a href="https://openrouter.ai/privacy">OpenRouter</a> to <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI</a>. The deployed app uses <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a> for processing/storage and <a href="https://neon.com/privacy-policy">Neon</a> for job storage; development uses local platform/database equivalents.</p>
-                <p id="request-retention" className="field-hint">Application request/results and job access expire seven days after creation; minimal billing and replay-prevention records remain. Provider/platform copies follow the linked policies, not this seven-day expiry; backup retention is separate. Downloaded packs remain on your device.</p>
-              </Field.Root>
-              <Button className="primary-button" type="submit" disabled={submittingRequest || !request.trim()}>{submittingRequest ? "Sending request…" : "Check past examples"}</Button>
-            </form>
-            <section className="request-suggestions" aria-labelledby="suggestions-title">
-              <h3 id="suggestions-title">Try a fictional client request</h3>
-              <p className="field-hint">Inspired by the fictional corpus, not checked matches. Choosing one fills the editable request above; only submitting starts an admission request.</p>
-              <div className="suggestion-grid">{suggestedRequests.map((suggestion) => <Button key={suggestion.title} type="button" className="secondary-button suggestion-button" onClick={() => {
-                setRequest(suggestion.request);
-                document.getElementById("client-request")?.focus();
-              }}><span>{suggestion.title}</span><span className="field-hint">Based on {suggestion.basis}</span></Button>)}</div>
+          <div className="step-one-grid">
+            <section className="screen" aria-labelledby="request-title">
+              <div className="screen-heading">
+                <div className="card-icon-title">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
+                  <h2 id="request-title">What does the client need?</h2>
+                </div>
+                <span className="title-accent-bar" aria-hidden="true" />
+                <p>Step 1 of 4 · Describe the onboarding scope and constraints to evaluate against verified past cases.</p>
+              </div>
+              <form onSubmit={submitRequest} className="request-form">
+                <Field.Root name="request">
+                  <Field.Label htmlFor="client-request">Client request <span className="required-star" aria-hidden="true">*</span></Field.Label>
+                  <Field.Description id="request-hint" className="field-hint">Target environment, scale, access requirements, and acceptance criteria. Do not include sensitive personal data.</Field.Description>
+                  <Field.Control render={<textarea id="client-request" aria-describedby="request-hint request-processing request-retention" rows={6} maxLength={6000} required placeholder="Enter client onboarding scope and constraints..." />} value={request} onValueChange={setRequest} />
+                  <details className="privacy-disclosure">
+                    <summary>Data processing &amp; 7-day retention policy</summary>
+                    <p id="request-processing" className="field-hint">
+                      {modelInfo ? <>Requests, fictional evidence, and generated drafts/reviews are sent to <a href={modelInfo.endpoint}>{modelInfo.endpoint}</a> using the {modelInfo.provider} API and model <code>{modelInfo.model}</code>.{" "}
+                        {modelInfo.endpoint === "https://openrouter.ai" ? <><a href="https://openrouter.ai/privacy">OpenRouter</a> routes requests to <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI</a>.{" "}</>
+                          : modelInfo.endpoint === "https://api.openai.com" ? <><a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI data policy</a>.{" "}</>
+                          : modelInfo.endpoint === "https://api.anthropic.com" ? <><a href="https://privacy.anthropic.com/">Anthropic privacy policy</a>.{" "}</>
+                          : modelInfo.provider === "opencode-go" && modelInfo.endpoint === "https://opencode.ai" ? <><a href="https://opencode.ai/docs/go/#privacy">OpenCode Go model-specific data policies</a>.{" "}</>
+                          : <>Ask the operator about this custom endpoint's upstream processors and retention policy.{" "}</>}
+                      </> : modelInfoError ? <>Model processing configuration is unavailable. Reload before submitting.{" "}</> : <>Loading model processing configuration.{" "}</>}
+                      The deployed app uses <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a> for processing/storage and <a href="https://neon.com/privacy-policy">Neon</a> for job storage; development uses local platform/database equivalents.
+                    </p>
+                    <p id="request-retention" className="field-hint">Application request/results and job access expire seven days after creation; minimal billing and replay-prevention records remain. Provider/platform copies follow the linked policies, not this seven-day expiry; backup retention is separate. Downloaded packs remain on your device.</p>
+                  </details>
+                </Field.Root>
+                <div className="form-submit-row">
+                  <Button className="primary-button" type="submit" disabled={submittingRequest || !request.trim() || !modelInfo}>{submittingRequest ? "Sending request…" : "Check past examples"}</Button>
+                </div>
+              </form>
             </section>
-          </section>
+            <section className="screen request-suggestions" aria-labelledby="suggestions-title">
+              <div className="suggestions-header">
+                <h3 id="suggestions-title">Starter templates</h3>
+                <p className="field-hint">Select a fictional scenario to populate the request editor above.</p>
+              </div>
+              <div className="suggestion-table" role="list">
+                <div className="suggestion-table-head" aria-hidden="true">
+                  <span>Scenario</span>
+                  <span>Corpus case</span>
+                  <span>Focus</span>
+                  <span />
+                </div>
+                {suggestedRequests.map((suggestion) => <Button key={suggestion.title} type="button" className="suggestion-row" onClick={() => {
+                  setRequest(suggestion.request);
+                  document.getElementById("client-request")?.focus();
+                }}>
+                  <span className="suggestion-main">
+                    <AvatarCircle name={suggestion.basis} tone={suggestion.tone} />
+                    <span className="suggestion-title">{suggestion.title}</span>
+                  </span>
+                  <span className="suggestion-cell">{suggestion.basis}</span>
+                  <span className="suggestion-cell">{suggestion.focus}</span>
+                  <span className="suggestion-chevron" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+                  </span>
+                </Button>)}
+              </div>
+            </section>
+          </div>
         )}
 
         {step === 2 && (
           <section className="screen" aria-labelledby="examples-title">
-            <div className="screen-heading"><span className="step-kicker">Step 2 of 4</span><h2 id="examples-title">Checked past examples</h2><p>These are checked fictional records, not proof that the same outcome will happen again.</p></div>
+            <div className="screen-heading">
+              <span className="step-kicker">Step 2 of 4</span>
+              <h2 id="examples-title">Checked past examples</h2>
+              <span className="title-accent-bar" aria-hidden="true" />
+              <p>Verified fictional precedent, dimension comparisons, and required checks.</p>
+            </div>
             <div className="assessment-layout">
             <section className="current-assessment" aria-labelledby="current-assessment-title">
-            <h3 id="current-assessment-title">Current assessment</h3>
+            <h3 id="current-assessment-title" className="sr-heading">Current assessment</h3>
             {(session || submittingRequest) && (assessmentState === "queued" || assessmentState === "running" || assessmentState === "not_started") && (
               <div className="status-panel" role="status" aria-live="polite">
                 <span className="status-indicator" aria-hidden="true" />
-                <div><strong>{submittingRequest ? "Submitting request for admission" : !job ? "Retrieving job status" : assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job.stage)}</strong><p>No draft is shown. Results appear only after reference checks and separate support review pass.</p></div>
+                <div><strong>{submittingRequest ? "Submitting request for admission" : !job ? "Retrieving job status" : assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job.stage)}</strong><p>Results appear after reference checks and independent support review complete.</p></div>
               </div>
             )}
             {assessmentState === "failed" && <div className="notice notice-error" role="alert"><strong>Assessment failed.</strong> {job?.error?.message ?? "No checked past-example result is available."}</div>}
@@ -1499,59 +1682,103 @@ function App({ active }: { active: boolean }) {
             {!session && !submittingRequest && <p className="notice notice-warning" role="status">No current checked answer is available. No selections or dependent brief remain.{previousJob ? " Previous content is historical only." : ""}</p>}
             {assessmentAvailable && (
               <>
-                <div className={`conclusion-panel conclusion-${visibleConclusion(assessment, assessmentClaims)}`} role="status">
-                  <strong>{label(visibleConclusion(assessment, assessmentClaims))}</strong>
-                  <p>{assessmentConclusions[visibleConclusion(assessment, assessmentClaims)]}</p>
+                <div className="anduin-overview-grid">
+                  <div className={`conclusion-panel conclusion-${visibleConclusion(assessment, assessmentClaims)}`} role="status">
+                    <span className="eyebrow">Assessment Conclusion</span>
+                    <strong>{label(visibleConclusion(assessment, assessmentClaims))}</strong>
+                    <p>{assessmentConclusions[visibleConclusion(assessment, assessmentClaims)]}</p>
+                    <div className="overview-kpis">
+                      <div><span>Checked leads</span><strong>{checkedLeads.length}</strong></div>
+                      <div><span>Next actions</span><strong>{assessment.nextActions.length}</strong></div>
+                      <div><span>Eligible work</span><strong>{selectableWorkChoices.length}</strong></div>
+                      <div><span>Cases reviewed</span><strong>{assessment.cases.length}</strong></div>
+                    </div>
+                  </div>
+                  <div className="donut-card" aria-label="Evidence review summary">
+                    <h4>Evidence review</h4>
+                    <div className="donut-layout">
+                      <svg className="donut-svg" viewBox="0 0 42 42" aria-hidden="true">
+                        <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#cfe5fc" strokeWidth="6" />
+                        <circle
+                          cx="21"
+                          cy="21"
+                          r="15.9155"
+                          fill="none"
+                          stroke="#1877d2"
+                          strokeWidth="6"
+                          strokeDasharray={`${supportedPct} ${100 - supportedPct}`}
+                          strokeDashoffset="25"
+                        />
+                        <text x="21" y="22.5" textAnchor="middle" className="donut-center-text">{supportedPct}%</text>
+                      </svg>
+                      <div className="donut-legend">
+                        <div className="legend-item"><span className="legend-swatch swatch-primary" /><span>Supported ({supportedClaimsCount})</span></div>
+                        <div className="legend-item"><span className="legend-swatch swatch-pale" /><span>Withheld ({withheldClaimsCount}) · {withheldPct}%</span></div>
+                      </div>
+                    </div>
+                    <WithheldNote count={assessment.withheldClaimCount} />
+                  </div>
                 </div>
-                <WithheldNote count={assessment.withheldClaimCount} />
                 {assessment.nextActions.length > 0 && <section className="content-section" aria-label="Checked next actions">
-                  <h3>What to verify next — and why it affects reuse</h3>
-                  <div className="card-grid">{assessment.nextActions.map((action) => <article key={action.claimId}>
-                    <h4>{action.caseId} / {action.artifactId}</h4>
+                  <div className="section-heading"><div><p className="eyebrow">Action Required</p><h3>What to verify next</h3></div></div>
+                  <div className="card-grid">{assessment.nextActions.map((action) => <article className="action-card" key={action.claimId}>
+                    <div className="avatar-title-row"><AvatarCircle name={action.caseId} /><h4>{action.caseId} / {action.artifactId}</h4></div>
                     <ClaimCard claim={assessmentClaims.get(action.claimId)!} inspect={setPassageRef} />
                   </article>)}</div>
                 </section>}
                 <section className="content-section" aria-labelledby="lead-title">
-                  <div className="section-heading"><div><p className="eyebrow">Checked leads</p><h3 id="lead-title">Examples that may be relevant</h3></div><span className="muted">Up to three leads</span></div>
-                  {checkedLeads.length === 0 ? <p className="empty-state">No supported checked leads were returned.</p> : checkedLeads.slice(0, 3).map((lead) => <div key={lead.caseId}>
+                  <div className="section-heading"><div><p className="eyebrow">Checked leads</p><h3 id="lead-title">Examples that may be relevant</h3></div><span className="muted">Up to 3 leads</span></div>
+                  {checkedLeads.length === 0 ? <p className="empty-state">No supported checked leads were returned.</p> : checkedLeads.slice(0, 3).map((lead) => <div className="lead-bundle" key={lead.caseId}>
                     <LeadCard lead={lead} claims={assessmentClaims} inspect={setPassageRef} />
                     <ComparisonTable rows={assessment.comparisons.filter((row) => row.caseId === lead.caseId)} claims={assessmentClaims} inspect={setPassageRef} />
                     <section className="checked-source-cards" aria-label={`Checked source artifacts for ${lead.caseId}`}>
                       <h4>Checked source artifacts</h4>
-                      <p className="field-hint">Accepted work evidence, not corpus-only browse matches. Choose artifacts, retained versions, and passages in the next step; nothing is selected automatically.</p>
                       <div className="card-grid">{workChoices.filter((work) => work.caseId === lead.caseId && lead.usefulArtifactIds.includes(work.item.artifactId) && work.sourceRefs.length > 0).map(({ item, sourceRefs, key }) => <article className="checked-source-card" key={key}>
-                        <div className="card-heading"><h4>{item.artifactId}</h4><Badge tone="fictional">Fictional source</Badge></div>
-                        {item.disposition && <Badge tone={item.disposition}>{label(item.disposition)}</Badge>}
+                        <div className="card-heading">
+                          <div className="avatar-title-row"><AvatarCircle name={item.artifactId} /><h4>{item.artifactId}</h4></div>
+                          <div className="badge-row">
+                            <Badge tone="fictional">Fictional source</Badge>
+                            {item.disposition && <Badge tone={item.disposition}>{label(item.disposition)}</Badge>}
+                          </div>
+                        </div>
                         <ClaimGroup title="Checked reuse recommendation" ids={item.dispositionClaimId ? [item.dispositionClaimId] : []} claims={assessmentClaims} inspect={setPassageRef} />
                         <ClaimGroup title="Blockers" ids={item.blockerClaimIds} claims={assessmentClaims} inspect={setPassageRef} />
                         <ClaimGroup title="Required verification" ids={item.verificationClaimIds} claims={assessmentClaims} inspect={setPassageRef} />
-                        <SourceLinks refs={sourceRefs} inspect={setPassageRef} />
+                        <SourceLinks refs={sourceRefs} inspect={setPassageRef} previews />
                       </article>)}</div>
                       {!workChoices.some((work) => work.caseId === lead.caseId && lead.usefulArtifactIds.includes(work.item.artifactId) && work.sourceRefs.length > 0) && <p className="empty-state">No eligible checked source artifacts for this lead.</p>}
                     </section>
                   </div>)}
                 </section>
-                {checkedContrasts.length > 0 && <section className="content-section" aria-labelledby="contrast-title">
-                  <div className="section-heading"><div><p className="eyebrow">Contrasts</p><h3 id="contrast-title">Comparisons, not recommendations</h3></div></div>
-                  {checkedContrasts.map((lead) => <div key={lead.caseId}>
-                    <LeadCard lead={lead} contrast claims={assessmentClaims} inspect={setPassageRef} />
-                    <ComparisonTable rows={assessment.comparisons.filter((row) => row.caseId === lead.caseId)} claims={assessmentClaims} inspect={setPassageRef} />
-                  </div>)}
-                </section>}
-                {unrankedComparisons.length > 0 && <section className="content-section" aria-label="Unestablished applicability">
-                  <h3>Applicability not established</h3>
-                  <p>These checked conflicts or unknowns explain why a proposed example is not a checked lead. They do not recommend its work as a starting point.</p>
-                  {unrankedComparisons.map(([caseId, rows]) => <div key={caseId}><h4>{caseId}</h4><ComparisonTable rows={rows} claims={assessmentClaims} inspect={setPassageRef} /></div>)}
-                </section>}
-                <section className="content-section" aria-labelledby="claim-title">
-                  <div className="section-heading"><div><p className="eyebrow">Checked claims</p><h3 id="claim-title">Facts, interpretations, and recommendations</h3></div></div>
-                  {assessment.claims.length === 0 ? <p className="empty-state">No checked claims were returned.</p> : <div className="claim-list">{assessment.claims.map((claim) => <ClaimCard key={claim.claimId} claim={claim} inspect={setPassageRef} />)}</div>}
-                </section>
-                <section className="content-section" aria-labelledby="case-status-title">
-                  <div className="section-heading"><div><p className="eyebrow">Evidence coverage</p><h3 id="case-status-title">Availability, outcomes, and uncertainty</h3></div></div>
-                  {assessment.cases.length === 0 ? <p className="empty-state">No checked case records were returned.</p> : <div className="card-grid">{assessment.cases.map((item) => <CaseCard key={item.caseId} item={item} claims={assessmentClaims} inspect={setPassageRef} />)}</div>}
-                </section>
-                <div className="action-row"><button className="primary-button" type="button" onClick={() => setStep(3)}>Choose work from these examples</button></div>
+                {checkedContrasts.length > 0 && <details className="section-disclosure content-section">
+                  <summary><span id="contrast-title">Contrasts — comparisons, not recommendations</span><Badge>{`${checkedContrasts.length}`}</Badge></summary>
+                  <div className="disclosure-body">
+                    {checkedContrasts.map((lead) => <div key={lead.caseId}>
+                      <LeadCard lead={lead} contrast claims={assessmentClaims} inspect={setPassageRef} />
+                      <ComparisonTable rows={assessment.comparisons.filter((row) => row.caseId === lead.caseId)} claims={assessmentClaims} inspect={setPassageRef} />
+                    </div>)}
+                  </div>
+                </details>}
+                {unrankedComparisons.length > 0 && <details className="section-disclosure content-section">
+                  <summary><span>Applicability not established</span><Badge>{`${unrankedComparisons.length}`}</Badge></summary>
+                  <div className="disclosure-body">
+                    <p className="field-hint">Checked conflicts or unknowns explaining why a case is not a recommended starting lead.</p>
+                    {unrankedComparisons.map(([caseId, rows]) => <div key={caseId}><h4>{caseId}</h4><ComparisonTable rows={rows} claims={assessmentClaims} inspect={setPassageRef} /></div>)}
+                  </div>
+                </details>}
+                <details className="section-disclosure content-section">
+                  <summary><span id="claim-title">Checked claims — facts, interpretations &amp; recommendations</span><Badge>{`${assessment.claims.length}`}</Badge></summary>
+                  <div className="disclosure-body">
+                    {assessment.claims.length === 0 ? <p className="empty-state">No checked claims were returned.</p> : <div className="claim-list">{assessment.claims.map((claim) => <ClaimCard key={claim.claimId} claim={claim} inspect={setPassageRef} />)}</div>}
+                  </div>
+                </details>
+                <details className="section-disclosure content-section">
+                  <summary><span id="case-status-title">Evidence coverage across all cases</span><Badge>{`${assessment.cases.length}`}</Badge></summary>
+                  <div className="disclosure-body">
+                    {assessment.cases.length === 0 ? <p className="empty-state">No checked case records were returned.</p> : <div className="card-grid">{assessment.cases.map((item) => <CaseCard key={item.caseId} item={item} claims={assessmentClaims} inspect={setPassageRef} />)}</div>}
+                  </div>
+                </details>
+                <div className="action-row"><button className="primary-button" type="button" onClick={() => setStep(3)}>Choose work from these examples ›</button></div>
               </>
             )}
             </section>
@@ -1561,9 +1788,9 @@ function App({ active }: { active: boolean }) {
               {!assessmentAvailable && questions && <p className="field-hint">Previous checked questions — not a newly checked answer.</p>}
               <ClaimGroup title="Checked questions and why they matter" ids={questions?.clarifyingClaimIds ?? []} claims={questionClaims} inspect={setPassageRef} />
               <form className="request-form clarification-form" onSubmit={submitClarifications}>
-                <label htmlFor="clarification-answers">Client answers</label>
-                <textarea id="clarification-answers" value={questionAnswers} onChange={(event) => setQuestionAnswers(event.currentTarget.value)} rows={4} maxLength={4000} disabled={rechecking} aria-describedby="clarification-hint" placeholder="Answer relevant questions or supply a new client constraint." />
-                <p id="clarification-hint" className="field-hint">Only submitting starts a fresh evidence check. It immediately clears artifact, version, and passage selections and the dependent brief, even if admission fails. One previous checked assessment remains read-only until its original expiry.</p>
+                <label htmlFor="clarification-answers">Client answers <span className="required-star" aria-hidden="true">*</span></label>
+                <textarea id="clarification-answers" value={questionAnswers} onChange={(event) => setQuestionAnswers(event.currentTarget.value)} rows={4} maxLength={4000} disabled={rechecking} aria-describedby="clarification-hint" placeholder="Supply client answers or updated constraints..." />
+                <p id="clarification-hint" className="field-hint">Submitting starts a fresh evidence check and clears current selections.</p>
                 <button className="secondary-button" type="submit" disabled={rechecking || !questionAnswers.trim()}>{rechecking ? "Rechecking…" : "Recheck with these answers"}</button>
               </form>
             </aside>}
@@ -1574,12 +1801,35 @@ function App({ active }: { active: boolean }) {
 
         {step === 3 && (
           <section className="screen" aria-labelledby="work-title">
-            <div className="screen-heading"><span className="step-kicker">Step 3 of 4</span><h2 id="work-title">Select work for the brief</h2><p>Choose the fictional work artifacts that fit. Select at least one checked passage for each chosen artifact.</p></div>
+            <div className="screen-heading">
+              <span className="step-kicker">Step 3 of 4</span>
+              <h2 id="work-title">Select work for the brief</h2>
+              <span className="title-accent-bar" aria-hidden="true" />
+              <p>Choose eligible artifacts and select at least one verified passage for each chosen item.</p>
+            </div>
             {!assessmentAvailable && <div className="notice notice-warning" role="alert">A ready, supported assessment is required before work can be selected.</div>}
             {assessmentAvailable && workChoices.length === 0 && <div className="empty-state">No checked work artifacts are available for selection.</div>}
-            {assessmentAvailable && workChoices.length > 0 && <div className="work-list">{workChoices.map(({ caseId, availability, item, sourceRefs, key }) => (
-              <WorkCard key={key} caseId={caseId} availability={availability} item={item} reviewRole={assessment.artifactReviews.find((review) => review.caseId === caseId && review.artifactId === item.artifactId)?.role} claims={assessmentClaims} draft={getDraft(key, sourceRefs)} onChange={(next) => updateDraft(key, next)} inspect={setPassageRef} />
-            ))}</div>}
+            {assessmentAvailable && workChoices.length > 0 && (
+              <>
+                {selectableWorkChoices.length > 0 && (
+                  <div className="work-list">
+                    {selectableWorkChoices.map(({ caseId, availability, item, sourceRefs, key }) => (
+                      <WorkCard key={key} caseId={caseId} availability={availability} item={item} reviewRole={assessment.artifactReviews.find((review) => review.caseId === caseId && review.artifactId === item.artifactId)?.role} claims={assessmentClaims} draft={getDraft(key, sourceRefs)} onChange={(next) => updateDraft(key, next)} inspect={setPassageRef} />
+                    ))}
+                  </div>
+                )}
+                {nonSelectableWorkChoices.length > 0 && (
+                  <details className="section-disclosure content-section" open={selectableWorkChoices.length === 0}>
+                    <summary><span>Other corpus artifacts (not eligible for selection)</span><Badge>{`${nonSelectableWorkChoices.length}`}</Badge></summary>
+                    <div className="disclosure-body work-list">
+                      {nonSelectableWorkChoices.map(({ caseId, availability, item, sourceRefs, key }) => (
+                        <WorkCard key={key} caseId={caseId} availability={availability} item={item} reviewRole={assessment.artifactReviews.find((review) => review.caseId === caseId && review.artifactId === item.artifactId)?.role} claims={assessmentClaims} draft={getDraft(key, sourceRefs)} onChange={(next) => updateDraft(key, next)} inspect={setPassageRef} />
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </>
+            )}
             {selectedCount > 0 && !selectionsValid && <p className="notice notice-warning" role="status">Each selected artifact needs at least one checked passage from its chosen retained version.</p>}
             {selectedCount === 0 && assessmentAvailable && workChoices.length > 0 && <p className="field-hint">No work is selected. Choosing work is required to make a brief.</p>}
             <div className="action-row action-row-split">
@@ -1591,11 +1841,16 @@ function App({ active }: { active: boolean }) {
 
         {step === 4 && (
           <section className="screen" aria-labelledby="brief-title">
-            <div className="screen-heading"><span className="step-kicker">Step 4 of 4</span><h2 id="brief-title">Checked brief</h2><p>Review the supported claims, blockers, and checks before using this fictional brief.</p></div>
+            <div className="screen-heading">
+              <span className="step-kicker">Step 4 of 4</span>
+              <h2 id="brief-title">Checked brief</h2>
+              <span className="title-accent-bar" aria-hidden="true" />
+              <p>Review supported reuse recommendations, required adaptations, and verification blockers.</p>
+            </div>
             {(briefState === "queued" || briefState === "running" || briefState === "not_started") && (
               <div className="status-panel" role="status" aria-live="polite">
                 <span className="status-indicator" aria-hidden="true" />
-                <div><strong>{briefState === "queued" ? "Waiting in the brief queue" : briefState === "not_started" ? "Brief has not started" : job?.stage === "ready" ? "Retrieving brief status" : label(job?.stage ?? "running")}</strong><p>No draft is shown until reference checks and separate support review pass. Queue wait is not processing time.</p></div>
+                <div><strong>{briefState === "queued" ? "Waiting in the brief queue" : briefState === "not_started" ? "Brief has not started" : job?.stage === "ready" ? "Retrieving brief status" : label(job?.stage ?? "running")}</strong><p>Results appear after reference checks and separate support review complete.</p></div>
               </div>
             )}
             {briefState === "ready" && !job?.brief && pollMode === "brief" && <div className="status-panel" role="status" aria-live="polite"><span className="status-indicator" aria-hidden="true" /><div><strong>Retrieving the checked brief</strong><p>The service reported readiness; the checked result is still being fetched.</p></div></div>}
@@ -1609,26 +1864,27 @@ function App({ active }: { active: boolean }) {
                 {(["reuse", "adapt", "verify"] as const).map((kind) => {
                   const items = (job.brief?.[kind] ?? []).filter((item) => claimsFor(item.claimIds, briefClaims).length > 0);
                   return <section className="content-section" aria-labelledby={`brief-${kind}`} key={kind}>
-                    <div className="section-heading"><div><p className="eyebrow">Fictional work artifacts</p><h3 id={`brief-${kind}`}>{label(kind)}</h3></div></div>
-                    {kind === "verify" && <p className="notice notice-warning">BLOCKED: unresolved checks. Not approved for unchanged reuse or production.</p>}
-                    {kind === "adapt" && <p>Required adaptations must be completed before use; checked recommendations are the checklist, not an invented implementation plan.</p>}
-                    {kind === "reuse" && <p>Checked reusable starting points only. This is not production approval.</p>}
+                    <div className="section-heading"><div><p className="eyebrow">Disposition</p><h3 id={`brief-${kind}`}>{label(kind)}</h3></div><Badge tone={kind}>{`${items.length} item${items.length === 1 ? "" : "s"}`}</Badge></div>
+                    {kind === "verify" && items.length > 0 && <p className="notice notice-warning">BLOCKED: unresolved checks. Not approved for unchanged reuse or production.</p>}
+                    {kind === "adapt" && items.length > 0 && <p className="field-hint">Required adaptations must be completed before use.</p>}
+                    {kind === "reuse" && items.length > 0 && <p className="field-hint">Checked reusable starting points only; not production approval.</p>}
                     {items.length === 0 ? <p className="empty-state">No supported {label(kind).toLowerCase()} items are available.</p> : <div className="card-grid">{items.map((item, index) => <BriefCard key={`${item.caseId}-${item.artifactId}-${index}`} item={item} claims={briefClaims} inspect={setPassageRef} />)}</div>}
                   </section>;
                 })}
-                <section className="content-section" aria-labelledby="brief-claims-title">
-                  <div className="section-heading"><div><p className="eyebrow">Checked claims</p><h3 id="brief-claims-title">Facts, interpretations, and recommendations</h3></div></div>
-                  {job.brief.claims.length === 0 ? <p className="empty-state">No checked claims were returned.</p> : <div className="claim-list">{job.brief.claims.map((claim) => <ClaimCard key={claim.claimId} claim={claim} inspect={setPassageRef} />)}</div>}
-                </section>
-                <div className="fictional-reminder"><Badge tone="fictional">Fictional examples only</Badge><p>Verify the checked claims and limits with the client. Observed outcomes do not promise a repeat.</p></div>
+                <details className="section-disclosure content-section">
+                  <summary><span id="brief-claims-title">All checked brief claims</span><Badge>{`${job.brief.claims.length}`}</Badge></summary>
+                  <div className="disclosure-body">
+                    {job.brief.claims.length === 0 ? <p className="empty-state">No checked claims were returned.</p> : <div className="claim-list">{job.brief.claims.map((claim) => <ClaimCard key={claim.claimId} claim={claim} inspect={setPassageRef} />)}</div>}
+                  </div>
+                </details>
+                <div className="fictional-reminder"><Badge tone="fictional">Fictional examples only</Badge><p>Verify checked claims and limits with the client before applying.</p></div>
               </>
             )}
             <div className="action-row"><button className="secondary-button" type="button" onClick={() => setStep(3)}>Back to selected work</button></div>
           </section>
         )}
       </section>
-      <EvidenceDialog sourceRef={passageRef} onClose={() => setPassageRef(null)} />
-    </>
+    </EvidenceWorkspace>
   );
 }
 

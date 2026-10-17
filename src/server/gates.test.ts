@@ -11,7 +11,7 @@ import { validateSelections } from "./selections.ts";
 import { assessmentPassageIds, EvidenceUnavailable, type Artifact, type CorpusSnapshot, type ModelCaseContext, type PastCase, type SourceVersion } from "./corpus.ts";
 import { dispositionChanges } from "../ui/lineage.ts";
 import { assessmentDraftPrompt, briefDraftPrompt } from "./prompts.ts";
-import { callOpenRouter } from "./openrouter.ts";
+import { callModel } from "./model.ts";
 import type { Env } from "./env.ts";
 
 const emptyRequirementReview: { request: string; constraints: RequestConstraints } = {
@@ -983,7 +983,7 @@ test("provider generation binds request inventories and each case claim to their
     return Response.json({ id: "gen-source-bound-schema", model: "openai/gpt-6-luna", provider: "OpenAI", choices: [{ finish_reason: "stop", message: { content: JSON.stringify(wireOutput) } }] });
   };
   try {
-    normalized = assessmentDraftSchema.parse((await callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_draft", assessmentDraftPrompt(request, corpus))).output);
+    normalized = assessmentDraftSchema.parse((await callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_draft", assessmentDraftPrompt(request, corpus))).output);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1082,7 +1082,7 @@ test("brief generation cannot add an unselected background artifact", async () =
     return Response.json({ id: "gen-selected-only", model: "openai/gpt-6-luna", provider: "OpenAI", choices: [{ finish_reason: "stop", message: { content: JSON.stringify(wireOutput) } }] });
   };
   try {
-    normalized = briefDraftSchema.parse((await callOpenRouter({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt)).output);
+    normalized = briefDraftSchema.parse((await callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt)).output);
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -8,6 +8,7 @@ import { HttpFailure } from "./errors.ts";
 import { getOwnedJob } from "./jobs.ts";
 import { requestSchema, startBriefSchema } from "./schemas.ts";
 import { exportStarterPack, starterPackMarkdown } from "./packs.ts";
+import { modelConfig } from "./model.ts";
 import {
   operatorBudgetSchema,
   operatorReconciliationSchema,
@@ -101,6 +102,11 @@ app.onError((error) => {
 });
 
 app.get("/api/health", (c) => c.json({ status: "ok" as const }));
+
+app.get("/api/model-info", (c) => {
+  const { provider, model, url } = modelConfig(c.env);
+  return c.json({ provider, model, endpoint: new URL(url).origin });
+});
 
 app.get("/api/sources", async (c) => {
   const corpus = await loadCorpus(c.env);

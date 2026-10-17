@@ -436,7 +436,7 @@ export function openRouterSchema(name: string, schema: z.ZodType, options: { omi
     // captured brief dispatch returned an empty `length` response in ~2.7s with
     // no usage, while the far larger anchored-pattern assessment grammar works.
     // The provider grammar is a generation guide, not the trust boundary: the
-    // runtime Zod schema parsed in callOpenRouter still enforces these patterns,
+    // runtime Zod schema parsed in callModel still enforces these patterns,
     // and the checked-brief gate again requires each quote verbatim in prose.
     // Anchored patterns (e.g. identity formats) stay in the provider grammar.
     const strip = (node: unknown): void => {

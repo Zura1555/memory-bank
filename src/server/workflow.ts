@@ -4,7 +4,7 @@ import type { Env, WorkflowParams } from "./env.ts";
 import { database, transaction } from "./db.ts";
 import { loadCorpus } from "./corpus.ts";
 import { loadStageOutput, runPaidStage, ReconciliationRequired } from "./calls.ts";
-import { ModelCallError, type ModelStage } from "./openrouter.ts";
+import { ModelCallError, type ModelStage } from "./model.ts";
 import {
   assessmentDraftPrompt,
   assessmentReviewPrompt,

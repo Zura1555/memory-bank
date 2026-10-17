@@ -2,7 +2,7 @@ import type { PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import type { Env, WorkflowParams } from "./env.ts";
 import { database } from "./db.ts";
-import { ModelCallError, callOpenRouter, type ModelStage, type StageOutput } from "./openrouter.ts";
+import { ModelCallError, callModel, modelConfig, type ModelReply, type ModelStage, type StageOutput } from "./model.ts";
 import type { StagePrompt } from "./prompts.ts";
 
 interface BegunAttempt {
@@ -17,7 +17,7 @@ export class ReconciliationRequired extends Error {
   }
 }
 
-async function beginAttempt(client: PoolClient, params: WorkflowParams, callIndex: 1 | 2): Promise<BegunAttempt> {
+async function beginAttempt(client: PoolClient, params: WorkflowParams, callIndex: 1 | 2, env: Env): Promise<BegunAttempt> {
   const reservation = await client.query<{ id: string }>(
     "SELECT id FROM phase_reservations WHERE id = $1 AND job_id = $2 AND phase = $3 AND state = 'held' FOR UPDATE",
     [params.attemptId, params.jobId, params.phase],
@@ -33,10 +33,11 @@ async function beginAttempt(client: PoolClient, params: WorkflowParams, callInde
     throw new ReconciliationRequired(attempt.id);
   }
   const id = randomUUID();
+  const config = modelConfig(env);
   await client.query(
-    `INSERT INTO model_attempts (id, reservation_id, job_id, phase, call_index, state, requested_model, dispatched_at)
-     VALUES ($1, $2, $3, $4, $5, 'dispatching', 'openai/gpt-6-luna', now())`,
-    [id, params.attemptId, params.jobId, params.phase, callIndex],
+    `INSERT INTO model_attempts (id, reservation_id, job_id, phase, call_index, state, requested_model, provider, dispatched_at)
+     VALUES ($1, $2, $3, $4, $5, 'dispatching', $6, $7, now())`,
+    [id, params.attemptId, params.jobId, params.phase, callIndex, config.model, new URL(config.url).host],
   );
   return { attemptId: id, cached: false };
 }
@@ -53,7 +54,7 @@ export async function runPaidStage(
   let attempt: BegunAttempt;
   try {
     await begun.query("BEGIN");
-    attempt = await beginAttempt(begun, params, callIndex);
+    attempt = await beginAttempt(begun, params, callIndex, env);
     await begun.query("COMMIT");
   } catch (error) {
     await begun.query("ROLLBACK").catch(() => undefined);
@@ -63,9 +64,9 @@ export async function runPaidStage(
   }
   if (attempt.cached) return attempt.attemptId;
 
-  let reply: Awaited<ReturnType<typeof callOpenRouter>>;
+  let reply: ModelReply;
   try {
-    reply = await callOpenRouter(env, stage, prompt);
+    reply = await callModel(env, stage, prompt, params.jobId);
   } catch (error) {
     const code = error instanceof ModelCallError ? error.code : "MODEL_DISPATCH_UNCERTAIN";
     const state = error instanceof ModelCallError && !error.uncertain ? "failed" : "uncertain";
@@ -73,7 +74,7 @@ export async function runPaidStage(
       const updated = await pool.query(
         `UPDATE model_attempts SET state = $2, error_code = $3, generation_id = $4,
            http_status = $5, failure_phase = $6, failure_cause = $7, usage = $8::jsonb,
-           returned_model = $9, provider = $10, completed_at = now()
+           returned_model = COALESCE($9, returned_model), provider = COALESCE($10, provider), completed_at = now()
          WHERE id = $1 AND state = 'dispatching'`,
         [attempt.attemptId, state, code, error instanceof ModelCallError ? error.generationId : null,
           error instanceof ModelCallError ? error.status : null,
