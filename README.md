@@ -44,15 +44,38 @@ MODEL_NAME=your-model-id
 ANTHROPIC_API_KEY=your-api-key
 ```
 
-`MODEL_BASE_URL` is a versioned API base, not a full completion URL: the app appends `/chat/completions` or `/messages`, preserving gateway path prefixes. Omit it to use `https://api.openai.com/v1` or `https://api.anthropic.com/v1`. HTTPS is required except for loopback HTTP (for example, `http://127.0.0.1:11434/v1`); URL credentials, query strings, fragments, and redirects are rejected. `MODEL_NAME` is required for both compatible modes. Only the selected provider's key is used.
+For [OpenCode Go](https://opencode.ai/docs/go/), use a separate Go credential and explicitly select the model's protocol:
 
-OpenAI-compatible endpoints must support strict JSON Schema `response_format`; Anthropic-compatible endpoints must support forced tool choice and return a single `submit_result` tool input. Both must support the stage schemas and 16,384 output tokens. All results still pass the same local schema, reference and independent-review checks; incomplete/refused/invalid results fail closed. Token usage is retained; absent provider-reported USD cost stays unknown and must be reconciled from provider billing, never assumed free.
+```dotenv
+MODEL_PROVIDER=opencode-go
+MODEL_API=responses
+MODEL_NAME=gpt-6-luna
+OPENCODE_API_KEY=your-go-api-key
+```
+
+Leave `MODEL_BASE_URL` unset to use Go's endpoint for the selected protocol. Match `MODEL_API` to the current [Go endpoint table](https://opencode.ai/docs/go/#endpoints), not just the model's vendor:
+
+| `MODEL_API` | Example model ID | Default versioned base |
+| --- | --- | --- |
+| `chat-completions` | `kimi-k3`, `glm-5.3-flash` | `https://opencode.ai/inference/go/openai/v1` |
+| `messages` | `minimax-m3`, `claude-haiku-5-5` | `https://opencode.ai/inference/go/anthropic/v1` |
+| `responses` | `gpt-6-luna` | `https://opencode.ai/inference/go/openai/v1` |
+
+Go requests identify this application as `User-Agent: memory-bank/0.1.0`. `x-opencode-session` is the persisted job UUID, shared across assessment/brief drafts and reviews, including process restarts; separate jobs have separate sessions. No visitor capability or request text is used as a session ID. Go requires `MODEL_NAME` and `MODEL_API`; other providers retain their existing protocols and credentials. Native Google/Gemini endpoints are not implemented.
+
+**Qualification and usage policy:** Go is designed for coding-agent traffic; obtain provider approval for this evidence-analysis workload before using it. Its [model-specific privacy policies](https://opencode.ai/docs/go/#privacy) differ. Protocol support is not proof that a particular Go model accepts our complete stage schemas or forced tool choice. No Go key was available for live inference during this change: Kimi/GLM strict schemas and Messages forced-tool behavior remain unqualified against the real service. Verify all four stages with the selected model before enabling campaign admission; do not weaken validation or retry/fall back after a rejection. Go subscription allowance is not a cash credit balance, and missing USD cost must still be reconciled rather than treated as free.
+
+`MODEL_BASE_URL` is a versioned API base, not a full completion URL: the app appends `/chat/completions`, `/messages`, or `/responses`, preserving gateway path prefixes. Compatible modes default to `https://api.openai.com/v1` or `https://api.anthropic.com/v1`; Go defaults are above. HTTPS is required except for loopback HTTP (for example, `http://127.0.0.1:11434/v1`); URL credentials, query strings, fragments, and redirects are rejected. `MODEL_NAME` is required outside the default OpenRouter mode. Only the selected provider's key is used.
+
+Chat Completions endpoints must support strict JSON Schema `response_format`; Messages endpoints must support forced tool choice and return a single `submit_result` tool input. Responses requests use strict `text.format`, `max_output_tokens: 16384`, `store: false`, and accept only a completed assistant JSON result, rejecting incomplete/error/refused/tool-call outputs. Every route must support the stage schemas and 16,384 output tokens. All results still pass the same local schema, reference and independent-review checks; incomplete/refused/invalid results fail closed. Token usage is retained; absent provider-reported USD cost stays unknown and must be reconciled from provider billing, never assumed free.
 
 Restart development after configuration changes. Production uses equivalent Worker bindings (these values can be included with the selected credential in `.dev.vars.production` for the existing secrets-file deploy). Drain active workflows and reconcile outstanding charges before switching provider/model; do not reuse a different provider's credit as an unchanged campaign balance. The intake reads `GET /api/model-info` to disclose the actual provider/model and endpoint origin without exposing credentials or gateway paths. Custom endpoint operators must supply upstream processor/privacy information. Endpoint compatibility does not qualify a new model's quality, pricing, context fit, or latency.
 
-Verification: `npm test` passes 43 TypeScript tests and one Python test, including compatible-provider normalization, foreign-claim/truncation rejection, and selected-credential/configuration failures. A no-paid-call smoke sent both protocols through a real loopback HTTP server with a gateway path prefix and checked the public model-info projection. Chromium verified the live default OpenRouter disclosure plus UI-only OpenAI, Anthropic, custom-endpoint, and unavailable-configuration states; unavailable configuration blocked submission. The custom-endpoint notice fit at 320px in dark mode without horizontal overflow. These checks are protocol/UI proof, not real-provider inference or model qualification.
+Verification: `npm test` passes 46 TypeScript tests and one Python test, including Go's three protocols over real loopback HTTP, foreign-claim/truncation rejection, Responses refusal/error/ambiguity handling, session validation and selected-credential isolation. A separate no-paid-call runtime smoke sent all four stages through each of the three protocols (12 loopback requests), validated outputs against the transmitted full stage JSON schemas, and checked the public model-info projection. Earlier Chromium checks covered the default OpenRouter, OpenAI, Anthropic, custom-endpoint and unavailable-configuration states; unavailable configuration blocked submission. These checks are protocol/UI proof, not real-provider inference or model qualification.
 
-`npm run typecheck` and the production build passed. The isolated `ledger.smoke.ts` also persisted the configured compatible model and endpoint host on an uncertain dispatch, exposed them in operator status, preserved accounting/replay guards across restart, container recreation and backup restore, and added no provider network requests. Operator-gate smoke rejected invalid configuration and missing selected-provider credentials before database access. No live campaign state, credentials, admission setting or deployment was changed.
+The actual development Worker and Chromium intake disclosed `opencode-go`, `gpt-6-luna`, `https://opencode.ai`, and Go's model-specific policy link from `.dev.vars` bindings. At the observed 400px viewport the page had no horizontal overflow. Filling the request enabled submission, but no job was submitted and no external inference request was made.
+
+`npm run typecheck` and the production build passed. The isolated `node --experimental-transform-types src/server/ledger.smoke.ts` verified Go's identifying headers and persisted the configured model and endpoint host on an uncertain dispatch, exposed them in operator status, preserved accounting/replay guards across restart, container recreation and backup restore, and added no provider network requests. Development bindings are explicitly declared so `.dev.vars` settings actually reach the local Worker; production continues to use the selected secrets-file bindings. No live campaign state, credentials, admission setting or deployment was changed.
 
 ## Paid admission authorization
 
@@ -261,7 +284,7 @@ At the initial production deployment, Neon database `memory_bank` had migrations
 
 Because `main` automatically deploys, the database prerequisite below must be satisfied before merging this revision into `main`, not merely before a manual deploy.
 
-Production secrets are Cloudflare `secret_text` bindings: `OPERATOR_TOKEN` (freshly generated, separate from local) and the selected provider's key (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`). Their local deployment copy is `.dev.vars.production`, which may also contain the model endpoint settings above; the direct Neon `DATABASE_URL` is in `.env.production`. Both files are Git-ignored and mode 0600. Keep these files private and back them up in a password manager; never paste them into an issue or commit. Do not upload `.env.production` as Worker secrets or copy local development variables into production.
+Production secrets are Cloudflare `secret_text` bindings: `OPERATOR_TOKEN` (freshly generated, separate from local) and the selected provider's key (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENCODE_API_KEY`). Their local deployment copy is `.dev.vars.production`, which may also contain the model endpoint settings above; the direct Neon `DATABASE_URL` is in `.env.production`. Both files are Git-ignored and mode 0600. Keep these files private and back them up in a password manager; never paste them into an issue or commit. Do not upload `.env.production` as Worker secrets or copy local development variables into production.
 
 To update this deployment from an authenticated checkout:
 

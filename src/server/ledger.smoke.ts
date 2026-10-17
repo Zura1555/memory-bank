@@ -32,9 +32,12 @@ const readyCapabilityHash = Buffer.alloc(32, 1);
 const readySelections: Selection[] = [{ caseId: "case-1", artifactId: "procedure", versionId: "procedure-v1", passageIds: ["passage-b", "passage-a"] }];
 let providerRequests = 0;
 const originalFetch = globalThis.fetch;
-globalThis.fetch = async () => {
+globalThis.fetch = async (_input, init) => {
   providerRequests++;
   if (providerRequests !== 1) throw new Error("PROVIDER_REPLAY_FORBIDDEN_IN_SMOKE");
+  const headers = new Headers(init?.headers);
+  assert.equal(headers.get("x-opencode-session"), jobId);
+  assert.match(headers.get("user-agent")!, /^memory-bank\//);
   return new Response(new ReadableStream({
     start(controller) { controller.error(new TypeError("PRIVATE_SYNTHETIC_TRANSPORT_DETAIL")); },
   }), { headers: { "x-generation-id": "gen-synthetic-interrupted" } });
@@ -104,7 +107,7 @@ try {
     );
     const env = {
       APP_ENV: "development", LOCAL_DATABASE_URL: connectionString,
-      MODEL_PROVIDER: "openai", MODEL_NAME: "synthetic-model", OPENAI_API_KEY: "synthetic-only",
+      MODEL_PROVIDER: "opencode-go", MODEL_API: "responses", MODEL_NAME: "synthetic-model", OPENCODE_API_KEY: "synthetic-only",
     } as Env;
     await assert.rejects(runPaidStage(env, {
       jobId, attemptId: reservationId, phase: "assessment", workflowId: `${jobId}-assessment-1`,
@@ -122,7 +125,7 @@ try {
     assert.deepEqual(diagnostic, {
       state: "uncertain", error_code: "MODEL_DISPATCH_UNCERTAIN", generation_id: "gen-synthetic-interrupted",
       http_status: 200, failure_phase: "response_body", failure_cause: "transport_error",
-      requested_model: "synthetic-model", provider: "api.openai.com",
+      requested_model: "synthetic-model", provider: "opencode.ai",
     });
     const status = await operatorStatus(env) as { recentModelAttempts: { id: string }[] };
     assert.deepEqual(

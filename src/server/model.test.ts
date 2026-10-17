@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createServer } from "node:http";
+import type { IncomingHttpHeaders } from "node:http";
+import type { AddressInfo } from "node:net";
+import { once } from "node:events";
 import type { Env } from "./env.ts";
 import { callModel, ModelCallError, modelConfig } from "./model.ts";
 
@@ -211,6 +215,9 @@ test("invalid endpoint configuration and missing selected credentials fail befor
     for (const invalid of [
       { MODEL_PROVIDER: "unknown" },
       { MODEL_PROVIDER: "openai" },
+      { MODEL_PROVIDER: "opencode-go", MODEL_NAME: "gpt-6-luna" },
+      { MODEL_PROVIDER: "opencode-go", MODEL_API: "unknown", MODEL_NAME: "gpt-6-luna" },
+      { MODEL_PROVIDER: "opencode-go", MODEL_API: "responses" },
       { MODEL_BASE_URL: "https://user:secret@example.com/v1" },
       { MODEL_BASE_URL: "http://example.com/v1" },
       { MODEL_BASE_URL: "https://example.com/v1?api_key=secret" },
@@ -225,7 +232,132 @@ test("invalid endpoint configuration and missing selected credentials fail befor
         code: "MODEL_CREDENTIAL_UNAVAILABLE", uncertain: false,
       });
     }
+    const go = { MODEL_PROVIDER: "opencode-go", MODEL_API: "responses", MODEL_NAME: "gpt-6-luna" };
+    await assert.rejects(callModel({
+      ...go, OPENAI_API_KEY: "wrong-provider-key",
+    } as Env, "assessment_draft", { instructions: "No dispatch", untrustedData: {} }, "job-one"), {
+      code: "MODEL_CREDENTIAL_UNAVAILABLE", uncertain: false,
+    });
+    for (const session of [undefined, "", "private\r\nheader", "x".repeat(129)]) {
+      await assert.rejects(callModel({
+        ...go, OPENCODE_API_KEY: "synthetic-only",
+      } as Env, "assessment_draft", { instructions: "No dispatch", untrustedData: {} }, session), {
+        code: "MODEL_SESSION_INVALID", uncertain: false,
+      });
+    }
     assert.equal(requests, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Go protocols preserve review validation, usage, and per-job identity over HTTP", async () => {
+  let reply: unknown;
+  const requests: { path: string; headers: IncomingHttpHeaders }[] = [];
+  const server = createServer(async (request, response) => {
+    request.resume();
+    requests.push({ path: request.url!, headers: request.headers });
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(reply));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address() as AddressInfo;
+  const base = `http://127.0.0.1:${address.port}/gateway/v1/`;
+  const prompt = {
+    instructions: "Review fictional evidence", untrustedData: { request: "Untrusted request" },
+    reviewTargets: { claimIds: ["brief-claim"], selections: [] },
+  };
+  try {
+    for (const api of ["chat-completions", "messages", "responses"]) {
+      const model = api === "responses" ? "gpt-6-luna" : api === "messages" ? "minimax-m3" : "kimi-k3";
+      const env = {
+        MODEL_PROVIDER: "opencode-go", MODEL_API: api, MODEL_NAME: model, MODEL_BASE_URL: base,
+        OPENCODE_API_KEY: "synthetic-go-only", OPENAI_API_KEY: "wrong-provider-key", ANTHROPIC_API_KEY: "wrong-provider-key",
+      } as Env;
+      const defaultConfig = modelConfig({ ...env, MODEL_BASE_URL: undefined });
+      assert.equal(defaultConfig.url, `https://opencode.ai/inference/go/${api === "messages" ? "anthropic" : "openai"}/v1/${api === "chat-completions" ? "chat/completions" : api}`);
+      for (const scenario of ["valid", "foreign-claim", "truncated"]) {
+        const output = { claimVerdicts: { [scenario === "foreign-claim" ? "foreign" : "brief-claim"]: "supported" }, constraintQuotes: {} };
+        const id = api === "responses" ? "resp_review" : api === "messages" ? "msg_review" : "chatcmpl-review";
+        reply = api === "messages" ? {
+          id, model, stop_reason: scenario === "truncated" ? "max_tokens" : "tool_use",
+          content: [{ type: "tool_use", name: "submit_result", input: output }],
+          usage: { input_tokens: 123, output_tokens: 45 },
+        } : api === "responses" ? {
+          id, model, status: scenario === "truncated" ? "incomplete" : "completed",
+          output: [
+            { type: "reasoning", summary: [] },
+            { type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: JSON.stringify(output) }] },
+          ],
+          usage: { input_tokens: 123, output_tokens: 45 },
+        } : {
+          id, model, choices: [{ finish_reason: scenario === "truncated" ? "length" : "stop", message: { content: JSON.stringify(output) } }],
+          usage: { prompt_tokens: 123, completion_tokens: 45 },
+        };
+        const session = scenario === "foreign-claim" ? "job-two" : "job-one";
+        if (scenario === "valid") {
+          const result = await callModel(env, "brief_review", prompt, session);
+          assert.deepEqual(result.output, { claimReviews: [{ claimId: "brief-claim", verdict: "supported" }], constraintReviews: [] });
+          assert.deepEqual(result.usage, {
+            promptTokens: 123, completionTokens: 45, reportedCostUsd: null, responseId: id,
+            requestedModel: model, returnedModel: model, provider: `127.0.0.1:${address.port}`,
+          });
+        } else {
+          await assert.rejects(callModel(env, "brief_review", prompt, session), {
+            code: scenario === "foreign-claim" ? "MODEL_OUTPUT_SCHEMA_INVALID" : "MODEL_OUTPUT_INCOMPLETE_OR_REFUSED",
+            generationId: id, uncertain: true,
+          });
+        }
+        const request = requests.at(-1)!;
+        assert.equal(requests.length, ["chat-completions", "messages", "responses"].indexOf(api) * 3 + ["valid", "foreign-claim", "truncated"].indexOf(scenario) + 1,
+          "No automatic retry is allowed after a billed response");
+        assert.equal(request.path, `/gateway/v1/${api === "chat-completions" ? "chat/completions" : api}`);
+        assert.equal(request.headers["x-opencode-session"], session);
+        assert.match(request.headers["user-agent"]!, /^memory-bank\//);
+        assert.equal(request.headers[api === "messages" ? "x-api-key" : "authorization"],
+          api === "messages" ? "synthetic-go-only" : "Bearer synthetic-go-only");
+        assert.ok(!JSON.stringify(request).includes("wrong-provider-key"));
+      }
+    }
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("Responses refuses partial, refused, ambiguous, or non-JSON outputs and preserves billing diagnostics", async () => {
+  const originalFetch = globalThis.fetch;
+  const message = {
+    type: "message", role: "assistant", status: "completed",
+    content: [{ type: "output_text", text: '{"claimVerdicts":{},"constraintQuotes":{}}' }],
+  };
+  const scenarios = [
+    { status: "failed" },
+    { incomplete_details: { reason: "max_output_tokens" } },
+    { error: { code: "server_error" } },
+    { output: [{ ...message, status: "incomplete" }] },
+    { output: [{ ...message, content: [...message.content, { type: "refusal" }] }] },
+    { output: [] },
+    { output: [message, message] },
+    { output: [message, { type: "function_call" }] },
+    { output: [{ ...message, content: [{ type: "output_text", text: "invalid JSON" }] }], code: "MODEL_OUTPUT_INVALID_JSON" },
+    { output: "malformed envelope", code: "MODEL_RESPONSE_INVALID" },
+  ];
+  try {
+    for (const { code = "MODEL_OUTPUT_INCOMPLETE_OR_REFUSED", ...override } of scenarios) {
+      let requests = 0;
+      globalThis.fetch = async () => {
+        requests++;
+        return Response.json({ id: "resp_diagnostic", status: "completed", output: [message], ...override });
+      };
+      await assert.rejects(callModel({
+        MODEL_PROVIDER: "opencode-go", MODEL_API: "responses", MODEL_NAME: "gpt-6-luna", OPENCODE_API_KEY: "synthetic-only",
+      } as Env, "brief_review", {
+        instructions: "Review fictional evidence", untrustedData: {}, reviewTargets: { claimIds: [], selections: [] },
+      }, "job-one"), { code, generationId: "resp_diagnostic", uncertain: true, status: 200 });
+      assert.equal(requests, 1);
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }
