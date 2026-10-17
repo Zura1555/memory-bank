@@ -114,17 +114,17 @@ test("checked briefs and both portable formats retain independently reviewed exa
   const item = job.brief_result!.adapt[0];
   const selection = job.brief_selections!.find((selected) => selected.versionId === item.versionId)!;
   const quotes = ["seven business days", "at most 1,200 records", "audit and removal remain unverified"];
-  job.request_text = `Check client scope for ${quotes.join("; ")}.`;
+  job.request_text = `client scope; ${quotes.join("; ")}`;
   const original = job.brief_result!.claims.find((claim) => claim.claimId === item.dispositionClaimId)!;
   const recommendation: Claim = {
-    ...original, requestQuotes: quotes,
-    text: `Before adaptation, check the requested constraints: ${quotes.join("; ")}.`,
+    ...original, requestQuotes: [job.request_text, ...quotes],
+    text: `Before adaptation, check the requested constraints: ${job.request_text}.`,
   };
   const fact = job.brief_result!.claims.find((claim) => claim.claimId === original.dependsOnClaimIds[0])!;
   const draft = { reuse: [], adapt: [item], verify: [], claims: [fact, recommendation] };
   const key = `${selection.caseId}/${selection.artifactId}/${selection.versionId}`;
   const schema = reviewSchema({ claimIds: draft.claims.map((claim) => claim.claimId), selections: [selection] }, job.request_text);
-  const wireReview = { constraintQuotes: { [key]: quotes }, claimVerdicts: Object.fromEntries(draft.claims.map((claim) => [claim.claimId, "supported"])) };
+  const wireReview = { constraintQuotes: { [key]: [job.request_text] }, claimVerdicts: Object.fromEntries(draft.claims.map((claim) => [claim.claimId, "supported"])) };
   const review = briefSupportReviewSchema.parse(schema.parse(wireReview));
   const requirements = { request: job.request_text, constraintReviews: review.constraintReviews };
   const check = (candidate = draft, verdicts = validateSupportReview(candidate.claims, review)) =>

@@ -963,6 +963,12 @@ test("provider generation binds request inventories and each case claim to their
   const ownContrast = structuredClone(valid);
   Object.assign(ownContrast.cases["case-1"], { tier: "contrast", state: "partial", reasons: [reason], comparisons: [{ dimension: "environment", requirementQuote: null, relation: "unknown", evidence: cell, assessment: cell, implication: cell }] });
   assert.equal(validate(ownContrast), true);
+  const inventedReasonQuote = structuredClone(ownContrast);
+  Object.assign(inventedReasonQuote.cases["case-1"], { reasons: [{ ...reason, requestQuotes: [`${request}?`] }] });
+  assert.equal(validate(inventedReasonQuote), false, "A fabricated quotation must not poison an otherwise supported lead reason.");
+  const quotedHistoricalReason = structuredClone(ownContrast);
+  Object.assign(quotedHistoricalReason.cases["case-1"], { reasons: [{ ...reason, kind: "source_fact", requestQuotes: ["Named operators need recovery evidence."] }] });
+  assert.equal(validate(quotedHistoricalReason), false, "Provider and normalized schemas must agree on historical reason quotations.");
   const normalizedContrast = assessmentDraftPrompt(request, corpus).responseSchema!.parse(ownContrast) as AssessmentOutput;
   assert.equal(normalizedContrast.claims.find((claim) => claim.claimId === normalizedContrast.contrasts[0].reasonClaimIds[0])?.caseId, "case-1");
   const foreignReason = structuredClone(ownContrast);
@@ -1013,7 +1019,7 @@ test("brief generation cannot add an unselected background artifact", async () =
   const output: BriefDraft = {
     reuse: [], verify: [],
     adapt: [{ caseId: selected[0].caseId, artifactId: selected[0].artifactId, versionId: selected[0].versionId, disposition: "adapt", dispositionClaimId: "choose", claimIds: ["choose"] }],
-    claims: [{ claimId: "choose", kind: "recommendation", text: "Adapt the selected procedure after checking compatibility.", sourceRefs: [{ caseId: selected[0].caseId, artifactId: selected[0].artifactId, versionId: selected[0].versionId, passageId: selected[0].passageIds[0] }], requestQuotes: ["current request"], dependsOnClaimIds: [] }],
+    claims: [{ claimId: "choose", kind: "recommendation", text: "Check the current request before adapting the selected procedure.", sourceRefs: [{ caseId: selected[0].caseId, artifactId: selected[0].artifactId, versionId: selected[0].versionId, passageId: selected[0].passageIds[0] }], requestQuotes: ["current request"], dependsOnClaimIds: [] }],
   };
   const selectedKey: string = "case-1/handover/handover-v1-case-1";
   const wireOutput = {
@@ -1037,6 +1043,23 @@ test("brief generation cannot add an unselected background artifact", async () =
   assert.deepEqual(normalized.claims, output.claims, "A supplied context label must resolve to its unchanged canonical identity.");
   const validate = new Ajv({ strict: false }).compile(providerSchema!);
   assert.equal(validate(wireOutput), true);
+  assert.doesNotMatch(JSON.stringify(providerSchema), /"allOf":/);
+  const lostQuote = structuredClone(wireOutput);
+  lostQuote.claims[0].text = "Adapt after checking client compatibility.";
+  assert.equal(validate(lostQuote), false, "Hidden request metadata cannot replace visible recommendation constraints.");
+  assert.equal(prompt.responseSchema!.safeParse(lostQuote).success, false);
+  const requestAsHistory = structuredClone(wireOutput);
+  requestAsHistory.claims[0].kind = "source_fact";
+  assert.equal(validate(requestAsHistory), false);
+  const literalRequest = "Use [sandbox].";
+  const literalPrompt = briefDraftPrompt(literalRequest, selected, corpus, checked);
+  const literalWire = structuredClone(wireOutput);
+  literalWire.claims[0].requestQuotes = [literalRequest];
+  literalWire.claims[0].text = `Verify the requested constraint: ${literalRequest}`;
+  const validateLiteral = new Ajv({ strict: false }).compile(openRouterSchema("brief", literalPrompt.responseSchema!).json_schema.schema);
+  assert.equal(validateLiteral(literalWire), true);
+  literalWire.claims[0].text = "Verify the requested constraint: Use s.";
+  assert.equal(validateLiteral(literalWire), false, "Request punctuation is literal, not a user-supplied regular expression.");
   const unselected = structuredClone(wireOutput);
   unselected.items["case-1/request/request-v1"] = structuredClone(unselected.items[selectedKey]);
   assert.equal(validate(unselected), false, "Full case background cannot add an unselected brief item.");
