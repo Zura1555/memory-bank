@@ -561,7 +561,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 /* Shell & Sidebar */
 .app-shell {
   display: grid;
-  grid-template-columns: 15.25rem minmax(0, 1fr);
+  grid-template-columns: 4.5rem minmax(0, 1fr);
   min-height: 100svh;
 }
 .app-body {
@@ -579,19 +579,22 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 .app-sidebar {
   position: sticky;
+  z-index: 1;
   top: 0;
   height: 100svh;
   display: flex;
   flex-direction: column;
-  padding: calc(1.5rem + env(safe-area-inset-top, 0px)) 1rem max(1.25rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
+  padding: calc(1.25rem + env(safe-area-inset-top, 0px)) .7rem max(1.25rem, env(safe-area-inset-bottom, 0px)) max(.7rem, env(safe-area-inset-left, 0px));
   border-right: 1px solid var(--card-border);
   background: var(--surface);
-  overflow-y: auto;
+  overflow: visible;
 }
-.sidebar-brand { padding-inline: .65rem; }
-.workspace-caption { display: block; margin-top: .45rem; color: var(--muted); font-size: .74rem; font-weight: 600; }
+.app-sidebar .sidebar-brand { display: flex; justify-content: center; padding-inline: 0; }
+.app-sidebar .brand > span:not(.brand-mark) { display: none; }
+.app-sidebar .workspace-caption { display: none; }
 .shell-separator { flex-shrink: 0; height: 1px; margin-block: 1.25rem; background: var(--line); }
 .nav-group-label { padding-inline: .8rem; margin-bottom: .5rem; color: var(--muted); font-size: .68rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.app-sidebar .nav-group-label { display: none; }
 .primary-nav-list { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; }
 .nav-link {
   display: flex;
@@ -604,6 +607,34 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   text-decoration: none;
   transition: background-color 120ms ease-out, color 120ms ease-out;
 }
+.app-sidebar .nav-link {
+  position: relative;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  gap: 0;
+}
+.app-sidebar .nav-link > span {
+  position: absolute;
+  z-index: 20;
+  top: 50%;
+  left: calc(100% + .55rem);
+  width: max-content;
+  max-width: 14rem;
+  padding: .45rem .65rem;
+  border-radius: .45rem;
+  background: var(--accent-strong);
+  color: var(--on-accent);
+  box-shadow: 0 .3rem .8rem rgb(15 23 42 / 16%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-.25rem, -50%) scale(.97);
+  transform-origin: left center;
+  transition: opacity 140ms cubic-bezier(.23, 1, .32, 1), transform 150ms cubic-bezier(.23, 1, .32, 1);
+}
+.app-sidebar .nav-label { color: inherit; font-size: .78rem; white-space: nowrap; }
+.app-sidebar .nav-detail { display: none; }
 .nav-link svg { flex: 0 0 1.2rem; width: 1.2rem; height: 1.2rem; color: var(--accent-bright); }
 .nav-label, .nav-detail { display: block; }
 .nav-label { font-size: .86rem; font-weight: 700; color: var(--ink); }
@@ -615,7 +646,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 @media (hover: hover) and (pointer: fine) {
   .nav-link:hover { background: var(--quiet); color: var(--ink); }
+  .app-sidebar .nav-link:hover > span { opacity: 1; transform: translate(0, -50%) scale(1); }
 }
+.app-sidebar .nav-link:focus-visible > span { opacity: 1; transform: translate(0, -50%) scale(1); }
 .sidebar-note {
   margin-top: auto;
   padding: .85rem;
@@ -628,6 +661,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 .sidebar-note .eyebrow { font-size: .63rem; margin-bottom: .2rem; display: block; }
 .sidebar-note p { margin: 0; font-weight: 600; color: var(--ink); }
+.app-sidebar .sidebar-note { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar .nav-link > span { transition: opacity 140ms ease; transform: translateY(-50%); }
+  .app-sidebar .nav-link:hover > span,
+  .app-sidebar .nav-link:focus-visible > span { transform: translateY(-50%); }
+}
 
 .header-location { display: flex; align-items: center; gap: .65rem; min-width: 0; font-size: .85rem; }
 .header-workspace { color: var(--muted); font-weight: 600; }
