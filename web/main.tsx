@@ -347,6 +347,10 @@ const labels: Record<string, string> = {
   drafting: "Drafting checked results",
   reference_check: "Checking references",
   support_review: "Reviewing support",
+  native: "Native text",
+  ocr_transcription: "Audited OCR transcription",
+  visual_observation: "Audited visual observation",
+  visual_interpretation: "Audited visual interpretation",
 };
 
 function label(value: string): string {
@@ -643,7 +647,7 @@ function SourcesPage() {
         {filtered.length === 0 ? <p className="screen empty-state">No sources match these filters. Clear the filters to browse the corpus.</p>
           : <div className="source-catalog">{filtered.map((source) => <article className="screen source-card" key={`${source.caseId}-${source.artifactId}-${source.versionId}`}>
             <div className="card-heading"><div><p className="eyebrow">{source.caseTitle}</p><h2>{source.title}</h2></div><Badge tone={source.availability}>{label(source.availability)}</Badge></div>
-            <p className="record-id">Case {source.caseId} · Artifact {source.artifactId} · Version {source.versionId}</p>
+            <p className="record-id">Case {source.caseId} · Artifact {source.artifactId} · Retained version {source.versionId}</p>
             <div className="badge-row"><Badge tone="fictional">Fictional source</Badge><Badge>{source.mimeType}</Badge>
               {[...new Set(source.passages.map((ref) => ref.sourceKind))].map((kind) => <Badge key={kind}>{label(kind)}</Badge>)}</div>
             <p className="muted source-date">{source.statedDate ? `Stated date: ${source.statedDate}` : "No stated date"}</p>
@@ -962,6 +966,7 @@ function EvidenceDialog({ sourceRef, onClose }: { sourceRef: SourceRef | null; o
             </div>
             <Dialog.Close className="icon-button" aria-label="Close passage">Close</Dialog.Close>
           </div>
+          {sourceRef && <p className="record-id">Requested source: Case {sourceRef.caseId} · Artifact {sourceRef.artifactId} · Retained version {sourceRef.versionId} · Passage {sourceRef.passageId}</p>}
           {sourceRef && <EvidencePassage key={JSON.stringify(sourceRef)} sourceRef={sourceRef} />}
         </Dialog.Popup>
       </Dialog.Portal>
