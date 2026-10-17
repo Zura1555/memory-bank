@@ -1,10 +1,10 @@
 # Memory Bank
 
-An English, evidence-backed reuse guide built from explicitly fictional client-onboarding work. The delivery lead reviews every checked comparison and remains the decision-maker. The dedicated `Zura1555/memory-bank` repository is private during implementation; this repository excludes the planning workspace and `.scratch` files. Production deployment and public release still require the planned review and separate approval.
+An English, evidence-backed reuse guide built from explicitly fictional client-onboarding work. The delivery lead reviews every checked comparison and remains the decision-maker. The dedicated `Zura1555/memory-bank` repository remains private; this repository excludes the planning workspace and `.scratch` files. Production infrastructure is deployed with paid admission disabled; model qualification and public repository release remain separate gates.
 
 ## Local setup
 
-1. Install Node.js 22+, Python 3.12+, and Docker Compose. Run `npm ci`.
+1. Install Node.js 22.18+ (verified with 24.19), Python 3.12+, and Docker Compose. Run `npm ci`.
 2. Create a Python environment and install the offline parsers:
 
    ```sh
@@ -15,12 +15,12 @@ An English, evidence-backed reuse guide built from explicitly fictional client-o
 
 3. Copy `.dev.vars.example` to `.dev.vars`. Set `OPERATOR_TOKEN` to `openssl rand -hex 32`. Set `OPENROUTER_API_KEY` only when you are ready to make the approved paid model calls. Never commit `.dev.vars`.
 4. Start local PostgreSQL: `docker compose up -d --wait postgres`. First initialization applies the SQL files in `migrations/` in filename order. The database is loopback-only on port 5433; the project-scoped `postgres_data` Docker volume preserves accounting and admission state across restarts and container recreation. Keep the same Compose project name/directory when returning to a campaign; another worktree/project gets a different volume, not the original ledger.
-5. Build the curator manifest and audit: `npm run ingest`. Publish only to Wrangler local R2: `npm run publish:corpus`.
-6. Run `npm run dev`, then open `http://127.0.0.1:8787`. The Worker builds the static UI before starting.
+5. Build the curator manifest and audit: `npm run ingest`. Publish only to cf local R2: `npm run publish:corpus`.
+6. Run `npm run dev`, then open `http://127.0.0.1:8787`. This builds with `cf` and serves the bundled Worker using Vite preview in development mode. Restart after edits; there is no hot reload. Bundling preserves startup-time AJV schema compilation, which the Vite development module runner rejects as dynamic code generation.
 
 Admission is disabled by default. Before enabling it, verify the initial remaining OpenRouter credit and route pricing in the provider dashboard or read-only provider API (`GET /api/v1/credits` and `GET /api/v1/models`); round remaining credit down to integer microUSD. `/api/operator/budget` records that campaign balance (1 USD = 1,000,000 microUSD). Metadata checks do not qualify the model route or full workflow. The $5 maximum caps admission, not provider invoices. The $0.30-per-call and $0.60-per-phase values are holds, not hard charge limits. Reconcile every terminal phase—including successful ones—against actual provider usage before further admission; the hold remains until reconciled, and an overage blocks later admissions but cannot prevent the provider charge. Do not reset the balance to the post-spend dashboard remainder because the ledger also subtracts reconciled spend. Disable admission if external activity changes the balance. This endpoint cannot query, add, or top up credit.
 
-The app has no fake AI fallback. Without a valid key and enabled ledger, paid jobs fail closed. Local queues, Workflows, and R2 use Wrangler's local platform implementation. Remote resources, secrets, provider qualification, public release, and deployment are not configured or performed by local setup.
+The app has no fake AI fallback. Without a valid key and enabled ledger, paid jobs fail closed. Local queues, Workflows, and R2 use the cf local platform simulation, persisted under the project's `.cloudflare/state`; the corpus publisher explicitly selects the same store as Vite. Local setup never provisions or deploys remote infrastructure. Production uses the separate resources below; no Wrangler dependency or configuration is used.
 
 ## Operator-only local operations
 
@@ -84,11 +84,27 @@ Observed local verification (2026-10-16): the smoke failed against tmpfs after r
 
 - The runtime reads the published eight-case manifest and exact originals from R2; it verifies SHA-256 before using a source or serving a download.
 - `ingestion/` is offline curator tooling. It supports native text/CSV and format-aware Office/PDF/image paths; scans and visual observations require a hash-bound human-audited sidecar. Missing or incomplete extraction is excluded, never guessed.
-- `evaluation/keys.json` is offline-only and is not copied into `dist/`, R2, prompts, or application routes. Do not use evaluation keys for prompt tuning.
+- `evaluation/keys.json` is offline-only and is not copied into `.cloudflare/output/`, R2, prompts, or application routes. Do not use evaluation keys for prompt tuning.
 - Anonymous job capabilities protect status/results. Application request/results expire after seven days; minimal accounting/idempotency records remain for operator reconciliation. Workflow checkpoint retention is configured for seven days; provider/platform/backup retention is separate and is not promised to be zero.
 - Before submission, the intake identifies OpenRouter/OpenAI processing, deployed Cloudflare/Neon storage/processing, local-development equivalents, and links the provider/platform privacy policies. It distinguishes seven-day application expiry from separate upstream/platform/backup retention, retained billing/replay records, and downloaded packs. The active job's exact expiry is visible during assessment, selection, and brief review, not only export. Terminal panels show the API's safe failure explanation without operator-only diagnostics.
 - Queue/Workflow duplicates use stable IDs. Paid model calls have no automatic retries or fallback; uncertain dispatch requires operator reconciliation.
 - Human-reviewed decision and lesson cards live in the versioned curator corpus, not expiring jobs. Browse `/?knowledge`, address a record with `/?knowledge=<recordId>`, or inspect it in case details. Cards link exact supporting passages/originals and mark superseded advice as history. Applying a lesson still requires the existing checked, request-specific recommendation pipeline; no new paid stage is added. See [curator authoring and review](ingestion/README.md#decision-and-lesson-records).
+
+### Workspace shell and Sources
+
+The shared shell uses the installed Base UI Navigation Menu, Drawer, Button, Separator, Field, Input, Select, and Collapsible primitives with the existing Anduin CSS tokens. Desktop has a persistent sidebar; screens up to 900px use a labelled, swipe-dismissible navigation drawer. Ask (`/`), Sources (`/?sources`), and reviewed knowledge (`/?knowledge` and permanent record links) are real destinations. History and Saved are available within Ask; unsupported global search, account controls, and decorative actions are omitted.
+
+Same-tab navigation and Back/Forward retain the mounted Ask request, checked result, current step, and artifact/version/passage selections. Existing polling, expiry, and clarification invalidation remain unchanged. Navigation does not submit model work. Reload still discards in-memory workflow state; capabilities never enter URLs. Browser-local History retains receipt metadata and capabilities as described below, not results or selections. Escape/close returns drawer focus to its trigger; choosing a destination moves focus to the main content after dismissal.
+
+`GET /api/sources` projects the published corpus into retained source versions: case/artifact ownership, titles, MIME type, stated date, fictional label, availability, and exact passage references/source kinds. It does not expose storage paths, evaluation keys, or job capabilities. Original hashes are checked through the existing corpus loader. Missing, corrupt, and incomplete originals have no inspectable passage controls or download links in the browser; direct evidence routes continue to enforce their own integrity checks. Sources combines title/case-name search with case and file-type filters, explicit no-result/error states, and the existing evidence inspector and exact-original downloads. Browsing is not an AI relevance assessment and does not make an artifact eligible for a brief.
+
+Observed local browser verification (2026-10-17): all four workflow steps, draft/selection retention across navigation, Back/Forward, permanent knowledge links, matching/empty/combined filters, source retrieval errors, exact-original SHA-256, evidence Escape/focus return, and both pack download controls passed at 1440×1000 and 320×1000 in light and dark schemes. Mobile drawer keyboard containment, Escape/focus return, destination focus, and open-drawer desktop resize passed. Document overflow was checked against `documentElement.clientWidth`, including classic scrollbars; the old 320px document minimum width was removed rather than hiding overflow. A separate explicitly UI-only second-version fixture cleared old passage selections and blocked brief submission until reselection in all four viewport/scheme combinations; it was never published or submitted for a brief.
+
+The workflow smoke replayed an existing accepted P1 job and its retained pack bytes. Source inventory used all 24 originals in the isolated local Worker/R2; passage inspection and SHA-256-verified original downloads also hit that real Worker rather than fixtures. No paid calls, deployment, admission changes, or AI requalification were performed.
+
+Visual evidence: [desktop light](docs/images/shell-light-1440.webp), [desktop dark](docs/images/shell-dark-1440.webp), [320px light](docs/images/shell-light-320.webp), and [320px dark](docs/images/shell-dark-320.webp). Contact sheets include Ask, Sources, checked examples, selected work, checked brief, and evidence inspection; narrow sheets also include the navigation drawer. These are UI-replay evidence, not new AI-workflow qualification.
+
+Repeat the README's existing evidence/export smokes, then navigate away from and back to an unsubmitted request and selected work. Verify Back/Forward, current-location labels, keyboard drawer/evidence dismissal, version-change passage clearing, and `documentElement.scrollWidth <= documentElement.clientWidth` at 320px in both schemes. Run `node --experimental-strip-types --test src/server/sources.test.ts` for missing/corrupt/incomplete-original browsing and exact-identity regression coverage.
 
 ### Explainable reuse workbench
 
@@ -102,11 +118,28 @@ Artifact dispositions are independently reviewed classification decisions, not l
 
 Independent review assigns every assessed artifact a role: `starting_point`, `context_only`, `not_relevant`, or `unresolved`. Only source-established starting material can become Reuse/Adapt; unknown new-client compatibility does not erase a conditional Adapt starting point, and still blocks unchanged Reuse. Explicit null exclusions require a self-contained, cited explanation and no authored dependencies; no new work category or paid stage is added. Context-only material can supply a concrete supported Verify check, never an implementation lead; inapplicable work cannot be selected. The server derives the aggregate conclusion from the complete reviewed roles and surviving work, rather than requesting a second, potentially contradictory model label. Bounded no-useful-precedent requires complete source availability and settled negative roles, not invented outcomes. Roles are retained and rechecked on reads, brief admission, export, and in the browser. Missing legacy review fails closed; revalidation never upgrades a stored uncertain conclusion.
 
-Submitting clarification starts a new checked assessment and immediately invalidates artifact/version/passage selections, including when admission fails. The tab retains only the immediately previous checked assessment, read-only, until its original seven-day expiry; a new request or page reload discards it. A supported disposition-change summary shows both prior and current recommendation evidence. A missing/withheld recommendation is not reported as an established change, and the UI does not infer that clarification alone caused a model-output difference. No capability, result history, or selection is written to browser storage.
+Checked findings and targeted clarification share one screen: a sticky question/answer panel alongside findings on wide screens, stacked on narrower screens. The current request context and most recently submitted clarification remain visible while admission/checking is pending or fails. Editing answers never submits work; only **Recheck with these answers** uses the existing fresh-assessment API. No conversational stage, automatic resubmission, or transcript persistence is added.
+
+Submitting clarification immediately invalidates artifact/version/passage selections and the dependent brief, including server admission failure and the local UTF-8 request-size rejection. A running brief does not block clarification; its late receipt/status cannot replace the new assessment. The tab retains only the immediately previous checked assessment (not its brief), read-only, until its original seven-day expiry, also checked on focus/resume. A new request or page reload discards this in-memory comparison. A supported disposition-change summary shows both prior and current recommendation evidence. Missing/withheld recommendations are not established changes; historical uncertainty, withheld counts, contrasts, availability, and supported outcomes remain visible, and failed checks are not no-precedent conclusions. The UI does not infer that clarification alone caused a model-output difference. History bookmarks can explicitly reopen a live job after reload, but never restore previous selections or comparison snapshots.
 
 Existing databases require `migrations/0002_assessment_workbench.sql` and `migrations/0003_model_failure_diagnostics.sql` before Worker startup; drain active workflows before changing the strict draft/review schema. Older stored assessments without the required request-constraint review are unavailable and need a new checked assessment. No empty inventory, repaired comparison, or automatic paid rerun is fabricated.
 
 The [workbench verification record](docs/workbench-2026-10-15.md) records approved real UI runs, exact charges, source checks, latency limits, and conservative clarification outcomes. A withdrawn prior lead is labeled “not established,” never silently replaced with a withheld recommendation.
+
+### Browser-local History and Saved: privacy and retention
+
+Accepted job receipts automatically enter **History**. **Save checked job** bookmarks a server-validated assessment or reuse brief in **Saved**; both lists reference the same job, with one entry per job identity. Unsave / Clear Saved keeps History; Remove / Clear History and Saved deletes local bookmarks, not remote jobs or downloaded files. Reopen makes only the existing bearer-authenticated status/results read: it never resubmits a paid assessment or brief, and clears prior artifact/version/passage selections before validating the live response.
+
+The `memory-bank.jobs.v1` localStorage key contains only a request label (at most 100 characters), job ID, bearer capability, original server-provided expiry, and saved flag. It never contains full request bodies, sources, generated results, selections, comparison snapshots, or exported packs. This is **this browser/device only**, not account sync or a durable archive. Anyone with access to this browser's local data can use its live capabilities: do not retain entries on a shared browser. Capabilities are never put in URLs, rendered markup, application logs, screenshots, issue reports, or exports; local labels render as inert text.
+
+History and Saved share the job's original seven-day expiry. Saving, unsaving, reopening, and starting a brief never extend it. The workspace removes expired labels and capabilities at its expiry timer and on reload/focus/visibility/storage refresh; active request/results and evidence dialogs are cleared at expiry too. A closed or suspended browser cannot execute deletion: cleanup runs when the workspace next runs/resumes, and the server independently denies expired access regardless of local data. Missing/404 and expired/410 jobs are removed on validation, with no cached result fallback. Already downloaded packs remain independent offline files and are not erased by local cleanup.
+
+Unavailable/full storage shows a persistence failure while leaving the main tab workflow usable; a failed save is never marked successful. Malformed local data is discarded with an error rather than trusted. If retention cleanup cannot rewrite the key, it attempts to remove the whole key; if browser storage itself blocks access/removal, use browser site-data settings to erase it. No browser application can promise physical deletion while storage access is denied.
+
+Focused deterministic check: `node --experimental-strip-types --test src/ui/local-jobs.test.ts`. Observed Chromium smoke (2026-10-17) used built browser assets and synthetic, bearer-checking job API fixtures, not paid model calls: acceptance/save; reload and keyboard reopen of assessment/brief; duplicate receipt; unsave, remove, both clear actions; original-expiry purge; missing job; malformed/quota/blocked storage; selection reset (two checked choices → zero); keyboard focus; and 320px light/dark layouts without page overflow. Worker preview was unavailable in this task worktree because its Hyperdrive development connection was not configured; these browser checks do not claim a new live Worker/database qualification.
+
+After integrating the workspace shell, Chromium also verified that leaving Ask closes its evidence dialog without dropping the saved job, reload/reopen remains read-only, and expiry clears bookmarks and active results while Ask is hidden. A forced early expiry callback reproduced retained in-memory results; the expiry effect now rearms until the original deadline and the same browser check passes.
+
 
 ### Evidence inspector
 
@@ -142,10 +175,58 @@ The existing shared CSS roles now use Anduin's observed public blue `#0158AE`, n
 
 See the [source selectors, explicit application/dark-mode derivations, measured contrast pairs, and browser screenshot record](docs/anduin-palette-2026-10-15.md). This is website-matched branding, not a claim of access to private product tokens. Browser replay proof is separate from paid workflow qualification.
 
+## Production deployment
+
+Live URL: **<https://memory-bank.zura-tran.workers.dev>**. The owner authorized infrastructure deployment on 2026-10-16 and selected the `Zura.tran@gmail.com` Cloudflare account. This is a live corpus/UI deployment with **paid assessment and brief admission disabled**, not successful model qualification.
+
+| Resource | Production identity |
+| --- | --- |
+| Cloudflare account / Worker | `6d5eb3fa868f53e83e13401577cdfc01` / `memory-bank` |
+| Neon | `memory-bank-production` (`hidden-dream-29034304`), PostgreSQL 17, Singapore `aws-ap-southeast-1`, 0.25 CU on the existing free organization |
+| Hyperdrive | `0880749f093c4bdaab7dd377c76f68b4`; query caching disabled so admission/accounting reads are not cached |
+| R2 | Private bucket `memory-bank-originals`; 24 exact fictional originals and the `fictional-onboarding-v2` manifest |
+| Queue / Workflow / cron | `memory-bank-jobs`, `memory-bank-jobs-dead`, `memory-bank-workflow`, every-minute outbox/retention handler |
+
+`cloudflare.config.ts` is the single binding/trigger configuration. The pinned `cf` CLI and Cloudflare Vite plugin beta build both Worker and browser assets into `.cloudflare/output/v0/`; `index.html` is at the repository root. Production always sets `APP_ENV=production` and uses Hyperdrive, never `LOCAL_DATABASE_URL`. `npm run dev` explicitly selects development mode.
+
+At the initial production deployment, Neon database `memory_bank` had migrations `0001_init.sql` and `0002_assessment_workbench.sql` applied atomically. It was a separate, initially empty ledger: no historical local reservations, lost rows, or charges were reconstructed; admission was false, available credit null and holds zero. This historical observation does not establish that migration `0003_model_failure_diagnostics.sql` has been applied. Do not rerun the initial CREATE TABLE migration against this initialized database.
+
+Because `main` automatically deploys, the database prerequisite below must be satisfied before merging this revision into `main`, not merely before a manual deploy.
+
+Production secrets are Cloudflare `secret_text` bindings: `OPERATOR_TOKEN` (freshly generated, separate from local) and `OPENROUTER_API_KEY`. Their local deployment copy is `.dev.vars.production`; the direct Neon `DATABASE_URL` is in `.env.production`. Both files are Git-ignored and mode 0600. Keep these files private and back them up in a password manager; never paste them into an issue or commit. Do not upload `.env.production` as Worker secrets or copy local development variables into production.
+
+To update this deployment from an authenticated checkout:
+
+1. Run `npm ci`, `npm run typecheck`, and `npm test`.
+2. Before deploying this revision to an existing database, keep admission disabled, drain processing, take and verify a private backup, and apply any missing migrations in order, including `0003_model_failure_diagnostics.sql`. Its diagnostic columns are required even for authenticated operator status. Verify the schema before code cutover; this instruction is not authorization to migrate or deploy production.
+3. For an approved corpus edition change only, run `npm run ingest` and `npm run publish:corpus:production`. The default `npm run publish:corpus` stays local.
+4. Run `npm run deploy:check`, then `npm run deploy`. The first builds/validates without API writes; the second builds and deploys with `.dev.vars.production`. No dashboard build command or Wrangler is required.
+5. With admission still disabled, run `npm run smoke:production`. It checks health/static assets, operator access control, every complete original's SHA-256, rejected paid admission, and unchanged accounting. Its two-second address-attempt timeout avoids Node's too-short default on this WSL network; it does not retry requests or enable admission.
+
+Observed deployment verification: `cf deploy` installed the Worker, Queue consumer/producer, Workflow, and cron. Live authenticated status proved the Worker→Hyperdrive→Neon connection and closed empty ledger; all 24 original downloads matched manifest SHA-256 values. Chromium rendered the app and three reviewed knowledge records, opened exact passage evidence, and displayed HTTP 503 on a denied assessment request. No paid call or credit purchase was made. The existing 25 TypeScript tests and one Python test passed. This does not establish paid workflow execution, model quality/latency, or production recovery qualification.
+
+### GitHub automatic deployment
+
+Cloudflare Workers Builds is connected to the private `Zura1555/memory-bank` GitHub repository. Pushes to **`main`** automatically build and deploy the existing production Worker. Preview builds are disabled; feature branches do not deploy against the production database. There is no second GitHub Actions deployment pipeline.
+
+| Setting | Value |
+| --- | --- |
+| Build / deploy commands | `npm run typecheck && npm run build` / `npx cf deploy --prebuilt --mode production` |
+| Branch / root directory | `main` / `/` |
+| Build runtime | Node.js `24.19.0`, pinned npm dependencies, build cache enabled |
+| Repository connection / production trigger | `ae220010-2dd7-4a19-8916-4588943ac989` / `f026b4df-6f19-4b70-b258-8cee7930a1e0` |
+| Deployment credentials | Dedicated `memory-bank production` build token, scoped to the selected Cloudflare account |
+
+The hosted deploy command intentionally differs from `npm run deploy`: it deploys the build once and preserves existing Worker runtime secrets without requiring the private `.dev.vars.production` file in GitHub or the build environment. The build token has account-read, Worker-write, R2-read, Queue-write, and Hyperdrive-read permissions; no Neon or OpenRouter credentials were added to GitHub. Corpus publishing and database migrations remain explicit operator actions, not automatic push side effects. Git deployment does not enable paid admission.
+
+Inspect builds under [Memory Bank → Settings → Builds](https://dash.cloudflare.com/6d5eb3fa868f53e83e13401577cdfc01/workers/services/view/memory-bank/production/settings/builds), or run `npx cf builds triggers list --external-script-id b1adf51e4e0144388cfc1166d609a5cf`.
+
 ## Verification and release gates
 
 Run `npm run typecheck`, `npm test`, `npm run build`, and `npm run ingest`. Then exercise the local Worker and verify source downloads, capability ownership, budget-denied admission, queue/outbox recovery, workflow state transitions, and retention cleanup. Paid qualification requires the approved existing credit, a valid key, and measured full P1–P4 runs; freeze configuration before H1–H4. Record real model usage/cost, queue wait, phase processing time, full-context fit, extraction fidelity, memory, replay behavior, and source/version access. Do not claim these results from fictional fixtures or code inspection.
 
 The [qualification report](docs/qualification-2026-10-15.md#remaining-gate-investigation-and-correction--2026-10-17) preserves all failed evaluations and subsequent corrections. Final exposed checks completed 12 assessments and 11 selected briefs; independent semantic review passed, unchanged-output replay checked 2,675 canonical references, 22 live pack exports and all 24 original hashes. **The four freshly frozen requests did not qualify: F3 passed; F1 excluded required starting material, F2 omitted an access-duration constraint, and F4 withheld the expected negative conclusion after independent request-inventory disagreement.** No outputs or expectations were repaired and no missing selection was forced. H2 improved but one final assessment missed 90 s; P3 assessment and P3/P4 briefs also missed targets. The owner chose to finish the current profile and disclose those misses, with 128 MB total-isolate fit left open. Local process/inspector samples are not isolate-quota proof. Typecheck, 35 TypeScript tests, one Python test and build passed; this is not release qualification. Billing monitoring remains stopped; no purchase, model/profile change, merge, deployment or public release is implied.
 
-Remote deployment requires separately approved Cloudflare/Neon resources and credentials, including Hyperdrive, Queue/dead-letter queue, Workflow, R2, and the deployed static asset binding. Keep the repository private until the source/secrets review is complete; make it public only under the approved submission plan.
+PR #23 integration verification (2026-10-17) combined PR head `7ab64ca` with main `495a8d5` without replacing either workflow wholesale. Typecheck, 37 TypeScript tests, one Python test and the Cloudflare build passed. Chromium exercised the built client with synthetic API receipts and a retained checked result: shell navigation retained findings, exact artifact/passage selection reached a checked brief, History save/reload/reopen used only a status read, and missing timing remained unavailable. At 320px in dark mode, keyboard entry, labelled disclosures, drawer Escape/focus return and no horizontal overflow passed. This is UI replay, not a new Worker/database/model qualification. The integrated candidate needs a new frozen qualification fixed point; fresh, latency, memory and release gates remain open.
+
+Infrastructure deployment is now authorized and performed as described above; that authorization did not enable paid admission or change repository visibility. Keep the repository private until the source/secrets review is complete; make it public only under the approved submission plan.

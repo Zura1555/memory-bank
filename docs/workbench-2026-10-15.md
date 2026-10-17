@@ -127,3 +127,31 @@ Historical disposition/prose inconsistencies were observed and reviewer instruct
 `npm run typecheck`, `npm test` (17 TypeScript regressions plus Python validation), `npm run build`, and `npm run ingest` passed. Migration applied to the existing retained-result DB; second application updated0rows. Missing capability/operator authorization returned404; three concurrent authenticated operator reads passed. All24 exact originals matched SHA-256.
 
 Actual Chromium verified compact comparison inspection, exact passage dialog, original link, selected mapping/passages then immediate invalidation, one previous snapshot, failed-recheck history, conservative ready state, light1440px and dark320px (page width320, no page overflow after header wrapping). Tables remain locally horizontally scrollable. No new brief phase was submitted; existing brief contracts remain covered by regression tests and prior qualification.
+
+## Inline clarification UI verification — 2026-10-17
+
+Issue #27 changes the browser presentation and bounded in-memory recheck state, not assessment/clarification APIs or model stages. Findings and the question/answer panel share a two-column layout at 1280px and wider; narrower layouts stack them. Current request context and submitted clarification remain visible even without an admitted job. Previous content has its own read-only disclosure, original expiry, conservative conclusion, withholding/contrast/availability/outcome context, and evidence controls; it does not retain a previous brief.
+
+Commands run from the task checkout:
+
+```sh
+npm ci
+npm run typecheck
+npm test
+npm run build
+python3 -m http.server 8792 --bind 127.0.0.1 --directory .cloudflare/output/v0/workers/default/assets
+```
+
+Typecheck/build passed; all 27 TypeScript tests and one Python test passed, including the existing regression comparing two checked disposition recommendations rather than withheld recommendations. Actual Chromium exercised the built assets with isolated synthetic checked-result/API replay, not new model qualification. All `/api/` fetches were intercepted in that browser; no Worker, paid provider, campaign writes, admission changes, or deployment were used. A read-only attempt to obtain the previously retained live results could not connect to local PostgreSQL at `127.0.0.1:5433`, so this run does not claim a new live-evidence/backend check.
+
+Browser checks passed:
+
+- Initial request `Sandbox mapping with an unconfirmed target version.`; clarification `Client target is production; version and compatibility are unconfirmed.`. Both inputs and the complete composed POST request were asserted equal. Editing alone sent no POST. Keyboard submission sent exactly one new assessment request.
+- Select an artifact, retained version and passage, start its brief, return to findings, then submit clarification. While the new admission response is held, current old findings, selections, and dependent brief disappear; the submitted constraint/context remains and one historical assessment is retained. After readiness, no work is selected and brief submission is disabled.
+- Replayed Adapt → Reuse exposed both recommendation texts and evidence controls. Replayed withdrawal/withholding showed “not established,” not an invented Verify replacement; current unknown applicability and withheld count remained visible. A second recheck replaced the older comparison with only its immediate predecessor.
+- HTTP 503 admission rejection kept the submitted context and historical questions/result, without a current answer or selected work/brief. A UTF-8 request exceeding 16 KiB invalidated first and sent no POST. An admitted failed check displayed failure, not “no useful precedent.”
+- Deferred old-job status/brief polling, brief admission, and assessment admission responses deliberately ignored abort signals. Releasing them after a new assessment/New request did not replace the current result, resurrect a brief, or change the workflow step.
+- The predecessor disappeared at its own original short replay expiry while a newer current assessment remained. New request and reload discarded comparison state; reload did not automatically submit work.
+- At 1440×1000 and 320×1000, in both light/dark schemes: visual inspection, answer-to-submit keyboard flow, keyboard historical disclosure, exact-passage dialog, version-specific original link, Escape/focus return, and no document horizontal overflow. Comparison tables retain local horizontal scrolling. Chromium reported zero page errors.
+
+Repeat with browser-local interception only: replay ready Adapt, supply a production/version constraint and replay a withheld result; hold the POST before releasing it to inspect immediate invalidation. Repeat with a 503, failed checked phase, and deferred old polling/brief/admission responses; open prior/current evidence, replace the predecessor on another recheck, and expire the prior result independently. Never submit these scenarios to a paid endpoint without separate authorization.
