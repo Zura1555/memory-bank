@@ -61,6 +61,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .comparison-table p { margin-block: .5rem; }
 .lineage-section { padding: 1rem; border: 1px solid var(--control-border); border-radius: .75rem; }
 .lineage-section summary { cursor: pointer; color: var(--accent-strong); }
+.lineage-section summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.assessment-layout { display: grid; gap: 1.5rem; align-items: start; }
+.current-assessment, .clarification-section { min-width: 0; overflow-wrap: anywhere; }
+.clarification-section { padding: 1rem; border: 1px solid var(--control-border); border-radius: .75rem; background: var(--quiet); }
+.clarification-section h3 { font-size: 1.15rem; line-height: 1.4; }
+.clarification-form { margin-top: 1rem; }
+@media (min-width: 1280px) {
+  .assessment-layout:has(> .clarification-section) { grid-template-columns: minmax(0, 1fr) minmax(16rem, .65fr); }
+  .clarification-section { position: sticky; top: 1rem; max-height: calc(100dvh - 2rem); overflow-y: auto; }
+}
 .local-library { margin-bottom: 2rem; padding: 1rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--surface); }
 .local-library h2 { font-size: 1.2rem; }
 .local-library .action-row { flex-wrap: wrap; flex-direction: row; justify-content: flex-start; margin-block: .8rem; }
@@ -352,7 +362,7 @@ textarea::placeholder { color: var(--muted); opacity: 1; }
 
 .submitted-request { margin: 0 0 1.5rem; padding: 1rem; border-left: 3px solid var(--accent); background: var(--accent-pale); }
 .submitted-request h3 { margin-bottom: .4rem; font-size: .9rem; letter-spacing: 0; }
-.submitted-request p { margin: 0; white-space: pre-wrap; line-height: 1.55; }
+.submitted-request p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
 .content-section { margin-top: 2.4rem; }
 .section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
 .section-heading .eyebrow { margin-bottom: .3rem; }

@@ -436,16 +436,19 @@ function ComparisonTable({ rows, claims, inspect }: { rows: ComparisonRow[]; cla
   </div>;
 }
 
-function AssessmentLineage({ previous, current, inspect }: { previous: JobView; current?: AssessmentResult; inspect: InspectPassage }) {
+type PreviousAssessment = Pick<JobView, "request" | "expiresAt" | "assessment">;
+
+function AssessmentLineage({ previous, current, inspect }: { previous: PreviousAssessment; current?: AssessmentResult; inspect: InspectPassage }) {
   if (!previous.assessment) return null;
   const changes = current ? dispositionChanges(previous.assessment, current) : [];
   const supportedChanges = changes.filter((change) => change.currentClaim !== null);
   const noLongerEstablished = changes.filter((change) => change.currentClaim === null);
   const previousClaims = new Map(previous.assessment.claims.map((claim) => [claim.claimId, claim]));
+  const currentClaims = new Map((current?.claims ?? []).map((claim) => [claim.claimId, claim]));
   return <section className="content-section lineage-section" aria-label="Assessment lineage">
     <h3>Clarification recheck</h3>
     <p>Previous selections were cleared. Only the immediately previous checked assessment is retained in this tab, until its original expiry.</p>
-    {current ? <><p>Previous conclusion: {label(previous.assessment.conclusion)}. Current conclusion: {label(current.conclusion)}.</p>
+    {current ? <><p>Previous conclusion: {label(visibleConclusion(previous.assessment, previousClaims))}. Current conclusion: {label(visibleConclusion(current, currentClaims))}.</p>
       <h4>Supported disposition changes</h4>
       {supportedChanges.length ? supportedChanges.map((change) => <article className="claim-card" key={`${change.caseId}/${change.artifactId}`}>
         <h4>{change.caseId} / {change.artifactId}: {label(change.before)} → {label(change.after!)}</h4>
@@ -459,9 +462,14 @@ function AssessmentLineage({ previous, current, inspect }: { previous: JobView; 
       <p className="muted">These compare checked results, not a claim that clarification alone caused a change.</p>
     </> : <p>The recheck has not produced a checked result. The previous result below is historical, not the current recommendation.</p>}
     <details><summary>Previous checked assessment — read only</summary>
-      <p>{previous.request}</p>
-      <p>{assessmentConclusions[previous.assessment.conclusion]}</p>
-      {previous.assessment.leads.map((lead) => <LeadCard key={lead.caseId} lead={lead} claims={previousClaims} inspect={inspect} />)}
+      <p className="field-hint">Historical only. Expires <time dateTime={previous.expiresAt}>{new Date(previous.expiresAt).toLocaleString()}</time>. Previous work and brief cannot be selected or reused here.</p>
+      <div className="submitted-request"><h4>Previous request</h4><p>{previous.request}</p></div>
+      <p>{assessmentConclusions[visibleConclusion(previous.assessment, previousClaims)]}</p>
+      <WithheldNote count={previous.assessment.withheldClaimCount} />
+      {previous.assessment.leads.filter((lead) => claimsFor(lead.reasonClaimIds, previousClaims).length > 0).map((lead) => <LeadCard key={lead.caseId} lead={lead} claims={previousClaims} inspect={inspect} />)}
+      {previous.assessment.contrasts.filter((lead) => claimsFor(lead.reasonClaimIds, previousClaims).length > 0).map((lead) => <LeadCard key={lead.caseId} lead={lead} contrast claims={previousClaims} inspect={inspect} />)}
+      <h4>Previous availability and outcomes</h4>
+      <ul>{previous.assessment.cases.map((item) => <li key={item.caseId}>{item.caseId}: {label(item.availability)} · Outcome: {label(claimsFor(item.outcomeClaimIds, previousClaims).length ? item.outcome : "unknown")}</li>)}</ul>
       <ComparisonTable rows={previous.assessment.comparisons} claims={previousClaims} inspect={inspect} />
       <ClaimGroup title="Previous checked claims" ids={previous.assessment.claims.map((claim) => claim.claimId)} claims={previousClaims} inspect={inspect} />
     </details>
@@ -942,13 +950,14 @@ function App({ active }: { active: boolean }) {
   const [request, setRequest] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [job, setJob] = useState<JobView | null>(null);
-  const [previousJob, setPreviousJob] = useState<JobView | null>(null);
+  const [previousJob, setPreviousJob] = useState<PreviousAssessment | null>(null);
   const [pollMode, setPollMode] = useState<PollMode>(null);
   const [workDrafts, setWorkDrafts] = useState<Record<string, WorkDraft>>({});
   const [serviceError, setServiceError] = useState<string | null>(null);
   const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const [questionAnswers, setQuestionAnswers] = useState("");
+  const [submittedClarification, setSubmittedClarification] = useState<{ context: string; answers: string } | null>(null);
   const [submittingBrief, setSubmittingBrief] = useState(false);
   const [localData, setLocalData] = useState(readBrowserJobs);
   const [library, setLibrary] = useState<"History" | "Saved">("History");
@@ -1014,10 +1023,25 @@ function App({ active }: { active: boolean }) {
 
   useEffect(() => {
     if (!previousJob) return;
-    const remaining = Date.parse(previousJob.expiresAt) - Date.now();
-    if (!Number.isFinite(remaining) || remaining <= 0) { setPreviousJob(null); return; }
-    const timer = window.setTimeout(() => { setPreviousJob(null); setPassageRef(null); }, remaining);
-    return () => window.clearTimeout(timer);
+    let timer: number;
+    const expire = () => {
+      const remaining = Date.parse(previousJob.expiresAt) - Date.now();
+      if (Number.isFinite(remaining) && remaining > 0) {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(expire, remaining);
+        return;
+      }
+      setPreviousJob(null);
+      setPassageRef(null);
+    };
+    expire();
+    window.addEventListener("focus", expire);
+    document.addEventListener("visibilitychange", expire);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", expire);
+      document.removeEventListener("visibilitychange", expire);
+    };
   }, [previousJob]);
 
   useEffect(() => {
@@ -1127,12 +1151,12 @@ function App({ active }: { active: boolean }) {
   async function createAssessment(requestText: string, clarification = false) {
     const trimmed = requestText.trim();
     if (!trimmed || submittingRequest) return;
-    if (new TextEncoder().encode(trimmed).byteLength > 16 * 1024) {
-      setServiceError("The request and answers must stay within 16 KiB.");
-      return;
+    if (clarification && job?.assessment && job.assessmentState === "ready" && Date.parse(job.expiresAt) > Date.now()) {
+      setPreviousJob({ request: job.request, expiresAt: job.expiresAt, assessment: job.assessment });
+    } else if (!clarification) {
+      setPreviousJob(null);
+      setSubmittedClarification(null);
     }
-    if (clarification && job?.assessment && job.assessmentState === "ready" && Date.parse(job.expiresAt) > Date.now()) setPreviousJob(job);
-    else if (!clarification) setPreviousJob(null);
     sessionGeneration.current += 1;
     pollController.current?.abort();
     briefController.current?.abort();
@@ -1145,6 +1169,11 @@ function App({ active }: { active: boolean }) {
     setStep(2);
     setRequest(trimmed);
     setQuestionAnswers("");
+    setServiceError(null);
+    if (new TextEncoder().encode(trimmed).byteLength > 16 * 1024) {
+      setServiceError("The request and answers must stay within 16 KiB. No new assessment was admitted; previous selections and brief were cleared.");
+      return;
+    }
     const submissionId = ++requestSubmissionId.current;
     requestController.current?.abort();
     const controller = new AbortController();
@@ -1204,6 +1233,7 @@ function App({ active }: { active: boolean }) {
     event.preventDefault();
     const answers = questionAnswers.trim();
     if (!answers || submittingRequest) return;
+    setSubmittedClarification({ context: request.trim(), answers });
     await createAssessment(`${request.trim()}\n\nClarifications supplied by the delivery lead:\n${answers}`, true);
   }
 
@@ -1224,6 +1254,7 @@ function App({ active }: { active: boolean }) {
     setPollMode(null);
     setWorkDrafts({});
     setQuestionAnswers("");
+    setSubmittedClarification(null);
     setSubmittingRequest(false);
     setSubmittingBrief(false);
     setServiceError(null);
@@ -1305,6 +1336,9 @@ function App({ active }: { active: boolean }) {
   const assessmentState = job?.assessmentState ?? "queued";
   const briefState = job?.briefState ?? "not_started";
   const assessmentAvailable = assessmentState === "ready" && !!assessment;
+  const rechecking = submittingRequest || pollMode === "assessment" || pollMode === "restore";
+  const questions = assessmentAvailable ? assessment : previousJob?.assessment;
+  const questionClaims = assessmentAvailable ? assessmentClaims : new Map((questions?.claims ?? []).map((claim) => [claim.claimId, claim]));
 
   return (
     <>
@@ -1376,17 +1410,23 @@ function App({ active }: { active: boolean }) {
         {step === 2 && (
           <section className="screen" aria-labelledby="examples-title">
             <div className="screen-heading"><span className="step-kicker">Step 2 of 4</span><h2 id="examples-title">Checked past examples</h2><p>These are checked fictional records, not proof that the same outcome will happen again.</p></div>
-            {job && <div className="submitted-request"><h3>Your request</h3><p>{request.trim()}</p></div>}
-            {previousJob && <AssessmentLineage previous={previousJob} current={assessmentAvailable ? assessment : undefined} inspect={setPassageRef} />}
+            <div className="assessment-layout">
+            <section className="current-assessment" aria-labelledby="current-assessment-title">
+            <h3 id="current-assessment-title">Current assessment</h3>
+            {(request.trim() || submittedClarification) && <div className="submitted-request">
+              <h4>Current request context</h4><p>{submittedClarification?.context ?? request.trim()}</p>
+              {submittedClarification && <><h4>Submitted clarification</h4><p>{submittedClarification.answers}</p></>}
+            </div>}
             {(session || submittingRequest) && (assessmentState === "queued" || assessmentState === "running" || assessmentState === "not_started") && (
               <div className="status-panel" role="status" aria-live="polite">
                 <span className="status-indicator" aria-hidden="true" />
-                <div><strong>{assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job?.stage ?? "assembling")}</strong><p>No result is shown until the evidence check is ready.</p></div>
+                <div><strong>{submittingRequest ? "Submitting request for admission" : assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job?.stage ?? "assembling")}</strong><p>No result is shown until the evidence check is ready.</p></div>
               </div>
             )}
             {assessmentState === "failed" && <div className="notice notice-error" role="alert"><strong>Evidence check failed.</strong> No past-example result is available.</div>}
             {assessmentState === "reconciliation_required" && <div className="notice notice-warning" role="alert"><strong>Evidence reconciliation is required.</strong> Results are withheld until the checked evidence can be reconciled.</div>}
             {assessmentState === "ready" && !assessment && <div className="notice notice-error" role="alert">The service did not return a supported checked assessment. No result is shown.</div>}
+            {!session && !submittingRequest && submittedClarification && <p className="notice notice-warning" role="status">No current checked answer is available. Previous content is historical only. No selections or dependent brief remain.</p>}
             {assessmentAvailable && (
               <>
                 <div className={`conclusion-panel conclusion-${visibleConclusion(assessment, assessmentClaims)}`} role="status">
@@ -1401,17 +1441,6 @@ function App({ active }: { active: boolean }) {
                     <ClaimCard claim={assessmentClaims.get(action.claimId)!} inspect={setPassageRef} />
                   </article>)}</div>
                 </section>}
-                  <section className="content-section clarification-section" aria-labelledby="clarification-title">
-                    <div className="section-heading">
-                      <div><p className="eyebrow">Decision-critical constraints</p><h3 id="clarification-title">{assessment.clarifyingClaimIds.length ? "Questions that may change which work applies" : "Add or clarify client constraints"}</h3></div>
-                    </div>
-                    <ClaimGroup title="Checked questions and why they matter" ids={assessment.clarifyingClaimIds} claims={assessmentClaims} inspect={setPassageRef} />
-                    <form className="request-form clarification-form" onSubmit={submitClarifications}>
-                      <label htmlFor="clarification-answers">Client answers</label>
-                      <textarea id="clarification-answers" value={questionAnswers} onChange={(event) => setQuestionAnswers(event.currentTarget.value)} rows={4} maxLength={4000} placeholder="Answer relevant questions. A fresh assessment clears selections and retains one previous checked result in this tab." />
-                      <button className="secondary-button" type="submit" disabled={submittingRequest || !questionAnswers.trim()}>{submittingRequest ? "Rechecking…" : "Recheck with these answers"}</button>
-                    </form>
-                  </section>
                 <section className="content-section" aria-labelledby="lead-title">
                   <div className="section-heading"><div><p className="eyebrow">Checked leads</p><h3 id="lead-title">Examples that may be relevant</h3></div><span className="muted">Up to three leads</span></div>
                   {checkedLeads.length === 0 ? <p className="empty-state">No supported checked leads were returned.</p> : checkedLeads.slice(0, 3).map((lead) => <div key={lead.caseId}>
@@ -1442,6 +1471,21 @@ function App({ active }: { active: boolean }) {
                 <div className="action-row"><button className="primary-button" type="button" onClick={() => setStep(3)}>Choose work from these examples</button></div>
               </>
             )}
+            </section>
+            {(assessmentAvailable || submittedClarification) && <aside className="clarification-section" aria-labelledby="clarification-title">
+              <p className="eyebrow">Decision-critical constraints</p>
+              <h3 id="clarification-title">{questions?.clarifyingClaimIds.length ? "Questions that may change which work applies" : "Add or clarify client constraints"}</h3>
+              {!assessmentAvailable && questions && <p className="field-hint">Previous checked questions — not a newly checked answer.</p>}
+              <ClaimGroup title="Checked questions and why they matter" ids={questions?.clarifyingClaimIds ?? []} claims={questionClaims} inspect={setPassageRef} />
+              <form className="request-form clarification-form" onSubmit={submitClarifications}>
+                <label htmlFor="clarification-answers">Client answers</label>
+                <textarea id="clarification-answers" value={questionAnswers} onChange={(event) => setQuestionAnswers(event.currentTarget.value)} rows={4} maxLength={4000} disabled={rechecking} aria-describedby="clarification-hint" placeholder="Answer relevant questions or supply a new client constraint." />
+                <p id="clarification-hint" className="field-hint">Only submitting starts a fresh evidence check. It immediately clears artifact, version, and passage selections and the dependent brief, even if admission fails. One previous checked assessment remains read-only until its original expiry.</p>
+                <button className="secondary-button" type="submit" disabled={rechecking || !questionAnswers.trim()}>{rechecking ? "Rechecking…" : "Recheck with these answers"}</button>
+              </form>
+            </aside>}
+            </div>
+            {previousJob && <AssessmentLineage previous={previousJob} current={assessmentAvailable ? assessment : undefined} inspect={setPassageRef} />}
           </section>
         )}
 
