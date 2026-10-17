@@ -10,7 +10,7 @@ import { buildStarterPack } from "./packs.ts";
 import { validateSelections } from "./selections.ts";
 import { assessmentPassageIds, EvidenceUnavailable, type Artifact, type CorpusSnapshot, type ModelCaseContext, type PastCase, type SourceVersion } from "./corpus.ts";
 import { dispositionChanges } from "../ui/lineage.ts";
-import { assessmentDraftPrompt, briefDraftPrompt } from "./prompts.ts";
+import { assessmentDraftPrompt, briefDraftPrompt, selectedAssessment } from "./prompts.ts";
 import { callModel } from "./model.ts";
 import type { Env } from "./env.ts";
 
@@ -117,6 +117,25 @@ function assessmentDraft(corpus: CorpusSnapshot): AssessmentDraft {
     claims,
   };
 }
+
+test("brief assessment background is scoped to selected work without cutting its dependencies", () => {
+  const corpus = fixture();
+  const draft = assessmentDraft(corpus);
+  const checked = buildCheckedAssessment(draft, new Map(draft.claims.map((item) => [item.claimId, "supported"])), new Set(), corpus, artifactRoles(draft), emptyRequirementReview);
+  const selected = [{ caseId: "case-1", artifactId: "handover", versionId: "handover-v1-case-1", passageIds: ["p-handover-v1-case-1"] }];
+  const scoped = selectedAssessment(checked, selected);
+  assert.deepEqual(scoped.cases.map((item) => item.caseId), ["case-1"], "Unselected cases are not brief background.");
+  assert.deepEqual(scoped.cases[0].artifactWork.map((item) => item.artifactId), ["handover"], "Only the selected artifact's checked work is retained.");
+  assert.ok(scoped.artifactReviews.every((item) => item.caseId === "case-1" && item.artifactId === "handover"));
+  const claimIds = new Set(scoped.claims.map((claim) => claim.claimId));
+  assert.ok(claimIds.has("decision-0-1") && claimIds.has("fact-0-1"), "The selected claim and its dependency survive scoping.");
+  assert.ok(!claimIds.has("fact-1-0") && !claimIds.has("decision-7-0"), "Claims belonging only to unselected cases are omitted.");
+  assert.ok(scoped.claims.length < checked.claims.length, "Scoping must actually reduce the brief provider document.");
+  assert.deepEqual(scoped.requestConstraints, checked.requestConstraints, "The global request inventory is retained in full.");
+  const prompt = briefDraftPrompt("current request", selected, corpus, checked);
+  const background = (prompt.untrustedData as { historicalContext: { checkedAssessment: { cases: { caseId: string }[] } } }).historicalContext.checkedAssessment;
+  assert.deepEqual(background.cases.map((item) => item.caseId), ["case-1"], "The brief draft prompt carries the scoped background, not all eight cases.");
+});
 
 test("assessment rejects omitted artifacts even when all eight cases are present", () => {
   const corpus = fixture();
