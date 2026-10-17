@@ -4,7 +4,7 @@ import { EvidenceUnavailable, knowledgeCards, loadCorpus, sourceVersion, type Co
 import { database } from "./db.ts";
 import type { Env } from "./env.ts";
 import { HttpFailure } from "./errors.ts";
-import { revalidateAssessment, revalidateBrief } from "./gates.ts";
+import { revalidateAssessment, revalidateBrief, withAssessmentConstraintFloor } from "./gates.ts";
 import { ownedJob, type JobRecord } from "./jobs.ts";
 import { validateSelections } from "./selections.ts";
 
@@ -74,7 +74,10 @@ export function buildStarterPack(job: JobRecord, corpus: CorpusSnapshot, origin:
   const assessment = revalidateAssessment(job.assessment_result, job.request_text, corpus);
   const selections = validateSelections(job.brief_selections, assessment, corpus);
   const selected = new Set(selections.map(identity));
-  const rechecked = revalidateBrief(job.brief_result, job.request_text, corpus);
+  const floored = job.brief_result.constraintReviews
+    ? { ...job.brief_result, constraintReviews: withAssessmentConstraintFloor(job.brief_result.constraintReviews, assessment, job.request_text) }
+    : job.brief_result;
+  const rechecked = revalidateBrief(floored, job.request_text, corpus);
   const claims = selectedClaims(rechecked.claims, selected);
   const claimIds = new Set(claims.map((claim) => claim.claimId));
   const keep = (items: BriefItem[]) => items.filter((item) => selected.has(identity(item)) && claimIds.has(item.dispositionClaimId) && item.claimIds.every((id) => claimIds.has(id)));

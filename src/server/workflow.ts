@@ -22,6 +22,7 @@ import {
   buildCheckedAssessment,
   buildCheckedBrief,
   GateFailure,
+  withAssessmentConstraintFloor,
   validateAssessmentDraft,
   validateBriefDraft,
   validateSupportReview,
@@ -199,7 +200,10 @@ export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> 
         const reviewAttemptId = await paidStep(this.env, params, step, "brief-support-review", 2, "brief_review", reviewPrompt);
         const review = briefSupportReviewSchema.parse(await loadStageOutput(this.env, reviewAttemptId));
         const verdicts = validateSupportReview(draft.claims, review);
-        const checked = buildCheckedBrief(draft, verdicts, invalidRefs, { request, constraintReviews: review.constraintReviews });
+        const checked = buildCheckedBrief(draft, verdicts, invalidRefs, {
+          request,
+          constraintReviews: withAssessmentConstraintFloor(review.constraintReviews, assessment, request),
+        });
         await finishPhase(this.env, params, checked);
       }
     } catch (error) {

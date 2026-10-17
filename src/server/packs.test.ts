@@ -8,7 +8,7 @@ import type { JobRecord } from "./jobs.ts";
 import type { Env } from "./env.ts";
 import { buildStarterPack, starterPackMarkdown } from "./packs.ts";
 import { app } from "./http.ts";
-import { buildCheckedBrief, revalidateBrief, validateBriefDraft, validateSupportReview } from "./gates.ts";
+import { buildCheckedBrief, revalidateBrief, validateBriefDraft, validateSupportReview, withAssessmentConstraintFloor } from "./gates.ts";
 import { briefSupportReviewSchema, reviewSchema } from "./schemas.ts";
 
 async function fixture() {
@@ -117,7 +117,7 @@ test("checked briefs and both portable formats retain independently reviewed exa
   job.request_text = `client scope; ${quotes.join("; ")}`;
   const original = job.brief_result!.claims.find((claim) => claim.claimId === item.dispositionClaimId)!;
   const recommendation: Claim = {
-    ...original, requestQuotes: [job.request_text, ...quotes],
+    ...original, requestQuotes: ["client scope", job.request_text, ...quotes],
     text: `Before adaptation, check the requested constraints: ${job.request_text}.`,
   };
   const fact = job.brief_result!.claims.find((claim) => claim.claimId === original.dependsOnClaimIds[0])!;
@@ -168,6 +168,41 @@ test("checked briefs and both portable formats retain independently reviewed exa
     validateSupportReview(draft.claims, review), new Set(),
     { request: job.request_text, constraintReviews: [{ ...review.constraintReviews[0], requestQuotes: [] }] },
   ).adapt, []);
+});
+
+test("an assessment-accepted duration stays in the checked brief and both exports when brief review inventories nothing", async () => {
+  const { corpus, job } = await fixture();
+  const duration = "seven business days";
+  const adapt = job.brief_result!.adapt[0];
+  const sibling = job.brief_result!.reuse[0];
+  job.request_text = `Check client scope for ${duration}.`;
+  const recommendation = job.assessment_result!.claims.find((claim) => claim.claimId === adapt.dispositionClaimId)!;
+  recommendation.requestQuotes = [duration];
+  recommendation.text = `The request asks for ${duration} of named access.`;
+  job.assessment_result!.requestConstraints.identity_access = [duration];
+  const reviews = job.brief_result!.constraintReviews.map((review) => ({ ...review, requestQuotes: [] as string[] }));
+  const floored = withAssessmentConstraintFloor(reviews, job.assessment_result!, job.request_text);
+  assert.deepEqual(floored.find((review) => review.versionId === adapt.versionId)?.requestQuotes, [duration, "client scope"]);
+  assert.deepEqual(floored.find((review) => review.versionId === sibling.versionId)?.requestQuotes, ["client scope"]);
+  const generic = structuredClone(job.brief_result!);
+  generic.constraintReviews = floored;
+  const adaptClaim = generic.claims.find((claim) => claim.claimId === adapt.dispositionClaimId)!;
+  adaptClaim.requestQuotes = [];
+  adaptClaim.text = "Check configured expiry before adaptation.";
+  const withheld = buildCheckedBrief(generic, new Map(generic.claims.map((claim) => [claim.claimId, "supported" as const])), new Set(), { request: job.request_text, constraintReviews: floored });
+  assert.equal(withheld.adapt.length, 0);
+  assert.equal(withheld.claims.some((claim) => claim.text.includes(duration)), false);
+  adaptClaim.requestQuotes = [duration, "client scope"];
+  adaptClaim.text = `Before adaptation, check client scope for the requested ${duration} access period. Audit and removal remain unverified.`;
+  const checked = buildCheckedBrief(generic, new Map(generic.claims.map((claim) => [claim.claimId, "supported" as const])), validateBriefDraft(generic, job.request_text, job.brief_selections!, corpus), { request: job.request_text, constraintReviews: floored });
+  assert.equal(checked.adapt[0]?.versionId, adapt.versionId);
+  assert.equal(checked.reuse[0]?.versionId, sibling.versionId);
+  job.brief_result = checked;
+  const pack = buildStarterPack(job, corpus, "https://demo.example");
+  const markdown = starterPackMarkdown(pack).split("## Checked brief claims / adaptation and verification checklist")[1].split("## Blocking questions")[0];
+  assert.ok(JSON.stringify(pack.brief.claims).includes(duration));
+  assert.ok(markdown.includes(duration));
+  assert.equal(markdown.includes("configured expiry"), false);
 });
 
 test("expiry, incomplete jobs, changed corpus and unavailable selected originals block a new pack", async () => {
