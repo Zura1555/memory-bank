@@ -16,18 +16,29 @@ export interface ModelUsage {
   provider: string | null;
 }
 
+type FailurePhase = "request" | "fetch" | "response_headers" | "response_body" | "response_validation" | "output_validation";
+type FailureCause = "deadline_exceeded" | "timeout" | "aborted" | "transport_error";
+
 export class ModelCallError extends Error {
   readonly code: string;
   readonly status: number | null;
   readonly uncertain: boolean;
+  readonly failurePhase: FailurePhase;
+  readonly failureCause: FailureCause | null;
   generationId: string | null = null;
 
-  constructor(code: string, status: number | null, uncertain: boolean) {
+  constructor(
+    code: string, status: number | null, uncertain: boolean,
+    failurePhase: FailurePhase = "request",
+    failureCause: FailureCause | null = null,
+  ) {
     super(code);
     this.name = "ModelCallError";
     this.code = code;
     this.status = status;
     this.uncertain = uncertain;
+    this.failurePhase = failurePhase;
+    this.failureCause = failureCause;
   }
 }
 
@@ -36,8 +47,19 @@ const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_MODEL_REQUEST_BYTES = 900_000;
 const MAX_MODEL_RESPONSE_BYTES = 2 * 1024 * 1024;
 
-async function readProviderJson(response: Response): Promise<unknown> {
-  if (!response.body) throw new ModelCallError("MODEL_RESPONSE_INVALID", response.status, true);
+function transportCause(error: unknown, deadline: AbortSignal | undefined): FailureCause {
+  if (deadline?.aborted && deadline.reason?.name === "TimeoutError") return "deadline_exceeded";
+  if (error instanceof Error && error.name === "TimeoutError") return "timeout";
+  if (error instanceof Error && error.name === "AbortError") return "aborted";
+  return "transport_error";
+}
+
+function safeGenerationId(value: unknown): string | null {
+  return typeof value === "string" && /^gen-[A-Za-z0-9_-]{1,251}$/.test(value) ? value : null;
+}
+
+async function readProviderJson(response: Response, deadline: AbortSignal): Promise<unknown> {
+  if (!response.body) throw new ModelCallError("MODEL_RESPONSE_INVALID", response.status, true, "response_body");
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -46,13 +68,13 @@ async function readProviderJson(response: Response): Promise<unknown> {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > MAX_MODEL_RESPONSE_BYTES) throw new ModelCallError("MODEL_RESPONSE_INVALID", response.status, true);
+      if (size > MAX_MODEL_RESPONSE_BYTES) throw new ModelCallError("MODEL_RESPONSE_INVALID", response.status, true, "response_body");
       chunks.push(value);
     }
   } catch (error) {
     await reader.cancel().catch(() => undefined);
     if (error instanceof ModelCallError) throw error;
-    throw new ModelCallError("MODEL_DISPATCH_UNCERTAIN", response.status, true);
+    throw new ModelCallError("MODEL_DISPATCH_UNCERTAIN", response.status, true, "response_body", transportCause(error, deadline));
   } finally {
     reader.releaseLock();
   }
@@ -65,7 +87,7 @@ async function readProviderJson(response: Response): Promise<unknown> {
   try {
     return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
   } catch {
-    throw new ModelCallError("MODEL_RESPONSE_INVALID", response.status, true);
+    throw new ModelCallError("MODEL_RESPONSE_INVALID", response.status, true, "response_validation");
   }
 }
 
@@ -87,14 +109,14 @@ const providerResponseSchema = z.object({
 
 function resultSchema(stage: ModelStage, prompt: StagePrompt) {
   switch (stage) {
-    case "assessment_draft": return assessmentDraftSchema;
-    case "brief_draft": return briefDraftSchema;
+    case "assessment_draft": return prompt.responseSchema ?? assessmentDraftSchema;
+    case "brief_draft": return prompt.responseSchema ?? briefDraftSchema;
     case "assessment_review":
     case "brief_review":
-      if (!prompt.reviewTargets || (stage === "assessment_review") !== (prompt.reviewTargets.leadArtifacts !== undefined)) {
+      if (!prompt.reviewTargets || (stage === "assessment_review") !== (prompt.reviewTargets.artifacts !== undefined)) {
         throw new ModelCallError("MODEL_REVIEW_TARGETS_UNAVAILABLE", null, false);
       }
-      return reviewSchema(prompt.reviewTargets);
+      return reviewSchema(prompt.reviewTargets, prompt.currentRequest ?? "");
   }
 }
 
@@ -104,6 +126,7 @@ export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StageP
   if (!env.OPENROUTER_API_KEY) throw new ModelCallError("MODEL_CREDENTIAL_UNAVAILABLE", null, false);
   const schema = resultSchema(stage, prompt);
   const timeoutMs = 120_000;
+  let deadline: AbortSignal | undefined;
   let response: Response;
   try {
     const requestBody = JSON.stringify({
@@ -125,9 +148,10 @@ export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StageP
     if (new TextEncoder().encode(requestBody).byteLength > MAX_MODEL_REQUEST_BYTES) {
       throw new ModelCallError("MODEL_CONTEXT_TOO_LARGE", null, false);
     }
+    deadline = AbortSignal.timeout(timeoutMs);
     response = await fetch(API_URL, {
       method: "POST",
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: deadline,
       headers: {
         Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
         "Content-Type": "application/json",
@@ -136,42 +160,46 @@ export async function callOpenRouter(env: Env, stage: ModelStage, prompt: StageP
     });
   } catch (error) {
     if (error instanceof ModelCallError) throw error;
-    throw new ModelCallError("MODEL_DISPATCH_UNCERTAIN", null, true);
+    throw new ModelCallError("MODEL_DISPATCH_UNCERTAIN", null, true, "fetch", transportCause(error, deadline));
   }
 
-  if (!response.ok) {
-    await response.body?.cancel().catch(() => undefined);
-    throw new ModelCallError("MODEL_PROVIDER_REJECTED", response.status, response.status >= 500);
-  }
+  let generationId = safeGenerationId(response.headers.get("x-generation-id"));
   try {
-    const body = await readProviderJson(response);
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new ModelCallError("MODEL_PROVIDER_REJECTED", response.status, response.status >= 500, "response_headers");
+    }
+    const body = await readProviderJson(response, deadline);
+    if (typeof body === "object" && body !== null && "id" in body) {
+      generationId = safeGenerationId(body.id) ?? generationId;
+    }
     const parsedEnvelope = providerResponseSchema.safeParse(body);
-    if (!parsedEnvelope.success) throw new ModelCallError("MODEL_RESPONSE_INVALID", response.status, true);
+    if (!parsedEnvelope.success) throw new ModelCallError("MODEL_RESPONSE_INVALID", response.status, true, "response_validation");
     const data = parsedEnvelope.data;
     const choice = data.choices?.[0];
     const usage: ModelUsage = {
       promptTokens: data.usage?.prompt_tokens ?? null,
       completionTokens: data.usage?.completion_tokens ?? null,
       reportedCostUsd: data.usage?.cost ?? null,
-      responseId: data.id ?? response.headers.get("x-generation-id"),
+      responseId: generationId,
       requestedModel: MODEL,
       returnedModel: data.model ?? null,
       provider: data.provider ?? null,
     };
     if (!choice || choice.finish_reason !== "stop" || typeof choice.message?.content !== "string" || choice.message.refusal) {
-      throw new ModelCallError("MODEL_OUTPUT_INCOMPLETE_OR_REFUSED", response.status, true);
+      throw new ModelCallError("MODEL_OUTPUT_INCOMPLETE_OR_REFUSED", response.status, true, "output_validation");
     }
     let decoded: unknown;
     try {
       decoded = JSON.parse(choice.message.content);
     } catch {
-      throw new ModelCallError("MODEL_OUTPUT_INVALID_JSON", response.status, true);
+      throw new ModelCallError("MODEL_OUTPUT_INVALID_JSON", response.status, true, "output_validation");
     }
     const parsed = schema.safeParse(decoded);
-    if (!parsed.success) throw new ModelCallError("MODEL_OUTPUT_SCHEMA_INVALID", response.status, true);
+    if (!parsed.success) throw new ModelCallError("MODEL_OUTPUT_SCHEMA_INVALID", response.status, true, "output_validation");
     return { output: parsed.data, usage };
   } catch (error) {
-    if (error instanceof ModelCallError) error.generationId = response.headers.get("x-generation-id");
+    if (error instanceof ModelCallError) error.generationId = generationId;
     throw error;
   }
 }

@@ -25,7 +25,7 @@ import {
   validateAssessmentDraft,
   validateBriefDraft,
   validateSupportReview,
-  validateLeadReview,
+  validateArtifactReview,
   revalidateAssessment,
 } from "./gates.ts";
 import { validateSelections } from "./selections.ts";
@@ -179,8 +179,8 @@ export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> 
         const reviewAttemptId = await paidStep(this.env, params, step, "assessment-support-review", 2, "assessment_review", reviewPrompt);
         const review = assessmentReviewSchema.parse(await loadStageOutput(this.env, reviewAttemptId));
         const verdicts = validateSupportReview(draft.claims, review);
-        const leadVerdicts = validateLeadReview(draft, review);
-        const checked = buildCheckedAssessment(draft, verdicts, invalidRefs, corpus, leadVerdicts, review.conclusion);
+        const artifactRoles = validateArtifactReview(draft, review);
+        const checked = buildCheckedAssessment(draft, verdicts, invalidRefs, corpus, artifactRoles, { request, constraints: review.requestConstraints });
         await finishPhase(this.env, params, checked);
       } else {
         if (job.assessment_state !== "ready" || !job.assessment_result || !job.brief_selections?.length) throw new Error("BRIEF_PREREQUISITE_MISSING");

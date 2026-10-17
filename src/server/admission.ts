@@ -76,7 +76,7 @@ export async function createAssessmentJob(env: Env, request: string): Promise<Cr
 }
 
 function normalizedSelections(selections: Selection[]): Selection[] {
-  return selections.map((item) => ({ ...item, passageIds: [...item.passageIds].sort() }))
+  return selections.map((item) => ({ caseId: item.caseId, artifactId: item.artifactId, versionId: item.versionId, passageIds: [...item.passageIds].sort() }))
     .sort((a, b) => `${a.caseId}/${a.artifactId}/${a.versionId}`.localeCompare(`${b.caseId}/${b.artifactId}/${b.versionId}`));
 }
 

@@ -46,8 +46,13 @@ export async function ownedJob(pool: Pool, jobId: string, hash: Buffer): Promise
 
 function phaseTimes(queuedAt: Date | null, startedAt: Date | null, finishedAt: Date | null, now: number): { queueWaitMs: number | null; processingMs: number | null } {
   if (!queuedAt) return { queueWaitMs: null, processingMs: null };
-  const queueWaitMs = Math.max(0, (startedAt?.getTime() ?? (finishedAt ? queuedAt.getTime() : now)) - queuedAt.getTime());
-  const processingMs = startedAt ? Math.max(0, (finishedAt?.getTime() ?? now) - startedAt.getTime()) : null;
+  const queued = queuedAt.getTime();
+  const started = startedAt?.getTime() ?? null;
+  if (started === null && finishedAt) return { queueWaitMs: null, processingMs: null };
+  const end = finishedAt?.getTime() ?? now;
+  if ((started !== null && started < queued) || end < (started ?? queued)) return { queueWaitMs: null, processingMs: null };
+  const queueWaitMs = (started ?? (finishedAt ? queued : now)) - queued;
+  const processingMs = started === null ? null : end - started;
   return { queueWaitMs, processingMs };
 }
 

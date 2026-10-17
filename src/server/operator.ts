@@ -49,7 +49,7 @@ export async function operatorStatus(env: Env): Promise<object> {
     ),
     pool.query(
       `SELECT id, reservation_id, job_id, phase, call_index, state, requested_model, returned_model, provider,
-         generation_id, usage, error_code, dispatched_at, completed_at
+         generation_id, usage, error_code, http_status, failure_phase, failure_cause, dispatched_at, completed_at
        FROM model_attempts ORDER BY created_at DESC LIMIT 50`,
     ),
     pool.query(
