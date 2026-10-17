@@ -274,7 +274,8 @@ export function buildCheckedAssessment(
     || draft.cases.some((item) => item.artifactWork.some((work) => !artifactRoles.has(`${item.caseId}/${work.artifactId}`)))) {
     throw new GateFailure("INCOMPLETE_ARTIFACT_REVIEW", "Missing or unknown artifact-role review.");
   }
-  let requirementConflict = false;
+  let requirementConflict = (Object.keys(constraints.data) as (keyof RequestConstraints)[])
+    .some((dimension) => (constraints.data[dimension].length === 0) !== (draftConstraints.data[dimension].length === 0));
   for (const row of draft.comparisons) {
     if ((row.requirementClaimId === null) !== (constraints.data[row.dimension].length === 0)
       || (row.requirementClaimId === null) !== (draftConstraints.data[row.dimension].length === 0)) {

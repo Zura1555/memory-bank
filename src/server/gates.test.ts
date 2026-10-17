@@ -819,6 +819,53 @@ test("explicit artifact exclusion is reviewed and explained without fabricating 
   assert.equal(assessmentDraftSchema.safeParse(danglingExclusion).success, false);
 });
 
+test("operational acceptance conflicts block negative proof even without comparison rows", () => {
+  const corpus = fixture();
+  const constraints: RequestConstraints = {
+    ...emptyRequirementReview.constraints,
+    recovery_operations: [
+      "The client's operating deadline is six hours.",
+      "Acceptance needs a signed receipt for each processed item, although that capability is unconfirmed.",
+      "An aggregate count is not an acceptable substitute.",
+    ],
+  };
+  const request = ["Assess the available evidence.", ...constraints.recovery_operations].join(" ");
+  const ids = assessmentPassageIds(corpus);
+  const draft = parseAssessmentDraft({
+    requestConstraints: constraints, leads: [], contrasts: [], clarifyingClaimIds: [], claims: [],
+    cases: corpus.manifest.cases.map((item) => ({
+      caseId: item.caseId, outcome: "unknown",
+      artifactWork: item.artifacts.map((artifact) => ({
+        artifactId: artifact.artifactId, disposition: null, usefulForLead: false,
+        recommendation: { text: "This record does not establish the requested operating procedure.", sourceRefs: [ids.get(artifact.versions[0].passages[0].passageId)!], requestQuotes: constraints.recovery_operations, dependsOnClaimIds: [] },
+        supportingClaims: [], blockerClaims: [], verificationClaims: [],
+      })),
+    })),
+  }, corpus);
+  const verdicts = new Map(draft.claims.map((claim) => [claim.claimId, "supported" as SupportVerdict]));
+  const roles = artifactRoles(draft, "context_only");
+  const build = (reviewed: RequestConstraints) => buildCheckedAssessment(draft, verdicts, validateAssessmentDraft(draft, request, corpus), corpus, roles, { request, constraints: reviewed });
+  const checked = build(constraints);
+  assert.equal(checked.conclusion, "no_useful_precedent");
+  assert.deepEqual(revalidateAssessment(checked, request, corpus).requestConstraints.recovery_operations, constraints.recovery_operations);
+  assert.deepEqual(checked.leads, []);
+  assert.deepEqual(checked.nextActions, []);
+  assert.ok(checked.cases.every((item) => item.outcome === "unknown" && item.artifactWork.every((work) => work.disposition === null)));
+  assert.equal(build(emptyRequirementReview.constraints).conclusion, "cannot_be_established", "An omitted acceptance inventory cannot prove absence merely because no comparison was generated.");
+  draft.requestConstraints = emptyRequirementReview.constraints;
+  assert.equal(build(constraints).conclusion, "cannot_be_established", "A review-only constraint also conflicts with draft absence.");
+  draft.requestConstraints = constraints;
+  roles.set("case-1/request", "unresolved");
+  assert.equal(build(constraints).conclusion, "cannot_be_established");
+  roles.set("case-1/request", "context_only");
+  for (const claim of draft.claims) if (!claim.claimId.startsWith("classification-")) verdicts.set(claim.claimId, "unsupported");
+  assert.equal(build(constraints).conclusion, "cannot_be_established", "Rejected explanations withhold their classifications through dependencies.");
+  for (const claim of draft.claims) verdicts.set(claim.claimId, "supported");
+  corpus.availableVersions.delete("request-v1");
+  corpus.caseAvailability.set("case-1", "partial");
+  assert.equal(revalidateAssessment(checked, request, corpus).conclusion, "cannot_be_established");
+});
+
 test("provider generation binds request inventories and each case claim to their actual sources", async () => {
   const corpus = fixture();
   const request = "Named operators need recovery evidence. New target authorization remains unconfirmed.";
@@ -1013,7 +1060,7 @@ test("agreed operational acceptance constraints establish no useful precedent an
     recovery_operations: [...quotes],
   };
   const roles = artifactRoles(draft, "context_only");
-  const verdicts = new Map(draft.claims.map((claim) => [claim.claimId, "supported" as const]));
+  const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
   const invalid = validateAssessmentDraft(draft, request, corpus);
   const checked = buildCheckedAssessment(draft, verdicts, invalid, corpus, roles, { request, constraints });
   assert.equal(checked.conclusion, "no_useful_precedent");
