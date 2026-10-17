@@ -10,7 +10,7 @@ import { buildStarterPack } from "./packs.ts";
 import { validateSelections } from "./selections.ts";
 import { assessmentPassageIds, EvidenceUnavailable, type Artifact, type CorpusSnapshot, type ModelCaseContext, type PastCase, type SourceVersion } from "./corpus.ts";
 import { dispositionChanges } from "../ui/lineage.ts";
-import { assessmentDraftPrompt, briefDraftPrompt, selectedAssessment } from "./prompts.ts";
+import { assessmentDraftPrompt, briefDraftPrompt, briefReviewPrompt, selectedAssessment } from "./prompts.ts";
 import { callModel } from "./model.ts";
 import type { Env } from "./env.ts";
 
@@ -135,6 +135,14 @@ test("brief assessment background is scoped to selected work without cutting its
   const prompt = briefDraftPrompt("current request", selected, corpus, checked);
   const background = (prompt.untrustedData as { historicalContext: { checkedAssessment: { cases: { caseId: string }[] } } }).historicalContext.checkedAssessment;
   assert.deepEqual(background.cases.map((item) => item.caseId), ["case-1"], "The brief draft prompt carries the scoped background, not all eight cases.");
+  const reviewPrompt = briefReviewPrompt("current request", selected, corpus, checked, {
+    reuse: [], adapt: [], verify: [],
+    claims: [{ claimId: "brief-1", kind: "recommendation", text: "Check the current request.", sourceRefs: [], requestQuotes: [], dependsOnClaimIds: [] }],
+  });
+  assert.match(reviewPrompt.instructions, /interrogative or task-framing sentence that only asks what to inspect, assess, represent or advise/);
+  assert.match(reviewPrompt.instructions, /is not a constraint and must not be inventoried/);
+  const reviewBackground = (reviewPrompt.untrustedData as { historicalContext: { checkedAssessmentBackground: { cases: { caseId: string }[] } } }).historicalContext.checkedAssessmentBackground;
+  assert.deepEqual(reviewBackground.cases.map((item) => item.caseId), ["case-1"], "The brief review prompt carries the same scoped background.");
 });
 
 test("assessment rejects omitted artifacts even when all eight cases are present", () => {
