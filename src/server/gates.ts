@@ -405,6 +405,49 @@ function deterministicOrder(leads: Lead[], cases: CaseAssessment[]): Lead[] {
     || a.caseId.localeCompare(b.caseId));
 }
 
+function sameSelectedVersion(claim: Claim, selection: { caseId: string; artifactId: string; versionId: string }): boolean {
+  return claim.sourceRefs.some((ref) => ref.caseId === selection.caseId && ref.artifactId === selection.artifactId && ref.versionId === selection.versionId);
+}
+
+// Quotations the checked assessment already accepted for this exact artifact/version.
+// The brief must keep them even when a later reviewer inventories nothing.
+export function boundAssessmentQuotes(
+  assessment: AssessmentResult,
+  selection: { caseId: string; artifactId: string; versionId: string },
+): string[] {
+  const work = assessment.cases.find((item) => item.caseId === selection.caseId)?.artifactWork.find((item) => item.artifactId === selection.artifactId);
+  const assigned = new Set([
+    ...(work?.claimIds ?? []),
+    ...(work?.blockerClaimIds ?? []),
+    ...(work?.verificationClaimIds ?? []),
+    ...(work?.dispositionClaimId ? [work.dispositionClaimId] : []),
+  ]);
+  const requirementIds = new Set(assessment.comparisons.flatMap((row) =>
+    row.caseId === selection.caseId && row.requirementClaimId ? [row.requirementClaimId] : []));
+  const inventory = Object.values(assessment.requestConstraints).flat();
+  const quotes = new Set<string>();
+  for (const claim of assessment.claims) {
+    if (!sameSelectedVersion(claim, selection) || (!assigned.has(claim.claimId) && !requirementIds.has(claim.claimId))) continue;
+    for (const quote of claim.requestQuotes) quotes.add(quote);
+    for (const quote of inventory) if (claim.text.includes(quote)) quotes.add(quote);
+  }
+  return [...quotes];
+}
+
+export function withAssessmentConstraintFloor(
+  reviews: BriefConstraintReview[],
+  assessment: AssessmentResult,
+  request: string,
+): BriefConstraintReview[] {
+  return reviews.map((review) => ({
+    ...review,
+    requestQuotes: [...new Set([
+      ...review.requestQuotes,
+      ...boundAssessmentQuotes(assessment, review).filter((quote) => request.includes(quote)),
+    ])],
+  }));
+}
+
 export function buildCheckedBrief(
   draft: BriefDraft,
   verdicts: Map<string, SupportVerdict>,

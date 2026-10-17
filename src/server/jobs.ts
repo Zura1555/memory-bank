@@ -5,7 +5,7 @@ import { database } from "./db.ts";
 import { capabilityHash } from "./auth.ts";
 import { HttpFailure } from "./errors.ts";
 import { EvidenceUnavailable, loadCorpus } from "./corpus.ts";
-import { revalidateAssessment, revalidateBrief } from "./gates.ts";
+import { revalidateAssessment, revalidateBrief, withAssessmentConstraintFloor } from "./gates.ts";
 
 export interface JobRecord {
   id: string;
@@ -102,7 +102,12 @@ export async function getOwnedJob(env: Env, jobId: string, authorization: string
       throw new EvidenceUnavailable("The job's pinned corpus revision is unavailable.");
     }
     if (job.assessment_result) job.assessment_result = revalidateAssessment(job.assessment_result, job.request_text, corpus);
-    if (job.brief_result) job.brief_result = revalidateBrief(job.brief_result, job.request_text, corpus);
+    if (job.brief_result) {
+      const floored = job.assessment_result && job.brief_result.constraintReviews
+        ? { ...job.brief_result, constraintReviews: withAssessmentConstraintFloor(job.brief_result.constraintReviews, job.assessment_result, job.request_text) }
+        : job.brief_result;
+      job.brief_result = revalidateBrief(floored, job.request_text, corpus);
+    }
   }
   return jobView(job);
 }

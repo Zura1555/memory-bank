@@ -725,6 +725,10 @@ F2 must be rerun only under separately approved execution on a frozen candidate 
 
 Integrate #33/#35 and rerun affected exposed regressions before #32's fresh fixed-point evaluation. Timing, total-isolate-memory and other prerequisite gates remain independently open unless explicitly scoped by the owner. No final-candidate freeze, fresh pass or release-readiness claim follows from this change.
 
+### Assessment quotations are now a brief coverage floor — 2026-10-17
+
+The first fix withheld a value only when brief review or the draft's own quotation metadata named it. A checked assessment could already have accepted that quotation on the selected artifact and version, and an empty brief-review inventory could still leave a generic expiry line in the brief. The server now adds those already accepted current-request quotations to that item's coverage floor before the checked brief is stored, and again on owned read and both exports. The floor does not copy unrelated assessment inventory onto other selected items, and it still withholds the item instead of inserting request text. A deterministic pack regression keeps a seven-business-day quotation in the checked claims and both portable formats, and withholds a generic configured-expiry replacement. This is not an F2 rerun. The real five-business-day brief, its independent grade, and fresh qualification remain under separately approved execution and #32.
+
 ## Issue #33 paid verification and current-main integration — 2026-10-17
 
 The owner explicitly authorized paid exposed-F1 verification and PR publication, then separately approved one instrumented provider diagnostic, a fresh corrected workflow, completion of the remaining F1 criteria, and an ordinary current-main-to-task-branch merge. These are bounded exposed-regression runs, not new held-out qualification or deployment authority.
