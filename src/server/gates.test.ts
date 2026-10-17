@@ -195,6 +195,54 @@ test("brief disposition is withheld when its recommendation claim is unsupported
 });
 
 
+test("checked brief survives only when each item carries its own atomic quotation claims", () => {
+  const corpus = fixture();
+  const request = "Keep source keys separate. Stop before replay when state is unclear.";
+  const quotes = ["Keep source keys separate.", "Stop before replay when state is unclear."];
+  const selections = [
+    { caseId: "case-1", artifactId: "request", versionId: "request-v1" },
+    { caseId: "case-1", artifactId: "handover", versionId: "handover-v1-case-1" },
+  ];
+  const refsFor = (item: typeof selections[number]) => [{
+    caseId: item.caseId, artifactId: item.artifactId, versionId: item.versionId,
+    passageId: item.artifactId === "request" ? "p-request-v1" : "p-handover-v1-case-1",
+  }];
+  const claimsFor = (item: typeof selections[number], prefix: string): Claim[] => [
+    { claimId: `${prefix}-disposition`, kind: "recommendation", text: "Adapt this work for the new request after the checks below.", sourceRefs: refsFor(item), requestQuotes: [], dependsOnClaimIds: [] },
+    ...quotes.map((quote, index) => ({
+      claimId: `${prefix}-quote-${index}`, kind: "recommendation" as const,
+      text: `Check this before adapting: ${quote}`, sourceRefs: refsFor(item), requestQuotes: [quote], dependsOnClaimIds: [],
+    })),
+  ];
+  const draft: BriefDraft = {
+    reuse: [], verify: [],
+    adapt: selections.map((item, index) => {
+      const claims = claimsFor(item, `item-${index}`);
+      return { ...item, disposition: "adapt" as const, dispositionClaimId: claims[0].claimId, claimIds: claims.map((claim) => claim.claimId) };
+    }),
+    claims: selections.flatMap((item, index) => claimsFor(item, `item-${index}`)),
+  };
+  const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
+  const constraintReviews = selections.map((item) => ({ ...item, requestQuotes: quotes }));
+  const checked = buildCheckedBrief(draft, verdicts, validateBriefDraft(draft, request, selections, corpus), { request, constraintReviews });
+  assert.deepEqual(checked.adapt.map((item) => item.artifactId), ["request", "handover"],
+    "A shared quotation repeated as a dedicated atomic claim per item covers both items.");
+  assert.equal(checked.withheldClaimCount, 0);
+
+  // The captured failure shape: one item's disposition prose carries the shared
+  // quotation while its metadata names only another quotation, and it has no
+  // dedicated claim for the shared one. The other item's coverage cannot save it.
+  const doomed = structuredClone(draft);
+  const disposition = doomed.claims.find((claim) => claim.claimId === "item-0-disposition")!;
+  disposition.text = `Adapt this work: ${quotes[0]} ${quotes[1]}`;
+  disposition.requestQuotes = [quotes[0]];
+  doomed.claims = doomed.claims.filter((claim) => claim.claimId !== "item-0-quote-1");
+  doomed.adapt[0].claimIds = doomed.adapt[0].claimIds.filter((claimId) => claimId !== "item-0-quote-1");
+  const withheld = buildCheckedBrief(doomed, verdicts, validateBriefDraft(doomed, request, selections, corpus), { request, constraintReviews });
+  assert.deepEqual(withheld.adapt.map((item) => item.artifactId), ["handover"],
+    "A quotation present only in prose, without matching metadata on that item, withholds that item.");
+});
+
 test("support review must cover each claim exactly once", () => {
   const claim: Claim = {
     claimId: "claim-one",
@@ -1060,6 +1108,18 @@ test("brief generation cannot add an unselected background artifact", async () =
   assert.equal(validateLiteral(literalWire), true);
   literalWire.claims[0].text = "Verify the requested constraint: Use s.";
   assert.equal(literalPrompt.responseSchema!.safeParse(literalWire).success, false, "Request punctuation is literal at runtime, not a user-supplied regular expression.");
+  const multiRequest = "First decisive sentence. Second decisive sentence.";
+  const multiPrompt = briefDraftPrompt(multiRequest, selected, corpus, checked);
+  assert.match(multiPrompt.instructions, /dedicated atomic recommendation claim/);
+  assert.match(multiPrompt.instructions, /No claim's text may contain a verbatim complete request sentence\/chunk other than its own sole requestQuotes entry/);
+  const strayWire = structuredClone(wireOutput);
+  strayWire.claims[0].requestQuotes = ["First decisive sentence."];
+  strayWire.claims[0].text = "Check the request: First decisive sentence. Second decisive sentence.";
+  assert.equal(multiPrompt.responseSchema!.safeParse(strayWire).success, false,
+    "A quotation in prose but not in the carrying claim's metadata is rejected at parse time, before independent review is spent.");
+  strayWire.claims[0].text = "Check the request: First decisive sentence.";
+  assert.equal(multiPrompt.responseSchema!.safeParse(strayWire).success, true,
+    "A dedicated atomic claim carrying its quotation in both prose and metadata still parses.");
   const unselected = structuredClone(wireOutput);
   unselected.items["case-1/request/request-v1"] = structuredClone(unselected.items[selectedKey]);
   assert.equal(validate(unselected), false, "Full case background cannot add an unselected brief item.");

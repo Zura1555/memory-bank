@@ -209,7 +209,8 @@ export function briefDraftSchemaFor(request: string, selected: Selection[], corp
   if (refs.size === 0) throw new Error("BRIEF_SELECTED_EVIDENCE_UNAVAILABLE");
   const decision = briefItem.omit({ caseId: true, artifactId: true, versionId: true });
   const localClaim = claim.extend({ sourceRefs: z.array(z.enum([...refs.keys()])).min(1).max(16) });
-  const quotedClaims = requestQuoteChoices(request).map((quote) => localClaim.extend({
+  const quoteChoices = requestQuoteChoices(request);
+  const quotedClaims = quoteChoices.map((quote) => localClaim.extend({
     kind: z.enum(["interpretation", "recommendation"]),
     text: z.string().min(1).max(4_000).regex(new RegExp(quote.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))),
     requestQuotes: z.array(z.literal(quote)).length(1),
@@ -218,6 +219,27 @@ export function briefDraftSchemaFor(request: string, selected: Selection[], corp
   return z.strictObject({
     items: z.strictObject(Object.fromEntries(inventory.map(({ key }) => [key, decision]))),
     claims: z.array(z.union([unquotedClaim, ...quotedClaims])).max(400),
+  }).superRefine(({ claims }, ctx) => {
+    // A request quotation may appear in a claim's prose only as that claim's
+    // sole requestQuotes entry. Cramming several request sentences into one
+    // claim's text while its metadata can name just one of them yields a draft
+    // the checked-brief coverage gate must withhold in full, so reject it at
+    // parse time instead of spending the independent review on a doomed draft.
+    // Fragments of the carried quotation itself are the same constraint, not a
+    // stray quotation. This only rejects drafts; it never repairs them.
+    claims.forEach((item, claimIndex) => {
+      const carried = item.requestQuotes[0];
+      for (const choice of quoteChoices) {
+        if (choice === carried || (carried !== undefined && carried.includes(choice))) continue;
+        if (item.text.includes(choice)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["claims", claimIndex, "text"],
+            message: "Claim prose contains a request quotation that is not its sole requestQuotes entry; give that quotation its own atomic claim.",
+          });
+        }
+      }
+    });
   }).transform(({ items, claims }) => {
     const entries = inventory.map(({ key, item }) => ({
       caseId: item.caseId, artifactId: item.artifactId, versionId: item.versionId, ...items[key],
