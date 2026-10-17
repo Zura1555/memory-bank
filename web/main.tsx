@@ -292,15 +292,16 @@ function formatDuration(milliseconds: number): string {
 }
 
 const avatarTones = ["blue", "sky", "amber", "coral", "navy"] as const;
-function avatarTone(seed: string): (typeof avatarTones)[number] {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+type AvatarTone = (typeof avatarTones)[number];
+function avatarTone(seed: string): AvatarTone {
+  let hash = 7;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 37 + seed.charCodeAt(i)) >>> 0;
   return avatarTones[hash % avatarTones.length];
 }
 
-function AvatarCircle({ name }: { name: string }) {
+function AvatarCircle({ name, tone }: { name: string; tone?: AvatarTone }) {
   const initial = (name.trim()[0] ?? "M").toUpperCase();
-  return <span className={`avatar-circle avatar-${avatarTone(name)}`} aria-hidden="true">{initial}</span>;
+  return <span className={`avatar-circle avatar-${tone ?? avatarTone(name)}`} aria-hidden="true">{initial}</span>;
 }
 
 function JobTimings({ job }: { job: JobView }) {
@@ -1083,10 +1084,10 @@ function EvidenceWorkspace({ sourceRef, onInspect, children }: {
 const stepNames = ["Client request", "Checked examples", "Selected work", "Checked brief"];
 
 // Authored from public fictional corpus requests, never held-out evaluation requests.
-const suggestedRequests = [
-  { title: "Plan a sandbox CSV import", basis: "Cedar Supply", request: "Plan a sandbox import of active supplier records from a UTF-8 CSV. Preserve source keys and reconcile accepted, rejected, and duplicate rows. What past mapping and reconciliation work could help, and what must we verify for a new target? No production writes are authorized." },
-  { title: "Scope temporary support access", basis: "Grove Clinic", request: "Two external support engineers need temporary read-only access to import errors in a test workspace. Require named accounts, MFA, expiry, and an access log; exclude patient charts and configuration changes. Find useful prior access work and identify unverified lifecycle or audit controls." },
-  { title: "Prepare an operator handover", basis: "Ibis Foods", request: "Prepare a test-environment handover of a nightly inventory import to a primary and backup operator. We need a runbook, escalation contact, recovery procedure, and witnessed recovery exercise. Which past work is useful, and which acceptance gaps remain? Production scheduling is out of scope." },
+const suggestedRequests: { title: string; basis: string; focus: string; tone: AvatarTone; request: string }[] = [
+  { title: "Plan a sandbox CSV import", basis: "Cedar Supply", focus: "CSV mapping & reconciliation", tone: "blue", request: "Plan a sandbox import of active supplier records from a UTF-8 CSV. Preserve source keys and reconcile accepted, rejected, and duplicate rows. What past mapping and reconciliation work could help, and what must we verify for a new target? No production writes are authorized." },
+  { title: "Scope temporary support access", basis: "Grove Clinic", focus: "Read-only access & MFA log", tone: "sky", request: "Two external support engineers need temporary read-only access to import errors in a test workspace. Require named accounts, MFA, expiry, and an access log; exclude patient charts and configuration changes. Find useful prior access work and identify unverified lifecycle or audit controls." },
+  { title: "Prepare an operator handover", basis: "Ibis Foods", focus: "Runbook & recovery drill", tone: "amber", request: "Prepare a test-environment handover of a nightly inventory import to a primary and backup operator. We need a runbook, escalation contact, recovery procedure, and witnessed recovery exercise. Which past work is useful, and which acceptance gaps remain? Production scheduling is out of scope." },
 ];
 
 function App({ active }: { active: boolean }) {
@@ -1628,27 +1629,30 @@ function App({ active }: { active: boolean }) {
               </form>
             </section>
             <section className="screen request-suggestions" aria-labelledby="suggestions-title">
-              <div className="card-icon-title">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
+              <div className="suggestions-header">
                 <h3 id="suggestions-title">Starter templates</h3>
+                <p className="field-hint">Select a fictional scenario to populate the request editor above.</p>
               </div>
-              <p className="field-hint">Select a fictional scenario to populate the request editor above.</p>
               <div className="suggestion-table" role="list">
                 <div className="suggestion-table-head" aria-hidden="true">
                   <span>Scenario</span>
-                  <span>Corpus Case</span>
-                  <span>Action</span>
+                  <span>Corpus case</span>
+                  <span>Focus</span>
+                  <span />
                 </div>
-                {suggestedRequests.map((suggestion) => <Button key={suggestion.title} type="button" className="secondary-button suggestion-button" onClick={() => {
+                {suggestedRequests.map((suggestion) => <Button key={suggestion.title} type="button" className="suggestion-row" onClick={() => {
                   setRequest(suggestion.request);
                   document.getElementById("client-request")?.focus();
                 }}>
                   <span className="suggestion-main">
-                    <AvatarCircle name={suggestion.basis} />
+                    <AvatarCircle name={suggestion.basis} tone={suggestion.tone} />
                     <span className="suggestion-title">{suggestion.title}</span>
                   </span>
-                  <span className="token-pill">[{suggestion.basis}]</span>
-                  <span className="suggestion-chevron" aria-hidden="true">›</span>
+                  <span className="suggestion-cell">{suggestion.basis}</span>
+                  <span className="suggestion-cell">{suggestion.focus}</span>
+                  <span className="suggestion-chevron" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+                  </span>
                 </Button>)}
               </div>
             </section>
