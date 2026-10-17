@@ -29,6 +29,7 @@ import type {
   StartBriefResponse,
 } from "../src/shared/protocol";
 import { dispositionChanges } from "../src/ui/lineage";
+import { readLocalJobs, writeLocalJobs, reopenedJobMode, type LocalJob } from "../src/ui/local-jobs";
 import "./styles.css";
 
 const phaseStates: PhaseState[] = ["not_started", "queued", "running", "ready", "failed", "reconciliation_required"];
@@ -266,7 +267,8 @@ function JobTimings({ job }: { job: JobView }) {
 
 
 function isCreateJobResponse(value: unknown): value is CreateJobResponse {
-  return isRecord(value) && isText(value.jobId) && isText(value.capability) && isText(value.expiresAt);
+  return isRecord(value) && isText(value.jobId) && isText(value.capability) && isText(value.expiresAt)
+    && Number.isFinite(Date.parse(value.expiresAt)) && Date.parse(value.expiresAt) > Date.now();
 }
 
 function isLocation(value: unknown): value is PassageView["location"] {
@@ -747,12 +749,14 @@ interface WorkDraft {
   passageIds: string[];
 }
 
-interface Session {
-  jobId: string;
-  capability: string;
-}
+type Session = CreateJobResponse;
 
-type PollMode = "assessment" | "brief" | null;
+type PollMode = "assessment" | "brief" | "restore" | null;
+
+function readBrowserJobs() {
+  try { return readLocalJobs(window.localStorage); }
+  catch { return { entries: [] as LocalJob[], error: "Local History/Saved persistence failed. Browser storage may be unavailable or full; use browser settings to clear retained data. The main workflow still works in this tab." }; }
+}
 
 function EvidencePassage({ sourceRef }: { sourceRef: SourceRef }) {
   const [passage, setPassage] = useState<PassageView | null>(null);
@@ -848,11 +852,60 @@ function App() {
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const [questionAnswers, setQuestionAnswers] = useState("");
   const [submittingBrief, setSubmittingBrief] = useState(false);
+  const [localData, setLocalData] = useState(readBrowserJobs);
+  const [library, setLibrary] = useState<"History" | "Saved">("History");
   const sessionGeneration = useRef(0);
   const requestSubmissionId = useRef(0);
   const requestController = useRef<AbortController | null>(null);
   const briefController = useRef<AbortController | null>(null);
   const pollController = useRef<AbortController | null>(null);
+
+  function changeLocalJobs(change: (entries: LocalJob[]) => LocalJob[]) {
+    try {
+      const current = readLocalJobs(window.localStorage);
+      const entries = writeLocalJobs(window.localStorage, change(current.entries));
+      setLocalData({ entries, error: current.error });
+    } catch {
+      setLocalData((current) => ({
+        entries: current.entries.filter((entry) => Date.parse(entry.expiresAt) > Date.now()),
+        error: "Local History/Saved persistence failed. The change was not saved; browser storage may be unavailable or full. The main workflow still works in this tab.",
+      }));
+    }
+  }
+
+  useEffect(() => {
+    const refresh = () => setLocalData(readBrowserJobs());
+    const deadlines = localData.entries.map((entry) => Date.parse(entry.expiresAt));
+    const timer = deadlines.length ? window.setTimeout(refresh, Math.max(0, Math.min(...deadlines) - Date.now())) : undefined;
+    window.addEventListener("focus", refresh);
+    window.addEventListener("storage", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("storage", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [localData.entries]);
+
+  useEffect(() => {
+    if (!session) return;
+    const expire = () => {
+      if (Date.parse(session.expiresAt) > Date.now()) return;
+      startNewRequest();
+      setRequest("");
+      setLocalData(readBrowserJobs());
+      setServiceError("This job reached its original expiry. Its request, results, and access capability are no longer available in this tab.");
+    };
+    const timer = window.setTimeout(expire, Math.max(0, Date.parse(session.expiresAt) - Date.now()));
+    window.addEventListener("focus", expire);
+    document.addEventListener("visibilitychange", expire);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", expire);
+      document.removeEventListener("visibilitychange", expire);
+    };
+  }, [session]);
 
   useEffect(() => {
     if (!previousJob) return;
@@ -875,6 +928,13 @@ function App() {
           signal: controller.signal,
         });
         if (controller.signal.aborted || generation !== sessionGeneration.current) return;
+        if (response.status === 404 || response.status === 410) {
+          changeLocalJobs((entries) => entries.filter((entry) => entry.jobId !== session.jobId));
+          startNewRequest();
+          setRequest("");
+          setServiceError(`This job is missing or expired (HTTP ${response.status}). No cached result is available.`);
+          return;
+        }
         if (response.status !== 200) {
           setServiceError(`Status check failed (HTTP ${response.status}). Retrying the real status check.`);
           timer = window.setTimeout(poll, 2500);
@@ -887,9 +947,20 @@ function App() {
           setPollMode(null);
           return;
         }
+        let mode: "assessment" | "brief";
+        try { mode = reopenedJobMode(session, body); }
+        catch {
+          startNewRequest();
+          setRequest("");
+          changeLocalJobs((entries) => entries.filter((entry) => entry.jobId !== session.jobId));
+          setServiceError("The original live job or expiry could not be validated. No cached result is available.");
+          return;
+        }
         setJob(body);
+        setRequest(body.request);
         setServiceError(null);
-        const currentState = pollMode === "assessment" ? body.assessmentState : body.briefState;
+        if (pollMode === "restore") setStep(mode === "brief" ? 4 : 2);
+        const currentState = (pollMode === "restore" ? mode : pollMode) === "assessment" ? body.assessmentState : body.briefState;
         if (["ready", "failed", "reconciliation_required"].includes(currentState)) {
           setPollMode(null);
           return;
@@ -1000,7 +1071,11 @@ function App() {
       setRequest(trimmed);
       setQuestionAnswers("");
       setSubmittingBrief(false);
-      setSession({ jobId: result.jobId, capability: result.capability });
+      setSession(result);
+      changeLocalJobs((entries) => [
+        { ...result, label: trimmed.slice(0, 100), saved: entries.find((entry) => entry.jobId === result.jobId)?.saved ?? false },
+        ...entries.filter((entry) => entry.jobId !== result.jobId),
+      ]);
       setJob(null);
       setWorkDrafts({});
       setPollMode("assessment");
@@ -1047,6 +1122,28 @@ function App() {
     setSubmittingRequest(false);
     setSubmittingBrief(false);
     setServiceError(null);
+  }
+
+  function reopen(entry: LocalJob) {
+    startNewRequest();
+    setRequest("");
+    if (Date.parse(entry.expiresAt) <= Date.now()) {
+      setLocalData(readBrowserJobs());
+      setServiceError("This bookmark has expired. Saved never extends the original job access.");
+      return;
+    }
+    setSession({ jobId: entry.jobId, capability: entry.capability, expiresAt: entry.expiresAt });
+    setPollMode("restore");
+    setStep(2);
+  }
+
+  function toggleSaved() {
+    if (!session || !job || (!job.assessment && !job.brief)) return;
+    const saved = localData.entries.find((entry) => entry.jobId === session.jobId)?.saved ?? false;
+    changeLocalJobs((entries) => [
+      { ...session, label: job.request.slice(0, 100), saved: !saved },
+      ...entries.filter((entry) => entry.jobId !== session.jobId),
+    ]);
   }
 
   async function submitBrief() {
@@ -1119,6 +1216,31 @@ function App() {
           <h1 id="workflow-title">Build a checked work brief</h1>
           <p>Review fictional past examples, choose the evidence that applies, and inspect every checked passage before using it.</p>
         </div>
+        <section className="local-library" aria-labelledby="local-library-title">
+          <h2 id="local-library-title">History and Saved</h2>
+          <p className="field-hint">This browser/device only — no account sync or durable archive. Accepted jobs are recorded locally with a short request label and access capability. Do not retain them on a shared browser. Saving never extends the original seven-day expiry. No results, source bodies, or packs are stored here; downloaded packs remain independent offline files.</p>
+          <div className="action-row" role="group" aria-label="Local job lists">
+            <button className="secondary-button" type="button" aria-pressed={library === "History"} onClick={() => setLibrary("History")}>History</button>
+            <button className="secondary-button" type="button" aria-pressed={library === "Saved"} onClick={() => setLibrary("Saved")}>Saved</button>
+            <button className="text-button" type="button" onClick={() => changeLocalJobs((entries) => library === "History" ? [] : entries.map((entry) => ({ ...entry, saved: false })))}>Clear {library === "History" ? "History and Saved" : "Saved"}</button>
+          </div>
+          {localData.error && <p role="alert" className="notice notice-error">{localData.error}</p>}
+          <p className="field-hint">Reopen validates the live job with the server; it does not regenerate an assessment. Remove/clear only changes this browser, never remote jobs.</p>
+          <ul className="local-job-list" aria-label={library}>
+            {localData.entries.filter((entry) => library === "History" || entry.saved).map((entry) => (
+              <li key={entry.jobId}>
+                <p>{entry.label} {entry.saved && <Badge>Saved</Badge>}</p>
+                <p className="field-hint">Expires <time dateTime={entry.expiresAt}>{new Date(entry.expiresAt).toLocaleString()}</time></p>
+                <div className="action-row">
+                  <button className="secondary-button" type="button" onClick={() => reopen(entry)} aria-label={`Reopen ${entry.label}`}>Reopen</button>
+                  {entry.saved && <button className="text-button" type="button" onClick={() => changeLocalJobs((entries) => entries.map((item) => item.jobId === entry.jobId ? { ...item, saved: false } : item))} aria-label={`Unsave ${entry.label}`}>Unsave</button>}
+                  <button className="text-button" type="button" onClick={() => changeLocalJobs((entries) => entries.filter((item) => item.jobId !== entry.jobId))} aria-label={`Remove ${entry.label}`}>Remove</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {!localData.entries.some((entry) => library === "History" || entry.saved) && <p className="empty-state">No local {library.toLowerCase()} entries.</p>}
+        </section>
         <nav className="step-nav" aria-label="Workflow steps">
           <ol>{stepNames.map((name, index) => (
             <li key={name} className={step === index + 1 ? "step-current" : step > index + 1 ? "step-complete" : ""} aria-current={step === index + 1 ? "step" : undefined}>
@@ -1129,6 +1251,14 @@ function App() {
 
         {serviceError && <p role="alert" className="notice notice-error">{serviceError}</p>}
         {step > 1 && job && <JobTimings job={job} />}
+        {session && job && (assessmentAvailable || (job.briefState === "ready" && job.brief)) && (
+          <div className="action-row">
+            <button className="secondary-button" type="button" aria-pressed={localData.entries.some((entry) => entry.jobId === session.jobId && entry.saved)} onClick={toggleSaved}>
+              {localData.entries.some((entry) => entry.jobId === session.jobId && entry.saved) ? "Unsave checked job" : "Save checked job"}
+            </button>
+            <span className="field-hint">Bookmark this live assessment / brief until its original expiry.</span>
+          </div>
+        )}
 
         {step === 1 && (
           <section className="screen" aria-labelledby="request-title">
