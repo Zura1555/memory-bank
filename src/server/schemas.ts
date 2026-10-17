@@ -263,7 +263,8 @@ export const briefSupportReviewSchema = supportReviewSchema.extend({
     caseId: id,
     artifactId: id,
     versionId: id,
-    requestQuotes: claim.shape.requestQuotes,
+    // Wider than the model inventory: checked assessment quotations are added before storage.
+    requestQuotes: z.array(z.string().min(1).max(500)).max(64),
   })).max(32),
 });
 export const artifactReviewsSchema = z.array(z.strictObject({
