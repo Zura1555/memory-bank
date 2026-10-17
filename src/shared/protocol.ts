@@ -130,11 +130,18 @@ export interface BriefItem {
   dispositionClaimId: string;
   claimIds: string[];
 }
+export interface BriefConstraintReview {
+  caseId: string;
+  artifactId: string;
+  versionId: string;
+  requestQuotes: string[];
+}
 export interface BriefResult {
   reuse: BriefItem[];
   adapt: BriefItem[];
   verify: BriefItem[];
   claims: Claim[];
+  constraintReviews: BriefConstraintReview[];
   withheldClaimCount: number;
 }
 
