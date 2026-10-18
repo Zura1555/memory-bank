@@ -18,30 +18,30 @@ URLs are versioned and may change. Existing fonts, layout, component APIs, backe
 
 ## Current token contract — 2026-10-18
 
-`web/styles.css` is the source of truth: shared CSS custom properties in `:root`, overridden by `@media (prefers-color-scheme: dark)`. `web/main.tsx` imports the stylesheet and its SVG chart consumes the same chart roles as the legend. There is no separate token package, theme toggle, or generator. The operating-system/browser color preference selects the theme.
+`web/styles.css` is the source of truth: shared CSS custom properties in `:root` with `color-scheme: light`. The app keeps white surfaces and the incumbent pale page background regardless of operating-system/browser color preference; automatic dark-mode overrides are removed. `web/main.tsx` imports the stylesheet and its SVG chart consumes the same chart roles as the legend. There is no separate token package, theme toggle, or generator.
 
-The repair restores dark-mode overrides and removes component-local color literals. Extracted spacing, font-size, and radius values preserve their existing sizes; the light theme retains the incumbent blue/navy identity. Primary actions, muted text, placeholders, and control boundaries use contrast-safe roles.
+Shared tokens remove component-local color literals. Extracted spacing, font-size, and radius values preserve their existing sizes; the fixed light palette retains the incumbent blue/navy identity. Primary actions, muted text, placeholders, and control boundaries use contrast-safe roles.
 
 ### Application assignments
 
-These role assignments are application decisions. Pale/quiet surfaces, functional borders, and **all dark-mode values** are application accessibility/visual derivations, not claimed exact Anduin tokens.
+These role assignments are application decisions. Pale/quiet surfaces and functional borders are application accessibility/visual derivations, not claimed exact Anduin tokens.
 
-| Role | Light | Dark |
-| --- | --- | --- |
-| `--accent`: actions, selection, evidence accents, focus | `#0158AE` | `#77B5FF` |
-| `--accent-strong`: hover, links, emphasized text | `#162950` | `#BDD8FF` |
-| `--accent-pale`: selected/evidence surfaces | `#EDF5FF` | `#192E4A` |
-| `--on-accent`: filled-action text | `#FFFFFF` | `#101B2D` |
-| `--ink` / `--muted` | `#162950` / `#526277` | `#EDF2FA` / `#B6C2D5` |
-| `--paper` / `--surface` | `#F4F7FB` / `#FFFFFF` | `#101B2D` / `#162239` |
-| `--line`: decorative dividers | `#E2E8F0` | `#394B68` |
-| `--control-border`: functional boundaries | `#738095` | `#8291A8` |
-| `--quiet`: inset/disabled surfaces | `#F8FAFC` | `#1B2A43` |
-| `--success` / `--success-pale`: existing semantic green | `#15544F` / `#E4F2EE` | `#B8E5DC` / `#203A38` |
+| Role | Value |
+| --- | --- |
+| `--accent`: actions, selection, evidence accents, focus | `#0158AE` |
+| `--accent-strong`: hover, links, emphasized text | `#162950` |
+| `--accent-pale`: selected/evidence surfaces | `#EDF5FF` |
+| `--on-accent`: filled-action text | `#FFFFFF` |
+| `--ink` / `--muted` | `#162950` / `#526277` |
+| `--paper` / `--surface` | `#F4F7FB` / `#FFFFFF` |
+| `--line`: decorative dividers | `#E2E8F0` |
+| `--control-border`: functional boundaries | `#738095` |
+| `--quiet`: inset/disabled surfaces | `#F8FAFC` |
+| `--success` / `--success-pale`: existing semantic green | `#15544F` / `#E4F2EE` |
 
 Removed hue-named `--teal*` brand roles and conflicting green brand borders/surfaces. Dialog, picker, checkboxes, selections, and all four workflow steps share the same accent roles. Semantic success/available/ready/verify remains green; partial/warning/adapt remains amber; failure/unavailable remains red; unknown remains neutral. Existing visible labels still carry meaning independently of color.
 
-Accessibility deviations: low-contrast public-site grays are not copied into small text or functional boundaries. Muted text and placeholders use `--muted`; inputs use `--control-border`, not decorative `--line`. Disabled actions use readable muted text and quiet surfaces instead of fading the whole control. Dark filled actions use dark text on light blue rather than white on that blue.
+Accessibility deviations: low-contrast public-site grays are not copied into small text or functional boundaries. Muted text and placeholders use `--muted`; inputs use `--control-border`, not decorative `--line`. Disabled actions use readable muted text and quiet surfaces instead of fading the whole control.
 
 ### Shared scales and component roles
 
@@ -55,7 +55,11 @@ Accessibility deviations: low-contrast public-site grays are not copied into sma
 
 Use semantic colors (for example, `color: var(--muted)`) and the matching existing scale value (for example, `gap: var(--space-3)`). One-off geometry, breakpoints, and component-specific sizes remain local; do not add a token for every literal. `--accent-bright` and `--accent-bar` are decorative; readable accent text and primary fills use `--accent`, and primary hover uses `--accent-strong`.
 
-### Current contrast and verification
+### Light-only restoration verification — 2026-10-18
+
+The development Cloudflare build passed. Chromium exercised the built Ask and Sources screens at 1440px under a dark system preference: native controls stayed light, request/library surfaces remained white, and the Sources workspace stayed 1,304px wide. At 320px, source selection still replaced the list with details and Back restored the list without horizontal overflow. Switching the system preference to light retained the same white library surface. No browser runtime exceptions, paid generation, or deployment occurred.
+
+### Historical dual-theme contrast and verification — before light-only restoration
 
 Computed browser token values, WCAG sRGB relative-luminance calculation; ratios rounded to three decimals. Text pairs exceed 4.5:1; focus/control pairs exceed 3:1. Palette-pair checks are not a complete accessibility certification.
 
@@ -77,7 +81,7 @@ Computed browser token values, WCAG sRGB relative-luminance calculation; ratios 
 - `npm run typecheck && npm test && npm run build`: passed, 60 TypeScript tests and one Python test. Build retains the >500kB client-chunk advisory.
 - Chromium exercised the actual app at 1440×1000 and 320×1000 in both schemes: preference switching, template selection, empty-request disabled state, textarea focus, mobile drawer Escape/focus return, source selection, and exact-passage inspection. No horizontal page overflow or browser runtime exceptions in those scenarios. Six representative elements retained identical computed font size, radius, padding, gap, and width against the pre-change app at both viewport sizes.
 - The UI preview used real local HTTP handlers and retained corpus/original files through a temporary read-only Node storage adapter. Indexing/provider configuration was unavailable in that adapter and remained visibly unconfirmed; no indexing or model qualification is claimed. All mutating API methods were blocked. No paid calls, uploads, deployment, or backend changes.
-- [Current contact sheet](images/design-tokens-2026-10-18.webp): light above dark, desktop beside 320px, with the focused request field. Reduced-motion emulation resolves shared transitions to .01ms in both schemes.
+- [Historical dual-theme contact sheet](images/design-tokens-2026-10-18.webp): light above dark, desktop beside 320px, with the focused request field. Reduced-motion emulation resolves shared transitions to .01ms in both schemes.
 
 ## Historical contrast — 2026-10-15
 
@@ -126,4 +130,4 @@ Each contact sheet contains steps 1–4, verified evidence, retrieval error, sel
 | Light | [Contact sheet](images/anduin-palette-light-1440.webp) | [Contact sheet](images/anduin-palette-light-320.webp) |
 | Dark | [Contact sheet](images/anduin-palette-dark-1440.webp) | [Contact sheet](images/anduin-palette-dark-320.webp) |
 
-Repeat the README's browser smokes against an existing checked-result replay without paid calls; measure both schemes' computed colors, exercise keyboard and pointer states, and keep fixture UI proof separate from live AI-workflow qualification.
+Repeat the README's browser smokes against an existing checked-result replay without paid calls; confirm the light palette under both system color preferences, exercise keyboard and pointer states, and keep fixture UI proof separate from live AI-workflow qualification.
