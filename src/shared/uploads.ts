@@ -18,6 +18,8 @@ export interface PrivateSource {
   id: string;
   name: string;
   mimeType: string;
+  caseId: string | null;
+  notes: string;
   size: number;
   sha256: string;
   createdAt: string;
@@ -40,6 +42,8 @@ export function isPrivateSource(value: unknown): value is PrivateSource {
   const item = value as Record<string, unknown>;
   return typeof item.id === "string" && /^[a-f0-9-]{36}$/u.test(item.id)
     && typeof item.name === "string" && typeof item.mimeType === "string"
+    && (item.caseId === null || (typeof item.caseId === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/u.test(item.caseId)))
+    && typeof item.notes === "string" && item.notes.length <= 4000
     && typeof item.size === "number" && Number.isSafeInteger(item.size) && item.size > 0 && item.size <= UPLOAD_LIMIT
     && typeof item.sha256 === "string" && /^[a-f0-9]{64}$/u.test(item.sha256)
     && [item.createdAt, item.updatedAt, item.expiresAt].every((date) => typeof date === "string" && Number.isFinite(Date.parse(date)))

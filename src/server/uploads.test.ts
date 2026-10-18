@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { zipSync, strToU8 } from "fflate";
 import { app } from "./http.ts";
 import type { Env } from "./env.ts";
-import { attachmentRequest, createUpload, expireUploads, listUploads, processUpload, searchUploads, uploadDetail, uploadOriginal, uploadOwner } from "./uploads.ts";
+import { attachmentRequest, createUpload, deleteUpload, expireUploads, listUploads, processUpload, searchUploads, updateUpload, uploadDetail, uploadOriginal, uploadOwner } from "./uploads.ts";
 import { UPLOAD_LIMIT, type PrivateSourceDetail } from "../shared/uploads.ts";
 
 function storage() {
@@ -160,4 +161,58 @@ test("a competing processing request cannot dispatch a second embedding attempt"
   await processing;
   assert.equal(calls, 1);
   assert.equal((await uploadDetail(env, owner, source.id)).hasText, true);
+});
+
+test("private source organization is owned, bounded, durable, and never changes original bytes or expiry", async () => {
+  const { env, objects } = storage();
+  const owner = await uploadOwner(authorization);
+  const source = await createUpload(env, owner, uploadRequest("review.txt", "Only sandbox access is authorized."));
+  const manifest = await readFile(new URL("../../corpus/manifest.json", import.meta.url), "utf8");
+  await env.ORIGINALS.put("corpus/manifest.json", manifest);
+  const caseId = JSON.parse(manifest).cases[0].caseId;
+  const headers = { Authorization: authorization, "Content-Type": "application/json", "CF-Connecting-IP": "127.0.0.1" };
+  const path = `http://localhost/api/uploads/${source.id}`;
+  assert.equal((await app.request(path, { method: "PATCH", headers: { ...headers, Authorization: otherAuthorization }, body: JSON.stringify({ notes: "foreign edit" }) }, env)).status, 404);
+  assert.equal((await app.request(path, { method: "DELETE", headers: { ...headers, Authorization: otherAuthorization } }, env)).status, 404);
+  assert.equal((await app.request(path, { method: "PATCH", headers, body: JSON.stringify({ notes: "x".repeat(4001) }) }, env)).status, 400);
+  assert.equal((await app.request(path, { method: "PATCH", headers, body: JSON.stringify({ state: "indexed" }) }, env)).status, 400);
+  assert.equal((await app.request(path, { method: "PATCH", headers, body: JSON.stringify({ caseId: "unknown-case" }) }, env)).status, 404);
+  assert.equal((await app.request(path, { method: "PATCH", headers, body: JSON.stringify({ caseId, notes: "Review the original before reuse.", previousNotes: "" }) }, env)).status, 200);
+  await assert.rejects(updateUpload(env, owner, source.id, { notes: "A stale editor must not overwrite these notes.", previousNotes: "" }), { code: "UPLOAD_CHANGED" });
+  await processUpload(env, owner, source.id);
+  const retained = (await listUploads(env, owner))[0];
+  assert.equal(retained.caseId, caseId);
+  assert.equal(retained.notes, "Review the original before reuse.");
+  assert.equal(retained.expiresAt, source.expiresAt);
+  assert.equal(await (await uploadOriginal(env, owner, source.id)).text(), "Only sandbox access is authorized.");
+  await assert.rejects(updateUpload(env, owner, source.id, { notes: "during indexing", previousNotes: retained.notes }), { code: "UPLOAD_PROCESSING" });
+  assert.equal((await app.request(path, { method: "DELETE", headers }, env)).status, 200);
+  assert.deepEqual(await listUploads(env, owner), []);
+  await assert.rejects(uploadOriginal(env, owner, source.id), { code: "UPLOAD_NOT_FOUND" });
+  await assert.rejects(attachmentRequest(env, owner, "Request", [source.id]), { code: "UPLOAD_NOT_FOUND" });
+  assert.equal([...objects.keys()].some((key) => key.includes(`/originals/${source.id}`)), false);
+});
+
+test("deletion during embedding prevents content resurrection and retains cleanup after vector failures", async () => {
+  const { env, objects, vectors } = storage();
+  const owner = await uploadOwner(authorization);
+  const source = await createUpload(env, owner, uploadRequest("delete-during-processing.txt", "A private client request."));
+  let release!: () => void;
+  let entered!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  env.AI = { run: async () => { entered(); await blocked; return { data: [Array(768).fill(0.1)] }; } } as unknown as Ai;
+  const processing = processUpload(env, owner, source.id);
+  await started;
+  env.VECTORIZE!.deleteByIds = async () => { throw new Error("temporary vector outage"); };
+  await deleteUpload(env, owner, source.id);
+  release();
+  await processing;
+  assert.deepEqual(await listUploads(env, owner), []);
+  assert.equal(vectors.size, 0);
+  assert.equal([...objects.keys()].some((key) => key.includes("/records/")), false);
+  assert.equal([...objects.keys()].some((key) => key.startsWith("private-upload-expiry/")), true);
+  env.VECTORIZE!.deleteByIds = async () => ({ mutationId: "removed" });
+  await expireUploads(env);
+  assert.equal([...objects.keys()].filter((key) => key.startsWith("private-upload-expiry/")).length, 1, "the original seven-day marker remains to sweep late in-flight vectors");
 });
