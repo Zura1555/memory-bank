@@ -1824,17 +1824,13 @@ function App({ active }: { active: boolean }) {
                     <h4>Evidence review</h4>
                     <div className="donut-layout">
                       <svg className="donut-svg" viewBox="0 0 42 42" aria-hidden="true">
-                        <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#cfe5fc" strokeWidth="6" />
-                        <circle
-                          cx="21"
-                          cy="21"
-                          r="15.9155"
-                          fill="none"
-                          stroke="#1877d2"
-                          strokeWidth="6"
-                          strokeDasharray={`${supportedPct} ${100 - supportedPct}`}
-                          strokeDashoffset="25"
-                        />
+                        <circle cx="21" cy="21" r="15.9155" fill="none" stroke="var(--chart-track)" strokeWidth="6" />
+                        <circle cx="21"
+                        cy="21"
+                        r="15.9155"
+                        fill="none" stroke="var(--chart-primary)" strokeWidth="6"
+                        strokeDasharray={`${supportedPct} ${100 - supportedPct}`}
+                        strokeDashoffset="25" />
                         <text x="21" y="22.5" textAnchor="middle" className="donut-center-text">{supportedPct}%</text>
                       </svg>
                       <div className="donut-legend">

@@ -287,9 +287,11 @@ For a browser smoke, choose a multi-version artifact, select a passage, and swit
 
 ### Shared Anduin colors
 
-The existing shared CSS roles now use Anduin's observed public blue `#0158AE`, navy `#162950`, and decorative blue-gray `#CCD2DB`. Actions, links, evidence accents, focus, and the Base UI picker/dialog share light/dark roles; semantic green/amber/red/unknown labels remain distinct. Small muted text and functional control borders use contrast-safe assignments rather than copying low-contrast website values.
+`web/styles.css` owns the app’s shared design tokens: semantic colors, spacing, type sizes, radii, motion, shadows, and focus/selection rings. Components consume CSS variables directly; the SVG chart shares its color roles with the legend. Repeated scale values preserve the existing layout; one-off geometry and breakpoints remain local.
 
-See the [source selectors, explicit application/dark-mode derivations, measured contrast pairs, and browser screenshot record](docs/anduin-palette-2026-10-15.md). This is website-matched branding, not a claim of access to private product tokens. Browser replay proof is separate from paid workflow qualification.
+The light theme retains Anduin-inspired blue `#0158AE` and navy `#162950`, with app-derived surfaces and contrast-safe text/control boundaries. `prefers-color-scheme: dark` overrides the same semantic roles automatically, including native form controls, dialogs, pickers, source status, and evidence surfaces. Success/warning/error/unknown remain distinct and visibly labelled. Reduced-motion preference shortens transitions; no theme toggle, token generator, or new dependency is introduced.
+
+See the [current token contract, public-source observations, measured contrast pairs, and dated browser evidence](docs/anduin-palette-2026-10-15.md). This is website-matched branding, not a claim of access to private product tokens. Browser replay proof is separate from paid workflow qualification.
 
 ## Production deployment
 
