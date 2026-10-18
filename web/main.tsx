@@ -766,18 +766,10 @@ function SourcesPage() {
       }
     }
   };
-  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow sources-workflow" aria-labelledby="sources-title">
-    <div className="intro"><h1 id="sources-title">Sources</h1>
-      <p>Browse the fictional corpus and your private files. Inspect originals, extracted content and live indexing status.</p></div>
-    <SourceLibrary sources={sources ?? []} indexStatus={indexStatus} renderSource={(source) => <section className="source-detail-evidence">
-      <h4>Exact source evidence</h4><p className="record-id">{source.caseId} / {source.artifactId} / {source.versionId}</p>
-      {source.availability === "available" ? <>
-        <a className="download-link" href={`/api/evidence/originals/${encodeURIComponent(source.versionId)}`}>Download exact fictional original</a>
-        {source.passages.length ? <SourceLinks refs={source.passages} inspect={setPassageRef} previews /> : <p>No inspectable passages are retained.</p>}
-      </> : <StringList title="Source unavailable for use" items={source.exclusionReasons} />}
-    </section>} />
-    {error ? <p className="notice notice-error" role="alert">The source inventory could not be verified. Reload to try again.</p>
-      : sources === null ? <p role="status">Loading source inventory…</p> : <>
+  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow sources-page" aria-labelledby="sources-title">
+    <SourceLibrary sources={sources ?? []} indexStatus={indexStatus} inspect={setPassageRef} loading={sources === null && !error} error={error} />
+    {sources !== null && !error && <details className="sources-search-disclosure">
+      <summary>Search public corpus passages by meaning</summary>
         <form className="screen source-semantic-search" role="search" aria-labelledby="semantic-search-title" aria-busy={semanticLoading} onSubmit={submitSemanticSearch}>
           <div>
             <h2 id="semantic-search-title">Semantic passage search</h2>
@@ -818,7 +810,7 @@ function SourcesPage() {
             </li>;
           })}</ol>
         </section>}
-      </>}
+    </details>}
   </section></EvidenceWorkspace>;
 }
 

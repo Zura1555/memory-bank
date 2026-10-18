@@ -14,7 +14,9 @@ interface UploadLibrary {
   upload: (files: File[]) => Promise<void>;
   process: (id: string) => Promise<void>;
   detail: (id: string, signal?: AbortSignal) => Promise<PrivateSourceDetail>;
-  download: (source: PrivateSource) => Promise<void>;
+  download: (source: PrivateSource, open?: boolean) => Promise<void>;
+  update: (id: string, changes: { caseId?: string | null; notes?: string; previousNotes?: string }) => Promise<void>;
+  remove: (id: string) => Promise<void>;
 }
 const UploadContext = createContext<UploadLibrary | null>(null);
 
@@ -29,12 +31,14 @@ async function uploadResponse(response: Response): Promise<unknown> {
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const reasons: Record<string, string> = {
-      UPLOAD_TOO_LARGE: "The file exceeds 10 MiB.", UPLOAD_LIBRARY_FULL: "This browser has 20 retained files. Wait for their seven-day expiry before adding more.",
+      UPLOAD_TOO_LARGE: "The file exceeds 10 MiB.", UPLOAD_LIBRARY_FULL: "This browser has 20 retained files. Delete an unneeded file or wait for its seven-day expiry.",
       UPLOAD_TYPE_NOT_SUPPORTED: "Choose DOCX, PDF, PPTX, XLSX, an image, UTF-8 Markdown, plain text, or CSV.",
       UPLOAD_FORMAT_MISMATCH: "The file content does not match its extension.", UPLOAD_UTF8_REQUIRED: "Text and CSV files must use UTF-8 without binary content.",
       UPLOAD_RATE_LIMITED: "The upload request limit was reached. Wait a minute before trying again.",
       UPLOAD_PROCESSING: "This file is already processing. Its status will refresh automatically.",
       UPLOAD_NOT_FOUND: "This private upload is missing, expired, or belongs to another browser.",
+      UPLOAD_CHANGED: "This source changed in another request. Refresh and try again.",
+      CASE_NOT_FOUND: "That case is no longer available. Refresh the source library.",
     };
     const code = body && typeof body === "object" && "error" in body && typeof body.error === "object" && body.error !== null && "code" in body.error ? String(body.error.code) : "";
     throw new Error(reasons[code] ?? `The upload service could not complete this request (HTTP ${response.status}). No automatic retry was made.`);
@@ -125,6 +129,7 @@ export function PrivateUploadsProvider({ children }: { children: ReactNode }) {
         setUploading(`Uploading ${file.name} (${index + 1} of ${files.length})…`);
         const source = await uploadResponse(await fetch("/api/uploads", { method: "POST", body: file, headers: { Authorization: `Bearer ${key}`, "X-File-Name": encodeURIComponent(file.name), "Content-Type": "application/octet-stream" } }));
         if (!isPrivateSource(source)) throw new Error("The upload receipt could not be verified. Reload Sources before trying again.");
+        generation.current++;
         setSources((items) => [source, ...items]);
         setFocusedId(source.id);
         await process(source.id);
@@ -137,19 +142,41 @@ export function PrivateUploadsProvider({ children }: { children: ReactNode }) {
     if (!isPrivateSource(source) || source.id !== id || !("text" in source) || !(source.text === null || typeof source.text === "string")) throw new Error("Private source content could not be verified.");
     return source as PrivateSourceDetail;
   }
-  async function download(source: PrivateSource): Promise<void> {
+  async function update(id: string, changes: { caseId?: string | null; notes?: string; previousNotes?: string }): Promise<void> {
+    const key = tokenRef.current;
+    const source = await uploadResponse(await fetch(`/api/uploads/${encodeURIComponent(id)}`, { method: "PATCH", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify(changes) }));
+    if (!isPrivateSource(source) || source.id !== id || key !== tokenRef.current) throw new Error("The source update could not be verified. Refresh and try again.");
+    generation.current++;
+    setSources((items) => items.map((item) => item.id === id ? source : item));
+  }
+  async function remove(id: string): Promise<void> {
+    const key = tokenRef.current;
+    await uploadResponse(await fetch(`/api/uploads/${encodeURIComponent(id)}`, { method: "DELETE", headers: { Authorization: `Bearer ${key}` } }));
+    if (key !== tokenRef.current) return;
+    generation.current++;
+    setSources((items) => items.filter((item) => item.id !== id));
+    setFocusedId((current) => current === id ? null : current);
+  }
+  async function download(source: PrivateSource, open = false): Promise<void> {
+    const preview = open ? window.open("about:blank", "_blank") : null;
+    if (preview) preview.opener = null;
     try {
       const response = await fetch(`/api/uploads/${encodeURIComponent(source.id)}/original`, { headers: { Authorization: `Bearer ${tokenRef.current}` } });
       if (!response.ok) { await uploadResponse(response); return; }
       const url = URL.createObjectURL(await response.blob());
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = source.name;
-      anchor.click();
+      if (open) {
+        if (!preview) { URL.revokeObjectURL(url); throw new Error("Allow pop-ups to open the original, or use Download."); }
+        preview.location.replace(url);
+      } else {
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = source.name;
+        anchor.click();
+      }
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (failure) { setError(failure instanceof Error ? failure.message : "The exact original could not be downloaded."); }
+    } catch (failure) { preview?.close(); setError(failure instanceof Error ? failure.message : "The exact original could not be downloaded."); }
   }
-  return <UploadContext.Provider value={{ sources, token, error, uploading, focusedId, setFocusedId, refresh, upload, process, detail, download }}>{children}</UploadContext.Provider>;
+  return <UploadContext.Provider value={{ sources, token, error, uploading, focusedId, setFocusedId, refresh, upload, process, detail, download, update, remove }}>{children}</UploadContext.Provider>;
 }
 
 export function usePrivateUploads(): UploadLibrary {
@@ -165,6 +192,7 @@ export function UploadPicker() {
   return <section className="upload-picker" data-dragging={dragging || undefined} aria-label="Upload private files"
     onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
     onDrop={(event) => { event.preventDefault(); setDragging(false); void library.upload(Array.from(event.dataTransfer.files)); }}>
+    <svg className="upload-drop-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5" /></svg>
     <div className="upload-picker-heading"><div><strong>Add private files</strong><p>Drop files here or choose from your device.</p></div>
       <Button className="secondary-button" type="button" disabled={Boolean(library.uploading)} onClick={() => input.current?.click()}>Upload files</Button>
       <input ref={input} className="visually-hidden" type="file" aria-label="Choose private files" accept={uploadAccept} multiple disabled={Boolean(library.uploading)} onChange={(event) => { void library.upload(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ""; }} /></div>
@@ -183,7 +211,7 @@ export function RequestAttachments({ selected, onChange }: { selected: string[];
       {library.sources.map((source) => <div className="attachment-option" key={source.id}>
         <label><input type="checkbox" checked={selected.includes(source.id)} disabled={!source.hasText || (!selected.includes(source.id) && selected.length >= 5)}
           onChange={(event) => onChange(event.currentTarget.checked ? [...selected, source.id] : selected.filter((id) => id !== source.id))} />
-          <span>{source.name}<small>{uploadStateLabels[source.state]}{!source.hasText ? " · waiting for extracted content" : " · unreviewed client context"}</small></span></label>
+          <span>{source.name}<small>{uploadStateLabels[source.state]}{source.hasText ? " · unreviewed client context" : " · waiting for extracted content"}</small></span></label>
         <a href="/?sources" onClick={() => library.setFocusedId(source.id)}>Review</a>
       </div>)}
     </fieldset>}

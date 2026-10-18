@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { unzipSync } from "fflate";
 import { XMLParser } from "fast-xml-parser";
+import { z } from "zod";
+import { loadCorpus } from "./corpus.ts";
 import { capabilityHash } from "./auth.ts";
 import { HttpFailure } from "./errors.ts";
 import type { Env } from "./env.ts";
@@ -36,6 +38,9 @@ async function stored(env: Env, owner: string, id: string) {
   const object = await env.ORIGINALS.get(recordKey(owner, checkedId(id)));
   if (!object) throw new HttpFailure(404, "UPLOAD_NOT_FOUND");
   const source = await object.json<PrivateSourceDetail>();
+  // Existing retained uploads acquire organization fields when read; original bytes never change.
+  source.caseId ??= null;
+  source.notes ??= "";
   if (Date.parse(source.expiresAt) <= Date.now()) throw new HttpFailure(404, "UPLOAD_NOT_FOUND");
   return { source, etag: object.etag };
 }
@@ -115,6 +120,7 @@ export async function createUpload(env: Env, owner: string, request: Request): P
   const now = new Date().toISOString();
   const source: PrivateSourceDetail = {
     id: crypto.randomUUID(), name, mimeType, size: bytes.byteLength,
+    caseId: null, notes: "",
     sha256: createHash("sha256").update(bytes).digest("hex"),
     createdAt: now, updatedAt: now, expiresAt: new Date(Date.now() + RETENTION).toISOString(),
     state: "pending", hasText: false, text: null, chunkCount: 0,
@@ -171,6 +177,45 @@ export async function uploadOriginal(env: Env, owner: string, id: string): Promi
     "Content-Type": source.mimeType, "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(source.name)}`,
     "Content-Length": String(bytes.byteLength), "Cache-Control": "no-store",
   } });
+}
+
+const organizationSchema = z.object({
+  caseId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/u).nullable().optional(),
+  notes: z.string().max(4000).optional(),
+  previousNotes: z.string().max(4000).optional(),
+}).strict().refine((value) => (value.notes !== undefined || value.caseId !== undefined) && (value.notes === undefined || value.previousNotes !== undefined));
+
+export async function updateUpload(env: Env, owner: string, id: string, input: unknown): Promise<PrivateSource> {
+  const { source, etag } = await stored(env, owner, id);
+  const parsed = organizationSchema.safeParse(input);
+  if (!parsed.success) throw new HttpFailure(400, "INVALID_REQUEST");
+  if (["extracting", "indexing"].includes(interrupted(source).state)) throw new HttpFailure(409, "UPLOAD_PROCESSING");
+  if (parsed.data.notes !== undefined && parsed.data.previousNotes !== source.notes) throw new HttpFailure(409, "UPLOAD_CHANGED");
+  if (parsed.data.caseId && !(await loadCorpus(env)).manifest.cases.some((item) => item.caseId === parsed.data.caseId)) throw new HttpFailure(404, "CASE_NOT_FOUND");
+  const { previousNotes: _previousNotes, ...changes } = parsed.data;
+  Object.assign(source, changes);
+  activity(source, interrupted(source).state, parsed.data.notes !== undefined ? "Private source notes updated." : "Private source case assignment updated; this remains unreviewed client context.");
+  const saved = await env.ORIGINALS.put(recordKey(owner, id), JSON.stringify(source), { onlyIf: { etagMatches: etag }, customMetadata: metadata(source) });
+  if (!saved) throw new HttpFailure(409, "UPLOAD_CHANGED");
+  return publicView(source);
+}
+
+export async function deleteUpload(env: Env, owner: string, id: string): Promise<void> {
+  const { source, etag } = await stored(env, owner, id);
+  // Expire first: concurrent processing cannot overwrite this revision or restore access.
+  source.expiresAt = new Date().toISOString();
+  const saved = await env.ORIGINALS.put(recordKey(owner, id), JSON.stringify(source), { onlyIf: { etagMatches: etag }, customMetadata: metadata(source) });
+  if (!saved) throw new HttpFailure(409, "UPLOAD_CHANGED");
+  const marker = `private-upload-expiry/${source.expiresAt}/${owner}/${id}`;
+  await env.ORIGINALS.put(marker, JSON.stringify({ owner, id }));
+  await env.ORIGINALS.delete([recordKey(owner, id), originalKey(owner, id)]);
+  try {
+    if (env.VECTORIZE) {
+      await env.VECTORIZE.deleteByIds(Array.from({ length: 128 }, (_, chunk) => vectorId(id, chunk)));
+      await env.ORIGINALS.delete(marker);
+    }
+  } catch { /* Content access is revoked; the retained marker retries vector cleanup. */ }
+  // Keep the original expiry marker to sweep any late, in-flight vector mutation as well.
 }
 
 function presentationText(bytes: Uint8Array): string {
