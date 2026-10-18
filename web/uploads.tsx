@@ -31,7 +31,7 @@ async function uploadResponse(response: Response): Promise<unknown> {
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const reasons: Record<string, string> = {
-      UPLOAD_TOO_LARGE: "The file exceeds 10 MiB.", UPLOAD_LIBRARY_FULL: "This browser has 20 retained files. Delete an unneeded file or wait for its seven-day expiry.",
+      UPLOAD_TOO_LARGE: "The file exceeds 25 MiB.", UPLOAD_LIBRARY_FULL: "This browser has 100 retained files. Delete an unneeded file or wait for its seven-day expiry.",
       UPLOAD_TYPE_NOT_SUPPORTED: "Choose DOCX, PDF, PPTX, XLSX, an image, UTF-8 Markdown, plain text, or CSV.",
       UPLOAD_FORMAT_MISMATCH: "The file content does not match its extension.", UPLOAD_UTF8_REQUIRED: "Text and CSV files must use UTF-8 without binary content.",
       UPLOAD_RATE_LIMITED: "The upload request limit was reached. Wait a minute before trying again.",
@@ -114,7 +114,7 @@ export function PrivateUploadsProvider({ children }: { children: ReactNode }) {
     busy.current = true;
     setError(null);
     try {
-      if (files.length > 5) throw new Error("Choose at most five files per upload.");
+      if (files.length > 20) throw new Error("Choose at most 20 files per upload.");
       let key = readToken();
       if (!key) {
         key = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
@@ -124,7 +124,7 @@ export function PrivateUploadsProvider({ children }: { children: ReactNode }) {
         setToken(key);
       }
       for (const [index, file] of files.entries()) {
-        if (!file.size || file.size > UPLOAD_LIMIT) throw new Error(`${file.name}: choose a non-empty file up to 10 MiB.`);
+        if (!file.size || file.size > UPLOAD_LIMIT) throw new Error(`${file.name}: choose a non-empty file up to 25 MiB.`);
         if (!uploadTypes[file.name.split(".").pop()!.toLowerCase()]) throw new Error(`${file.name}: this file type is not supported.`);
         setUploading(`Uploading ${file.name} (${index + 1} of ${files.length})…`);
         const source = await uploadResponse(await fetch("/api/uploads", { method: "POST", body: file, headers: { Authorization: `Bearer ${key}`, "X-File-Name": encodeURIComponent(file.name), "Content-Type": "application/octet-stream" } }));
@@ -196,7 +196,7 @@ export function UploadPicker() {
     <div className="upload-picker-heading"><div><strong>Add private files</strong><p>Drop files here or choose from your device.</p></div>
       <Button className="secondary-button" type="button" disabled={Boolean(library.uploading)} onClick={() => input.current?.click()}>Upload files</Button>
       <input ref={input} className="visually-hidden" type="file" aria-label="Choose private files" accept={uploadAccept} multiple disabled={Boolean(library.uploading)} onChange={(event) => { void library.upload(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ""; }} /></div>
-    <p className="field-hint">DOCX, PDF, PPTX, XLSX, images, UTF-8 Markdown, text and CSV · 10 MiB/file · 5 files at a time.</p>
+    <p className="field-hint">DOCX, PDF, PPTX, XLSX, images, UTF-8 Markdown, text and CSV · 25 MiB/file · 20 files at a time.</p>
     <p className="field-hint">Private access is saved only in this browser. Cloudflare stores and processes files; application access expires after seven days, with background content cleanup. Files never enter the public corpus. Conversion/embedding may use Workers AI. <a href="https://developers.cloudflare.com/workers-ai/platform/data-usage/">Platform data policies</a> govern upstream copies, not this expiry. Do not upload sensitive data.</p>
     {library.uploading && <p role="status">{library.uploading}</p>}
     {library.error && <p className="notice notice-error" role="alert">{library.error}</p>}
