@@ -1,6 +1,6 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import type { AssessmentResult, Selection } from "../shared/protocol.ts";
-import type { Env, WorkflowParams } from "./env.ts";
+import type { Env, WorkflowParams, UploadWorkflowParams } from "./env.ts";
 import { database, transaction } from "./db.ts";
 import { loadCorpus } from "./corpus.ts";
 import { loadStageOutput, runPaidStage, ReconciliationRequired } from "./calls.ts";
@@ -30,6 +30,7 @@ import {
   revalidateAssessment,
 } from "./gates.ts";
 import { validateSelections } from "./selections.ts";
+import { processUpload } from "./uploads.ts";
 
 interface WorkflowJob {
   request_text: string;
@@ -153,8 +154,15 @@ async function paidStep(
   return outcome.attemptId;
 }
 
-export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
-  async run(event: WorkflowEvent<WorkflowParams>, step: WorkflowStep): Promise<void> {
+export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams | UploadWorkflowParams> {
+  async run(event: WorkflowEvent<WorkflowParams | UploadWorkflowParams>, step: WorkflowStep): Promise<void> {
+    if ("uploadId" in event.payload) {
+      const upload = event.payload;
+      await step.do("extract-and-index-private-source", {
+        retries: { limit: 0, delay: "1 second" }, timeout: "5 minutes", sensitive: "output",
+      }, () => processUpload(this.env, upload.owner, upload.uploadId));
+      return;
+    }
     const params = event.payload;
     let job: WorkflowJob | null = null;
     try {

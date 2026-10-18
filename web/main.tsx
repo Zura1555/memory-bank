@@ -42,6 +42,9 @@ import { dispositionChanges } from "../src/ui/lineage";
 import { readLocalJobs, writeLocalJobs, reopenedJobMode, type LocalJob } from "../src/ui/local-jobs";
 import { checkedArtifactRefs } from "../src/ui/checked-sources";
 import { isPassage } from "../src/ui/passage";
+import { PrivateUploadsProvider, RequestAttachments, usePrivateUploads } from "./uploads";
+import { SourceLibrary } from "./source-library";
+import type { SourceIndexStatus } from "../src/shared/uploads";
 import "./styles.css";
 
 const phaseStates: PhaseState[] = ["not_started", "queued", "running", "ready", "failed", "reconciliation_required"];
@@ -70,6 +73,9 @@ async function admissionFailure(response: Response, subject: string): Promise<st
     ADMISSION_NOT_ENABLED: "Paid admission is disabled.",
     AUTHORIZED_CREDIT_EXHAUSTED: "Authorized credit is exhausted.",
     WORKFLOW_BUSY: "The service cannot admit another workflow yet.",
+    UPLOAD_NOT_FOUND: "An attached file is missing, expired, or belongs to another browser. Review the selected files.",
+    UPLOAD_TEXT_NOT_READY: "An attached file has no usable extracted text yet. Review its Sources status.",
+    ATTACHED_REQUEST_TOO_LARGE: "The request and complete attached text exceed 16 KiB. Remove an attachment or shorten the request; nothing was truncated.",
   };
   const code = isRecord(body) && isRecord(body.error) && typeof body.error.code === "string" ? body.error.code : "";
   return Object.hasOwn(reasons, code)
@@ -661,7 +667,7 @@ function SourceFilter({ title, value, options, onChange }: {
 function SourcesPage() {
   const [sources, setSources] = useState<SourceCatalogEntry[] | null>(null);
   const [error, setError] = useState(false);
-  const [query, setQuery] = useState("");
+  const [indexStatus, setIndexStatus] = useState<Record<string, SourceIndexStatus> | null>(null);
   const [caseId, setCaseId] = useState("");
   const [mimeType, setMimeType] = useState("");
   const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
@@ -672,6 +678,15 @@ function SourcesPage() {
   const [semanticError, setSemanticError] = useState<string | null>(null);
   const semanticSearchController = useRef<AbortController | null>(null);
   useEffect(() => () => semanticSearchController.current?.abort(), []);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/sources/index-status", { signal: controller.signal }).then(async (response) => {
+      if (!response.ok) return;
+      const body: unknown = await response.json();
+      if (isRecord(body) && isRecord(body.status) && Object.values(body.status).every((status) => ["indexed", "partial", "pending", "unavailable"].includes(status as string)) && !controller.signal.aborted) setIndexStatus(body.status as Record<string, SourceIndexStatus>);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
@@ -697,10 +712,6 @@ function SourcesPage() {
   }, [sources]);
   const caseOptions = [...new Map((sources ?? []).map((source) => [source.caseId, { value: source.caseId, label: source.caseTitle }])).values()];
   const typeOptions = [...new Set((sources ?? []).map((source) => source.mimeType))].map((type) => ({ value: type, label: type }));
-  const needle = query.trim().toLocaleLowerCase();
-  const filtered = (sources ?? []).filter((source) => (!caseId || source.caseId === caseId)
-    && (!mimeType || source.mimeType === mimeType)
-    && (!needle || `${source.title} ${source.caseTitle}`.toLocaleLowerCase().includes(needle)));
   const cancelSemanticSearch = () => {
     semanticSearchController.current?.abort();
     semanticSearchController.current = null;
@@ -756,24 +767,26 @@ function SourcesPage() {
     }
   };
   return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow" aria-labelledby="sources-title">
-    <div className="intro"><p className="eyebrow">Original Corpus</p><h1 id="sources-title">Sources</h1>
-      <span className="title-accent-bar" aria-hidden="true" />
-      <p>Browse fictional source versions, inspect retained passages, and download verified originals.</p></div>
+    <div className="intro"><h1 id="sources-title">Sources</h1>
+      <p>Browse the fictional corpus and your private files. Inspect originals, extracted content and live indexing status.</p></div>
+    <SourceLibrary sources={sources ?? []} indexStatus={indexStatus} renderSource={(source) => <section className="source-detail-evidence">
+      <h4>Exact source evidence</h4><p className="record-id">{source.caseId} / {source.artifactId} / {source.versionId}</p>
+      {source.availability === "available" ? <>
+        <a className="download-link" href={`/api/evidence/originals/${encodeURIComponent(source.versionId)}`}>Download exact fictional original</a>
+        {source.passages.length ? <SourceLinks refs={source.passages} inspect={setPassageRef} previews /> : <p>No inspectable passages are retained.</p>}
+      </> : <StringList title="Source unavailable for use" items={source.exclusionReasons} />}
+    </section>} />
     {error ? <p className="notice notice-error" role="alert">The source inventory could not be verified. Reload to try again.</p>
       : sources === null ? <p role="status">Loading source inventory…</p> : <>
-        <div className="screen source-controls" role="search" aria-label="Search the source corpus">
-          <Field.Root name="source-search"><Field.Label>Search sources</Field.Label>
-            <Input value={query} onValueChange={setQuery} placeholder="Source title or case name…" className="source-search" type="search" />
-          </Field.Root>
-          <SourceFilter title="Case" value={caseId} onChange={(next) => { if (next !== caseId) { cancelSemanticSearch(); setCaseId(next); } }} options={[{ value: "", label: "All cases" }, ...caseOptions]} />
-          <SourceFilter title="File type" value={mimeType} onChange={(next) => { if (next !== mimeType) { cancelSemanticSearch(); setMimeType(next); } }} options={[{ value: "", label: "All file types" }, ...typeOptions]} />
-          <Button className="secondary-button" type="button" onClick={() => { if (caseId || mimeType) cancelSemanticSearch(); setQuery(""); setCaseId(""); setMimeType(""); }} disabled={!query && !caseId && !mimeType}>Clear filters</Button>
-        </div>
         <form className="screen source-semantic-search" role="search" aria-labelledby="semantic-search-title" aria-busy={semanticLoading} onSubmit={submitSemanticSearch}>
           <div>
             <h2 id="semantic-search-title">Semantic passage search</h2>
             <p id="semantic-search-privacy" className="field-hint">Only on submit, your query is sent to Cloudflare Workers AI for embedding. The app does not persist submitted queries; semantic search is separate from the checked assessment workflow.</p>
             <p id="semantic-search-note" className="field-hint">Semantic similarity is not applicability and is not a checked recommendation.</p>
+          </div>
+          <div className="source-controls">
+            <SourceFilter title="Search case" value={caseId} onChange={(next) => { cancelSemanticSearch(); setCaseId(next); }} options={[{ value: "", label: "All cases" }, ...caseOptions]} />
+            <SourceFilter title="Search file type" value={mimeType} onChange={(next) => { cancelSemanticSearch(); setMimeType(next); }} options={[{ value: "", label: "All file types" }, ...typeOptions]} />
           </div>
           <div className="source-semantic-controls">
             <Field.Root name="semantic-search"><Field.Label>Search passage meaning</Field.Label>
@@ -805,35 +818,6 @@ function SourcesPage() {
             </li>;
           })}</ol>
         </section>}
-        <p className="source-count muted" role="status">{filtered.length} of {sources.length} retained source versions</p>
-        {filtered.length === 0 ? <p className="screen empty-state">No sources match these filters. Clear the filters to browse the corpus.</p>
-          : <div className="source-catalog">{filtered.map((source) => <article className="screen source-card" key={`${source.caseId}-${source.artifactId}-${source.versionId}`}>
-            <div className="card-heading">
-              <div className="avatar-title-row">
-                <AvatarCircle name={source.caseTitle} />
-                <div>
-                  <p className="eyebrow">{source.caseTitle}</p>
-                  <h2>{source.title}</h2>
-                </div>
-              </div>
-              <Badge tone={source.availability}>{label(source.availability)}</Badge>
-            </div>
-            <div className="badge-row">
-              <span className="token-pill">[{source.caseId} / {source.artifactId}]</span>
-              <span className="token-pill">[{source.versionId}]</span>
-              <Badge tone="fictional">Fictional source</Badge>
-              <Badge>{source.mimeType}</Badge>
-              {[...new Set(source.passages.map((ref) => ref.sourceKind))].map((kind) => <Badge key={kind}>{label(kind)}</Badge>)}
-              <span className="muted small">{source.statedDate ? `Stated: ${source.statedDate}` : "No stated date"}</span>
-            </div>
-            {source.availability === "available" ? <div className="source-card-footer">
-              <a className="download-link" href={`/api/evidence/originals/${encodeURIComponent(source.versionId)}`}>Download exact fictional original</a>
-              {source.passages.length > 0 ? <Collapsible.Root className="source-passages">
-                <Collapsible.Trigger render={<Button className="secondary-button" />}>Inspect passages ({source.passages.length})</Collapsible.Trigger>
-                <Collapsible.Panel><SourceLinks refs={source.passages} inspect={setPassageRef} previews /></Collapsible.Panel>
-              </Collapsible.Root> : <p className="muted">No inspectable passages are retained.</p>}
-            </div> : <StringList title="Source unavailable for use" items={source.exclusionReasons} />}
-          </article>)}</div>}
       </>}
   </section></EvidenceWorkspace>;
 }
@@ -1219,6 +1203,19 @@ const suggestedRequests: { title: string; basis: string; focus: string; tone: Av
 function App({ active }: { active: boolean }) {
   const [step, setStep] = useState(1);
   const [request, setRequest] = useState("");
+  const uploads = usePrivateUploads();
+  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
+  useEffect(() => {
+    const attach = (event: Event) => {
+      const id: unknown = (event as CustomEvent<unknown>).detail;
+      if (typeof id !== "string") return;
+      startNewRequest();
+      setAttachmentIds((ids) => ids.includes(id) ? ids : [...ids.slice(0, 4), id]);
+      window.setTimeout(() => document.getElementById("client-request")?.focus(), 0);
+    };
+    window.addEventListener("memory-bank:attach-source", attach);
+    return () => window.removeEventListener("memory-bank:attach-source", attach);
+  }, []);
   const [modelInfo, setModelInfo] = useState<{ provider: string; model: string; endpoint: string } | null>(null);
   const [modelInfoError, setModelInfoError] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
@@ -1438,7 +1435,8 @@ function App({ active }: { active: boolean }) {
   const selectionsValid = selectedCount > 0 && selections.length === selectedCount && selections.every((selection) => selection.passageIds.length > 0);
 
   async function createAssessment(requestText: string, clarification = false) {
-    const trimmed = requestText.trim();
+    const attached = clarification ? [] : attachmentIds;
+    const trimmed = requestText.trim() || (attached.length ? "Use the attached files as the new client's request." : "");
     if (!trimmed || submittingRequest || !modelInfo) return;
     if (clarification && job?.assessment && job.assessmentState === "ready" && Date.parse(job.expiresAt) > Date.now()) {
       setPreviousJob({ request: job.request, expiresAt: job.expiresAt, assessment: job.assessment });
@@ -1470,10 +1468,10 @@ function App({ active }: { active: boolean }) {
     setSubmittingRequest(true);
     setServiceError(null);
     try {
-      const body: CreateJobRequest = { request: trimmed };
+      const body: CreateJobRequest = { request: trimmed, ...(attached.length ? { attachmentIds: attached } : {}) };
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(attached.length && uploads.token ? { Authorization: `Bearer ${uploads.token}` } : {}) },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -1496,6 +1494,7 @@ function App({ active }: { active: boolean }) {
       setQuestionAnswers("");
       setSubmittingBrief(false);
       setSession(result);
+      setAttachmentIds([]);
       changeLocalJobs((entries) => [
         { ...result, label: trimmed.slice(0, 100), saved: entries.find((entry) => entry.jobId === result.jobId)?.saved ?? false },
         ...entries.filter((entry) => entry.jobId !== result.jobId),
@@ -1733,7 +1732,7 @@ function App({ active }: { active: boolean }) {
                 <Field.Root name="request">
                   <Field.Label htmlFor="client-request">Client request <span className="required-star" aria-hidden="true">*</span></Field.Label>
                   <Field.Description id="request-hint" className="field-hint">Target environment, scale, access requirements, and acceptance criteria. Do not include sensitive personal data.</Field.Description>
-                  <Field.Control render={<textarea id="client-request" aria-describedby="request-hint request-processing request-retention" rows={6} maxLength={6000} required placeholder="Enter client onboarding scope and constraints..." />} value={request} onValueChange={setRequest} />
+                  <Field.Control render={<textarea id="client-request" aria-describedby="request-hint request-processing request-retention" rows={6} maxLength={6000} required={!attachmentIds.length} placeholder="Enter client onboarding scope and constraints..." />} value={request} onValueChange={setRequest} />
                   <details className="privacy-disclosure">
                     <summary>Data processing &amp; 7-day retention policy</summary>
                     <p id="request-processing" className="field-hint">
@@ -1749,8 +1748,9 @@ function App({ active }: { active: boolean }) {
                     <p id="request-retention" className="field-hint">Application request/results and job access expire seven days after creation; minimal billing and replay-prevention records remain. Provider/platform copies follow the linked policies, not this seven-day expiry; backup retention is separate. Downloaded packs remain on your device.</p>
                   </details>
                 </Field.Root>
+                <RequestAttachments selected={attachmentIds} onChange={setAttachmentIds} />
                 <div className="form-submit-row">
-                  <Button className="primary-button" type="submit" disabled={submittingRequest || !request.trim() || !modelInfo}>{submittingRequest ? "Sending request…" : "Check past examples"}</Button>
+                  <Button className="primary-button" type="submit" disabled={submittingRequest || (!request.trim() && !attachmentIds.length) || attachmentIds.some((id) => !uploads.sources.some((source) => source.id === id && source.hasText)) || !modelInfo}>{submittingRequest ? "Sending request…" : "Check past examples"}</Button>
                 </div>
               </form>
             </section>
@@ -2014,8 +2014,8 @@ function App({ active }: { active: boolean }) {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<AppShell
+createRoot(document.getElementById("root")!).render(<PrivateUploadsProvider><AppShell
   ask={(active) => <App active={active} />}
   sources={<SourcesPage />}
   knowledge={(recordId) => <KnowledgePage key={recordId ?? "all"} recordId={recordId} />}
-/>);
+ /></PrivateUploadsProvider>);
