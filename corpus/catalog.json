@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "corpusVersion": "fictional-onboarding-v2",
+  "corpusVersion": "fictional-onboarding-v3",
   "cases": [
     {
       "caseId": "cedar-batch-import",
@@ -28,7 +28,42 @@
       "caseId": "elm-bulk-integration",
       "title": "Elm Rentals batch connector",
       "fictional": true,
-      "records": [],
+      "records": [
+        {
+          "kind": "source_fact",
+          "recordId": "elm-batch-count-discrepancy",
+          "caseId": "elm-bulk-integration",
+          "basis": "source_fact",
+          "assertion": "The Elm StayLedger v4 / PaySpring Connect v3 sandbox delivery log reports that the 600-item batch was rejected with no adjustments applied, then split into two 300-item batches; it records four intentionally malformed amounts and says the target returned item-level rejects. The later entry says the second 300-item batch ended with two rejects and the client confirmed 598 of 600 accepted across tests. These statements are unreconciled: retain four malformed amounts, two second-batch rejects, and the 598/600 total as distinct reports. Do not infer that the two rejects explain the malformed amounts or that a reconciled accepted total was verified.",
+          "applicability": "Historical Elm sandbox import run only; the source reports are not reconciled.",
+          "evidence": [
+            { "caseId": "elm-bulk-integration", "artifactId": "delivery-log", "versionId": "notes-2025-04-17", "passageId": "p-f0307a32de54738459c000dce90f00a3" },
+            { "caseId": "elm-bulk-integration", "artifactId": "delivery-log", "versionId": "notes-2025-04-17", "passageId": "p-f8671693077604825e9d0089517cb7e1" }
+          ],
+          "reviewStatus": "source_verified",
+          "sourceVerifier": "CampaignProtocol (agent)",
+          "sourceVerifiedAt": "2026-10-18",
+          "sourceVerificationMethod": "independent_read_only_agent_review"
+        },
+        {
+          "kind": "source_fact",
+          "recordId": "elm-sandbox-limitations",
+          "caseId": "elm-bulk-integration",
+          "basis": "source_fact",
+          "assertion": "Elm evidence is limited to StayLedger v4 / PaySpring Connect v3 sandbox, tested fields, and batches of at most 500 per job. No production test was run, and no production billing result is available. Production authorization and sustained rate-limit behavior are unknown; production delivery acceptance remains pending. No generic retry policy was validated.",
+          "applicability": "Historical Elm sandbox evidence only; it does not establish production readiness or new-tenant compatibility.",
+          "evidence": [
+            { "caseId": "elm-bulk-integration", "artifactId": "delivery-log", "versionId": "notes-2025-04-17", "passageId": "p-21debbf5cf36d783aed25c67591aa425" },
+            { "caseId": "elm-bulk-integration", "artifactId": "delivery-log", "versionId": "notes-2025-04-17", "passageId": "p-f8671693077604825e9d0089517cb7e1" },
+            { "caseId": "elm-bulk-integration", "artifactId": "delivery-log", "versionId": "notes-2025-04-17", "passageId": "p-d686a3f998ca265836120c01fdb30eb2" },
+            { "caseId": "elm-bulk-integration", "artifactId": "batch-adapter-notes", "versionId": "adapter-2025-04-11", "passageId": "p-03a4c5b29fe0071b33bc51422c10c0f2" }
+          ],
+          "reviewStatus": "source_verified",
+          "sourceVerifier": "CampaignProtocol (agent)",
+          "sourceVerifiedAt": "2026-10-18",
+          "sourceVerificationMethod": "independent_read_only_agent_review"
+        }
+      ],
       "artifacts": [
         { "artifactId": "request", "title": "Billing integration request", "fictional": true, "versions": [{ "versionId": "request-2025-04-02", "sourcePath": "corpus/originals/elm-bulk-integration/request.md", "mimeType": "text/markdown", "statedDate": "2025-04-02" }] },
         { "artifactId": "delivery-log", "title": "Connector notes and sandbox outcome", "fictional": true, "versions": [{ "versionId": "notes-2025-04-17", "sourcePath": "corpus/originals/elm-bulk-integration/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-04-17" }] },
@@ -125,7 +160,27 @@
       "caseId": "ibis-verified-handover",
       "title": "Ibis Foods tested handover",
       "fictional": true,
-      "records": [],
+      "records": [
+        {
+          "kind": "source_fact",
+          "recordId": "ibis-recovery-correction-history",
+          "caseId": "ibis-verified-handover",
+          "basis": "source_fact",
+          "assertion": "The Ibis 2025-05-19 first recovery attempt failed because the test archive lacked the prior day's checkpoint. After a corrected test archive was supplied on 2025-05-21, Maya restored the prior checkpoint and replayed one test batch; the target showed that batch once and source/target counts matched. The runbook says not to replay if the checkpoint is missing or the applied state is unclear; the exercise was in test only. Production alert routing, readiness, and recovery outcomes are not established.",
+          "applicability": "Ibis test-environment recovery exercise and supplied test batch only; no production recovery outcome or readiness is established.",
+          "evidence": [
+            { "caseId": "ibis-verified-handover", "artifactId": "delivery-log", "versionId": "notes-2025-05-23", "passageId": "p-dfd36ef4bb4b2aff13569f7e84b7b0d5" },
+            { "caseId": "ibis-verified-handover", "artifactId": "delivery-log", "versionId": "notes-2025-05-23", "passageId": "p-be10ef47b2b36387937fc281e1874201" },
+            { "caseId": "ibis-verified-handover", "artifactId": "delivery-log", "versionId": "notes-2025-05-23", "passageId": "p-18356d39c827604af801be2658c16ea3" },
+            { "caseId": "ibis-verified-handover", "artifactId": "operator-runbook", "versionId": "runbook-2025-05-21", "passageId": "p-f1ee09d99d16cc6f2f3fd50ad47b58be" },
+            { "caseId": "ibis-verified-handover", "artifactId": "operator-runbook", "versionId": "runbook-2025-05-21", "passageId": "p-6e6e4258f362813425bc3cdf99f6b378" }
+          ],
+          "reviewStatus": "source_verified",
+          "sourceVerifier": "CampaignProtocol (agent)",
+          "sourceVerifiedAt": "2026-10-18",
+          "sourceVerificationMethod": "independent_read_only_agent_review"
+        }
+      ],
       "artifacts": [
         { "artifactId": "request", "title": "Operations handover request", "fictional": true, "versions": [{ "versionId": "request-2025-05-05", "sourcePath": "corpus/originals/ibis-verified-handover/request.md", "mimeType": "text/markdown", "statedDate": "2025-05-05" }] },
         { "artifactId": "delivery-log", "title": "Handover and exercise record", "fictional": true, "versions": [{ "versionId": "notes-2025-05-23", "sourcePath": "corpus/originals/ibis-verified-handover/delivery-log.md", "mimeType": "text/markdown", "statedDate": "2025-05-23" }] },

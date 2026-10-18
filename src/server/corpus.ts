@@ -4,7 +4,7 @@ import addFormats from "ajv-formats";
 import manifestSchema from "../../contracts/corpus-manifest.schema.json" with { type: "json" };
 import knowledgeSchema from "../../contracts/knowledge-record.schema.json" with { type: "json" };
 import type { Env } from "./env.ts";
-import type { KnowledgeCard, KnowledgeRecord, PassageView } from "../shared/protocol.ts";
+import type { KnowledgeCard, KnowledgeRecord, PassageView, SourceRef } from "../shared/protocol.ts";
 
 const ajv = new Ajv2020({ allErrors: true, strict: true });
 addFormats(ajv);
@@ -37,12 +37,28 @@ export interface Artifact {
   versions: SourceVersion[];
 }
 
+export interface SourceHistoryRecord {
+  kind: "source_fact";
+  recordId: string;
+  caseId: string;
+  basis: "source_fact";
+  assertion: string;
+  applicability: string;
+  evidence: SourceRef[];
+  reviewStatus: "source_verified";
+  sourceVerifier: string;
+  sourceVerifiedAt: string;
+  sourceVerificationMethod: "independent_read_only_agent_review";
+}
+
+export type CorpusRecord = KnowledgeRecord | SourceHistoryRecord;
+
 export interface PastCase {
   caseId: string;
   title: string;
   fictional: true;
   artifacts: Artifact[];
-  records: KnowledgeRecord[];
+  records: CorpusRecord[];
 }
 
 export interface CorpusManifest {
@@ -117,7 +133,7 @@ function asManifest(value: unknown): CorpusManifest {
       }
     }
   }
-  const records = new Map<string, KnowledgeRecord>();
+  const records = new Map<string, CorpusRecord>();
   for (const pastCase of manifest.cases) {
     for (const record of pastCase.records) {
       if (record.caseId !== pastCase.caseId || records.has(record.recordId)) {
@@ -134,16 +150,20 @@ function asManifest(value: unknown): CorpusManifest {
   }
   const superseded = new Set<string>();
   for (const record of records.values()) {
-    if (record.supersedesId === undefined) continue;
-    const target = records.get(record.supersedesId);
+    const targetId = "supersedesId" in record ? record.supersedesId : undefined;
+    if (targetId === undefined) continue;
+    const target = records.get(targetId);
     if (!target || target.caseId !== record.caseId || target.kind !== record.kind || superseded.has(target.recordId)) {
       throw new EvidenceUnavailable("Invalid or ambiguous knowledge supersession link.");
     }
     superseded.add(target.recordId);
     const seen = new Set([record.recordId]);
-    for (let current: KnowledgeRecord | undefined = target; current; current = current.supersedesId === undefined ? undefined : records.get(current.supersedesId)) {
+    let current: CorpusRecord | undefined = target;
+    while (current) {
       if (seen.has(current.recordId)) throw new EvidenceUnavailable("Knowledge supersession cycle.");
       seen.add(current.recordId);
+      const nextId: string | undefined = "supersedesId" in current ? current.supersedesId : undefined;
+      current = nextId === undefined ? undefined : records.get(nextId);
     }
   }
   return manifest;
@@ -287,8 +307,8 @@ export async function exactPassage(env: Env, passageId: string): Promise<Indexed
 export function knowledgeCards(snapshot: CorpusSnapshot, caseId?: string): KnowledgeCard[] {
   return snapshot.manifest.cases.flatMap((pastCase) => {
     if (caseId !== undefined && pastCase.caseId !== caseId) return [];
-    return pastCase.records.filter((record) => record.evidence.every((ref) => snapshot.availableVersions.has(ref.versionId))).map((record) => {
-      const successor = pastCase.records.find((candidate) => candidate.supersedesId === record.recordId);
+    return pastCase.records.filter((record): record is KnowledgeRecord => record.kind !== "source_fact" && record.evidence.every((ref) => snapshot.availableVersions.has(ref.versionId))).map((record) => {
+      const successor = pastCase.records.find((candidate) => candidate.kind !== "source_fact" && candidate.supersedesId === record.recordId);
       return { ...record, ...(successor ? { supersededById: successor.recordId } : {}) };
     });
   });
@@ -298,7 +318,7 @@ export interface ModelCaseContext {
   caseId: string;
   title: string;
   availability: "available" | "partial" | "unavailable" | undefined;
-  records: KnowledgeCard[];
+  records: (KnowledgeCard | SourceHistoryRecord)[];
   artifacts: {
     artifactId: string;
     title: string;
@@ -328,9 +348,13 @@ export function modelCorpus(snapshot: CorpusSnapshot, passageIds?: ReadonlyMap<s
     caseId: pastCase.caseId,
     title: pastCase.title,
     availability: snapshot.caseAvailability.get(pastCase.caseId),
-    records: passageIds ? knowledgeCards(snapshot, pastCase.caseId).map((record) => ({
+    records: [
+      ...knowledgeCards(snapshot, pastCase.caseId),
+      ...pastCase.records.filter((record): record is SourceHistoryRecord => record.kind === "source_fact"
+        && record.evidence.every((ref) => snapshot.availableVersions.has(ref.versionId))),
+    ].map((record) => passageIds ? {
       ...record, evidence: record.evidence.map((ref) => ({ ...ref, passageId: passageIds.get(ref.passageId)! })),
-    })) : knowledgeCards(snapshot, pastCase.caseId),
+    } : record),
     artifacts: pastCase.artifacts.map((artifact) => ({
       artifactId: artifact.artifactId,
       title: artifact.title,

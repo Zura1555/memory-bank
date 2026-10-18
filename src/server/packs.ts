@@ -7,6 +7,7 @@ import { HttpFailure } from "./errors.ts";
 import { revalidateAssessment, revalidateBrief, withAssessmentConstraintFloor } from "./gates.ts";
 import { ownedJob, type JobRecord } from "./jobs.ts";
 import { validateSelections } from "./selections.ts";
+import { isSourceHistoryQualification } from "./source-history.ts";
 
 const identity = (ref: { caseId: string; artifactId: string; versionId: string }) => `${ref.caseId}/${ref.artifactId}/${ref.versionId}`;
 const sectionTitles = { reuse: "Reusable material — checked starting point, not production approval", adapt: "Required adaptations — complete before use", verify: "Unresolved verification — BLOCKED, not approved unchanged reuse" } as const;
@@ -47,8 +48,15 @@ export interface StarterPack {
   evidence: PassageView[];
 }
 // Keep only selected-source claims with their entire checked dependency chain.
-function selectedClaims(claims: Claim[], selected: Set<string>): Claim[] {
+function selectedClaims(claims: Claim[], selected: Set<string>, corpus: CorpusSnapshot): Claim[] {
   const accepted = new Set(claims.filter((claim) => claim.sourceRefs.every((ref) => selected.has(identity(ref)))).map((claim) => claim.claimId));
+  // Required historical qualifications may cite another original in the same
+  // case. Preserve those exact dependency facts, never additional starting work.
+  const byId = new Map(claims.map((claim) => [claim.claimId, claim]));
+  for (const id of accepted) for (const dependency of byId.get(id)!.dependsOnClaimIds) {
+    const claim = byId.get(dependency);
+    if (claim && isSourceHistoryQualification(corpus, claim)) accepted.add(dependency);
+  }
   let changed = true;
   while (changed) {
     changed = false;
@@ -78,7 +86,7 @@ export function buildStarterPack(job: JobRecord, corpus: CorpusSnapshot, origin:
     ? { ...job.brief_result, constraintReviews: withAssessmentConstraintFloor(job.brief_result.constraintReviews, assessment, job.request_text) }
     : job.brief_result;
   const rechecked = revalidateBrief(floored, job.request_text, corpus, assessment);
-  const claims = selectedClaims(rechecked.claims, selected);
+  const claims = selectedClaims(rechecked.claims, selected, corpus);
   const claimIds = new Set(claims.map((claim) => claim.claimId));
   const keep = (items: BriefItem[]) => items.filter((item) => selected.has(identity(item)) && claimIds.has(item.dispositionClaimId) && item.claimIds.every((id) => claimIds.has(id)));
   const reuse = keep(rechecked.reuse), adapt = keep(rechecked.adapt), verify = keep(rechecked.verify);
@@ -88,7 +96,7 @@ export function buildStarterPack(job: JobRecord, corpus: CorpusSnapshot, origin:
     constraintReviews: rechecked.constraintReviews.filter((review) => items.some((item) => identity(item) === identity(review))),
     withheldClaimCount: rechecked.withheldClaimCount + rechecked.claims.length - claims.length,
   };
-  const assessmentClaims = selectedClaims(assessment.claims, selected);
+  const assessmentClaims = selectedClaims(assessment.claims, selected, corpus);
   const assessmentIds = new Set(assessmentClaims.map((claim) => claim.claimId));
   const inventory: PackArtifact[] = selections.map((selection) => {
     const { version, artifact } = sourceVersion(corpus, selection.versionId);

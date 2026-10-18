@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the runtime corpus manifest from curator-authored catalog metadata."""
+"""Build the runtime corpus manifest from authored and independently source-verified catalog records."""
 from __future__ import annotations
 
 import argparse
@@ -289,11 +289,13 @@ def validate_catalog(catalog, root):
 
 
 def validate_records(manifest):
-    """Validate hand-authored records against extracted, exact source identities."""
-    common = {"kind", "recordId", "caseId", "basis", "applicability", "evidence", "reviewStatus", "reviewer", "reviewedAt"}
+    """Validate human-reviewed and source-verified records against exact source identities."""
+    human_common = {"kind", "recordId", "caseId", "basis", "applicability", "evidence", "reviewStatus", "reviewer", "reviewedAt"}
+    agent_common = {"kind", "recordId", "caseId", "basis", "applicability", "evidence", "reviewStatus", "sourceVerifier", "sourceVerifiedAt", "sourceVerificationMethod"}
     fields = {
         "decision": {"context", "choice"},
         "lesson": {"observation", "recommendedFutureAction", "outcomeLimitations"},
+        "source_fact": {"assertion"},
     }
     id_pattern = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
     records = {}
@@ -309,21 +311,31 @@ def validate_records(manifest):
         for record in case["records"]:
             if not isinstance(record, dict) or record.get("kind") not in fields:
                 raise ValueError("invalid knowledge record kind")
-            required = common | fields[record["kind"]]
-            optional = {"supersedesId"} | ({"recordedRationale", "recordedRejectedAlternatives"} if record["kind"] == "decision" else set())
+            kind = record["kind"]
+            base = agent_common if kind == "source_fact" else human_common
+            required = base | fields[kind]
+            optional = ({"supersedesId"} if kind != "source_fact" else set()) | ({"recordedRationale", "recordedRejectedAlternatives"} if kind == "decision" else set())
             if not required <= set(record) or set(record) - required - optional:
                 raise ValueError("invalid knowledge record fields")
-            text_fields = {"recordId", "caseId", "basis", "applicability", "reviewStatus", "reviewer", "reviewedAt"} | fields[record["kind"]] | (set(record) & {"recordedRationale", "supersedesId"})
+            text_fields = (required - {"evidence"}) | (set(record) & {"recordedRationale", "supersedesId"})
             if any(not isinstance(record[key], str) or not record[key].strip() or len(record[key]) > 4000 for key in text_fields):
                 raise ValueError("invalid knowledge record text")
-            if not id_pattern.fullmatch(record["recordId"]) or record["caseId"] != case["caseId"]:
+            if (not id_pattern.fullmatch(record["recordId"]) or (kind == "source_fact" and len(record["recordId"]) > 49)
+                or record["caseId"] != case["caseId"]):
                 raise ValueError("invalid knowledge record identity")
             if record["recordId"] in records:
                 raise ValueError("duplicate knowledge record ID")
-            if record["reviewStatus"] != "reviewed" or record["basis"] not in {"source_fact", "curator_interpretation"}:
-                raise ValueError("knowledge records require human review and an explicit assertion basis")
+            if kind == "source_fact":
+                if (record["reviewStatus"] != "source_verified" or record["basis"] != "source_fact"
+                    or record["sourceVerificationMethod"] != "independent_read_only_agent_review"):
+                    raise ValueError("source facts require explicit independent source verification")
+                review_date = record["sourceVerifiedAt"]
+            else:
+                if record["reviewStatus"] != "reviewed" or record["basis"] not in {"source_fact", "curator_interpretation"}:
+                    raise ValueError("knowledge records require human review and an explicit assertion basis")
+                review_date = record["reviewedAt"]
             try:
-                if datetime.strptime(record["reviewedAt"], "%Y-%m-%d").date().isoformat() != record["reviewedAt"]:
+                if datetime.strptime(review_date, "%Y-%m-%d").date().isoformat() != review_date:
                     raise ValueError()
             except ValueError as exc:
                 raise ValueError("invalid knowledge review date") from exc
@@ -355,7 +367,6 @@ def validate_records(manifest):
                 raise ValueError("knowledge supersession cycle")
             seen.add(target["recordId"])
             target = records.get(target.get("supersedesId"))
-
 
 def build(catalog_path: Path, root: Path):
     try:

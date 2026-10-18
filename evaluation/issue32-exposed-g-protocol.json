@@ -1,0 +1,322 @@
+{
+  "protocolVersion": "issue32-exposed-g-v1",
+  "requestOrder": ["g2", "g3", "g4"],
+  "requests": [
+    {
+      "requestId": "g2",
+      "request": "Our next sandbox pilot reads StayLedger v4 adjustment JSON and sends it to PaySpring Connect v3. We cap each submitted job at 450 items, preserve adjustment_ref, and need item-level accepted/rejected results. A dropped status connection must trigger terminal-status retrieval, never blind resubmission. Separately, the pilot handover must name a primary and backup, include one witnessed checkpoint-restoration exercise with count reconciliation, and retain delivery escalation for only two business days after signed acceptance. Production writes and claims of production recovery readiness are out of scope. Identify the adapter and handover starting material, then carry these exact limits into the selected brief without pretending the old test certified our tenant.",
+      "expectedConclusion": "precedent_found",
+      "expectedConditionalWork": [
+        {
+          "caseId": "elm-bulk-integration",
+          "artifactId": "batch-adapter-notes",
+          "versionId": "adapter-2025-04-11",
+          "disposition": "adapt",
+          "reason": "Matching versioned sandbox job pattern and references; new 450-item cap and tenant checks remain."
+        },
+        {
+          "caseId": "ibis-verified-handover",
+          "artifactId": "operator-runbook",
+          "versionId": "runbook-2025-05-21",
+          "disposition": "adapt",
+          "reason": "Named ownership, checkpoint safeguards and test count reconciliation are usable handover structure, not proven adapter-specific recovery."
+        }
+      ],
+      "expectedEvidence": [
+        {
+          "caseId": "elm-bulk-integration",
+          "artifactId": "batch-adapter-notes",
+          "versionId": "adapter-2025-04-11",
+          "lineStart": 7,
+          "lineEnd": 13,
+          "sourceExpectation": "Preserve adjustment_ref, at most 500 records per job, retain job ID, per-item retrieval, no blind resubmit and tenant/version boundaries."
+        },
+        {
+          "caseId": "elm-bulk-integration",
+          "artifactId": "delivery-log",
+          "versionId": "notes-2025-04-17",
+          "lineStart": 7,
+          "lineEnd": 13,
+          "sourceExpectation": "600-item rejection, two 300-item batches, interrupted polling followed by terminal retrieval, 598/600 accepted, four malformed amount mention and unknown production behavior."
+        },
+        {
+          "caseId": "ibis-verified-handover",
+          "artifactId": "operator-runbook",
+          "versionId": "runbook-2025-05-21",
+          "lineStart": 7,
+          "lineEnd": 14,
+          "sourceExpectation": "Historical named owners and five-business-day support window, no replay with missing/unclear checkpoint, witnessed test exercise only."
+        },
+        {
+          "caseId": "ibis-verified-handover",
+          "artifactId": "delivery-log",
+          "versionId": "notes-2025-05-23",
+          "lineStart": 7,
+          "lineEnd": 11,
+          "sourceExpectation": "Initial missing-checkpoint failure, corrected test, matching counts, signatures and unverified production routing/recovery."
+        },
+        {
+          "caseId": "kestrel-pending-handover",
+          "artifactId": "delivery-log",
+          "versionId": "notes-2025-06-11",
+          "lineStart": 7,
+          "lineEnd": 11,
+          "sourceExpectation": "A delivery-note completion assertion does not outweigh unresolved ownership, absent acknowledgment or absent exercise."
+        }
+      ],
+      "decisiveValuesAndUncertainty": [
+        "Current per-job maximum is 450 items, not historical 500. Source demonstration was two 300-item batches; no 450-item observation is recorded.",
+        "The current escalation window is only two business days after signed acceptance; Ibis's historical first five business days must not overwrite or obscure that value.",
+        "Preserve exact v4/v3 versions, sandbox scope, adjustment_ref identity, item-level counts, and terminal retrieval before any decision to resubmit.",
+        "The new handover requires primary and backup, one witnessed checkpoint-restoration/count exercise and signed acceptance; none is already complete for this tenant. Historical Maya/Luis/Priya identities are not new-client appointments.",
+        "Elm reports 598 of 600 accepted and two second-batch rejects while separately mentioning four intentionally malformed amounts. Preserve the source tension if reporting totals; do not invent a reconciliation or silently rewrite the total.",
+        "Ibis initially lacked a checkpoint and later exercised corrected test recovery only. Its test result cannot establish production or cross-product recovery."
+      ],
+      "acceptableUncertainty": [
+        "Require the new tenant to confirm endpoint/account capabilities, 450-item acceptance, duplicate handling, auth and status semantics before running; these checks do not eliminate the usable adapter starting point.",
+        "Require client-specific owner appointment, supplied checkpoint, witnessed exercise, count evidence and signed acceptance with the exact two-business-day escalation limit.",
+        "No generic retry/idempotency, sustained throttling, new-tenant result or production recovery guarantee is established. Treat applying Ibis to the Elm pilot as adaptation requiring validation, not an integrated tested system."
+      ],
+      "prohibitedRecommendations": [
+        "Resubmit solely because polling stopped, submit 600 or 500 items under the new 450 cap, or promise the historical acceptance ratio.",
+        "Preserve the old five-business-day escalation window as current, omit the two-business-day value, or treat named historical operators as the client's appointed team.",
+        "Replay without a checkpoint or with unknown applied state; claim production readiness from test evidence.",
+        "Offer Kestrel's generic shared-folder draft as evidence of accepted operating ownership or substitute it for Ibis."
+      ],
+      "humanSelectionExpectations": {
+        "actualSelectionRequired": true,
+        "substitutionAllowed": false,
+        "selections": [
+          {
+            "caseId": "elm-bulk-integration",
+            "artifactId": "batch-adapter-notes",
+            "versionId": "adapter-2025-04-11",
+            "passageIds": [
+              "p-6a3d0b6ac0bd223824d47ad8791023b2",
+              "p-dba0cea7ae8baa8825c8c0269e28eafd",
+              "p-c578cf380386ba8e4f5b21a3f79ccb36",
+              "p-256b0b044b2d6d8f6b57384718e04c60",
+              "p-03a4c5b29fe0071b33bc51422c10c0f2"
+            ]
+          },
+          {
+            "caseId": "ibis-verified-handover",
+            "artifactId": "operator-runbook",
+            "versionId": "runbook-2025-05-21",
+            "passageIds": [
+              "p-cd338717bf8f7b4a19c78c8645187b99",
+              "p-f852b5d637a821ebfe09b2c078422211",
+              "p-f1ee09d99d16cc6f2f3fd50ad47b58be",
+              "p-464e11b2e87d4bdaab76103a36bf5324",
+              "p-f0cef5d6a8d78122a6b2f23b6e02ae5e",
+              "p-6e6e4258f362813425bc3cdf99f6b378"
+            ]
+          }
+        ],
+        "briefExpectation": "Both remain conditional Adapt, explicitly preserving 450 items and two business days with their scopes/triggers. Do not certify an integrated recovery implementation or add unselected products."
+      }
+    },
+    {
+      "requestId": "g3",
+      "request": "The overall supplier estate contains 90,000 rows, but the only work currently authorized is a segregated 700-active-row sandbox pilot; do not plan or perform the full transfer. Those 700 rows have immutable source IDs and matching target fields, and our client has already decided that different IDs sharing an email stay separate. The pilot must finish its accepted/rejected reconciliation within 18 elapsed hours of receipt, with zero production writes. We want the small-batch field map as conditional starting material, plus a candid account of why the larger interrupted-import record cannot certify restart safety. Keep the pilot usable without quietly turning a draft control sheet into a tested migration or losing the 700-row, 18-hour limits in the selected brief.",
+      "expectedConclusion": "precedent_found",
+      "expectedConditionalWork": [
+        {
+          "caseId": "cedar-batch-import",
+          "artifactId": "mapping",
+          "versionId": "map-2025-02-11",
+          "disposition": "adapt",
+          "reason": "The explicit authorized work is an isolated 700-active-row compatible sandbox pilot, not a 90,000-row migration. Larger-estate context must not suppress this valid narrow starting point."
+        }
+      ],
+      "expectedEvidence": [
+        {
+          "caseId": "cedar-batch-import",
+          "artifactId": "mapping",
+          "versionId": "map-2025-02-11",
+          "lineStart": 9,
+          "lineEnd": 15,
+          "sourceExpectation": "Immutable source-key reconciliation, active-only scope, exact field normalization, duplicate-email preservation and small sandbox boundary."
+        },
+        {
+          "caseId": "cedar-batch-import",
+          "artifactId": "delivery-log",
+          "versionId": "notes-2025-02-13",
+          "lineStart": 9,
+          "lineEnd": 13,
+          "sourceExpectation": "Two same-email distinct-source-key records retained, 1,198 accepted/2 rejected, corrected rejects not retried."
+        },
+        {
+          "caseId": "ash-volume-import",
+          "artifactId": "delivery-log",
+          "versionId": "notes-2025-03-18",
+          "lineStart": 7,
+          "lineEnd": 13,
+          "sourceExpectation": "84,117-row dry run, 6,402 repeated email values, 713 missing-ID rejects, unknown commits among 3,000 submitted rows, no replay, partial only."
+        },
+        {
+          "caseId": "ash-volume-import",
+          "artifactId": "reconciliation-draft",
+          "versionId": "draft-2025-03-14",
+          "lineStart": 9,
+          "lineEnd": 14,
+          "sourceExpectation": "Unvalidated control draft and unresolved target semantics; no verified no-duplicate restart or full reconciliation."
+        }
+      ],
+      "decisiveValuesAndUncertainty": [
+        "90,000 rows describes the overall estate, not the authorized pilot volume. The authorized work is exactly 700 active sandbox rows and zero production writes.",
+        "Current accepted/rejected reconciliation deadline is within 18 elapsed hours of receipt. This is a required acceptance bound, not an observed Cedar duration or an established throughput guarantee.",
+        "The new client's identity policy is already decided: distinct immutable IDs sharing an email stay separate. Do not call that policy absent or make deciding email uniqueness an unresolved precondition; verifying that implementation preserves the explicit policy remains appropriate.",
+        "Cedar's 1,200-active-row sandbox outcome was 1,198 accepted + 2 rejected, no corrected-row retry. Do not map historical counts onto 700 rows.",
+        "Ash's 84,117 rows, 6,402 repeated-email values, 713 missing IDs and 3,000 submitted rows with unknown commits are historical quantities, not the new estate's measurements. Ash completed no migration or safe-restart validation.",
+        "Retain the useful Cedar pilot while refusing to generalize its scope to the 90,000-row estate. Scope mismatch for the future transfer does not invalidate the explicitly bounded current pilot."
+      ],
+      "acceptableUncertainty": [
+        "Verify that field/payment-code mapping, row quality, sandbox limits and timing plan can satisfy the 18-hour acceptance deadline. Say that this timing target has no recorded precedent rather than omitting it or guaranteeing it.",
+        "If interruption is possible, require verified target-supported reconciliation/idempotency and clear applied state before retry. Existing Ash control proposals are not validation.",
+        "Full-estate transfer, production behavior, scale, cutover/writability and target upsert semantics are outside proven scope and outside current authorization. The given pilot identity rule is not unknown."
+      ],
+      "prohibitedRecommendations": [
+        "Exclude Cedar mapping because the estate has 90,000 rows, or allow context-only/Verify/no useful precedent to replace the requested conditional sandbox starting point.",
+        "Recommend the full transfer, production writes, email merging, blind replay, or Ash's draft as an executable proven procedure.",
+        "Lose 700 active rows, 18 elapsed hours from receipt or zero-production scope from the selected brief; substitute generic small batch or timely reconciliation.",
+        "Claim the new identity policy is absent or unresolved, or that Cedar/Ash proves the pilot deadline or a full 90,000-row migration."
+      ],
+      "humanSelectionExpectations": {
+        "actualSelectionRequired": true,
+        "substitutionAllowed": false,
+        "selections": [
+          {
+            "caseId": "cedar-batch-import",
+            "artifactId": "mapping",
+            "versionId": "map-2025-02-11",
+            "passageIds": [
+              "p-3ea71e1ac22714630e66f900bd99ce17",
+              "p-5a59afd7d10f95de50ace5af37afb719",
+              "p-1d2a9449d74ddc57918aa63a97c504f8",
+              "p-94690e2727f13bd70bcc99db3180accd",
+              "p-765c7687fedf827681d64e395c7f9a85",
+              "p-7f1a25ed5a9ec4bf27bc83acaee2fa55"
+            ]
+          }
+        ],
+        "briefExpectation": "Only the selected Cedar mapping is briefed as conditional Adapt for 700 active sandbox rows with an explicit unverified 18-elapsed-hour-from-receipt reconciliation requirement. Ash may remain assessment context, not an added selected migration product."
+      }
+    },
+    {
+      "requestId": "g4",
+      "request": "We need an already demonstrated production procedure for a permanently disconnected site: hardware-backed smart-card enrollment and revocation must work without an online identity provider, and the site's TripPine API v2 reservation workflow must process bulk asynchronous updates without using the retired v1 polling route. Operational acceptance additionally requires a named owner and backup to witness a no-data-loss recovery drill completed within 12 minutes; a runbook placed in a folder is not acceptance. For this combined requirement, does the bounded record collection contain useful implementation precedent? If not, state that clearly and list the missing evidence without inventing an offline connector, a card procedure, or a recovery guarantee.",
+      "expectedConclusion": "no_useful_precedent",
+      "expectedConditionalWork": [],
+      "usefulImplementationSources": [],
+      "expectedEvidence": [
+        {
+          "caseId": "harbor-offline-access",
+          "artifactId": "request",
+          "versionId": "request-2025-06-09",
+          "lineStart": 7,
+          "lineEnd": 9,
+          "sourceExpectation": "Actual disconnected/hardware-backed access requirements, not implementation success."
+        },
+        {
+          "caseId": "harbor-offline-access",
+          "artifactId": "scope-inventory",
+          "versionId": "inventory-2025-06-16",
+          "lineStart": 9,
+          "lineEnd": 14,
+          "sourceExpectation": "No card middleware, trust policy or local lifecycle procedure; Grove network dependency is not offline provisioning."
+        },
+        {
+          "caseId": "harbor-offline-access",
+          "artifactId": "delivery-log",
+          "versionId": "notes-2025-06-16",
+          "lineStart": 7,
+          "lineEnd": 11,
+          "sourceExpectation": "No offline implementation attempt or verified outcome."
+        },
+        {
+          "caseId": "finch-legacy-api",
+          "artifactId": "delivery-log",
+          "versionId": "notes-2025-05-06",
+          "lineStart": 7,
+          "lineEnd": 12,
+          "sourceExpectation": "v1 38/40 test and two unexplained pending, v2 nonwriting probe returned 410 for v1 route, withdrawn carry-forward advice, no v2 bulk/async attempt."
+        },
+        {
+          "caseId": "finch-legacy-api",
+          "artifactId": "capability-sheet",
+          "versionId": "capabilities-2025-05-02",
+          "lineStart": 9,
+          "lineEnd": 12,
+          "sourceExpectation": "Finch v2 account lacks documented bulk and async per-item retrieval; product names do not establish compatibility."
+        },
+        {
+          "caseId": "kestrel-pending-handover",
+          "artifactId": "delivery-log",
+          "versionId": "notes-2025-06-11",
+          "lineStart": 7,
+          "lineEnd": 11,
+          "sourceExpectation": "Conflicting completion claim and unresolved operator ownership; no acknowledgment or exercise."
+        },
+        {
+          "caseId": "kestrel-pending-handover",
+          "artifactId": "operations-draft",
+          "versionId": "draft-2025-06-05",
+          "lineStart": 7,
+          "lineEnd": 11,
+          "sourceExpectation": "Generic inbox and document existence do not prove owner, backup, recovery or acceptance."
+        },
+        {
+          "caseId": "ibis-verified-handover",
+          "artifactId": "operator-runbook",
+          "versionId": "runbook-2025-05-21",
+          "lineStart": 7,
+          "lineEnd": 14,
+          "sourceExpectation": "Named ownership and one witnessed test exercise do not establish production, no-data-loss or 12-minute recovery."
+        },
+        {
+          "caseId": "elm-bulk-integration",
+          "artifactId": "batch-adapter-notes",
+          "versionId": "adapter-2025-04-11",
+          "lineStart": 7,
+          "lineEnd": 13,
+          "sourceExpectation": "StayLedger v4/PaySpring v3 sandbox adjustment jobs are not a disconnected TripPine v2 reservation connector."
+        },
+        {
+          "caseId": "grove-scoped-access",
+          "artifactId": "access-checklist",
+          "versionId": "checklist-2025-01-21",
+          "lineStart": 7,
+          "lineEnd": 14,
+          "sourceExpectation": "Networked IdP/MFA setup is not offline smart-card enrollment/revocation."
+        }
+      ],
+      "decisiveValuesAndUncertainty": [
+        "Current requirements explicitly include demonstrated production procedure, permanent disconnection, hardware-backed smart-card enrollment and revocation without online IdP, TripPine API v2 bulk async reservations, and no retired v1 route.",
+        "Operational acceptance explicitly requires named owner plus backup, witnessed drill, no data loss and completion within 12 minutes. Both independent inventories must preserve these operating/recovery requirements rather than treat them as source-only or unstated.",
+        "No source establishes the combined implementation. The correct bounded negative result is not Cannot be established merely because the reviewer forgot a stated operational requirement; complete available original coverage supports no useful precedent here.",
+        "Historical Finch test had 38 of 40 visible updates with two pending. Its 410 probe was nonwriting and tested the v1 route against v2, not any bulk alternative; no inferred reservation replacement.",
+        "Ibis demonstrates only a corrected test restoration with counts, not timed production recovery or zero data loss. Kestrel's completion wording is disputed and unsupported by ownership or exercise acceptance.",
+        "All 24 artifacts must have reviewed settled relevance roles. No useful starting point may be offered for this combined already-demonstrated production/offline/TripPine/recovery demand. Context and gap evidence are not implementation products."
+      ],
+      "acceptableUncertainty": [
+        "Say no useful implementation precedent is represented in this bounded collection, not that no solution exists in the industry.",
+        "Ask for offline card middleware, issuer/trust/revocation/lifecycle policy, supported exact-tenant v2 asynchronous interfaces, local operating authority, signed acceptance criteria, and actual timed production-like no-data-loss drill evidence.",
+        "Finch's account-specific documentation is not a universal claim that no TripPine v2 deployment anywhere supports bulk. The new site's capability remains unverified.",
+        "If originals are genuinely missing or corrupt, report evidence availability honestly and fail this criterion rather than fabricate completeness; absence of evidence must not be promoted to unsupported no-precedent proof."
+      ],
+      "prohibitedRecommendations": [
+        "Offer Grove networked groups, Elm billing jobs, Finch v1 polling, Ibis test replay or Kestrel folder draft as a proven implementation of the combined requirement.",
+        "Invent smart-card enrollment/revocation, offline API transport, alternate TripPine reservation connector, or production no-data-loss recovery guarantee.",
+        "Lose the 12-minute bound, named owner/backup, witness or no-data-loss acceptance requirement, or call those requirements absent.",
+        "Return a structurally safe but incomplete Cannot-be-established result as a pass when all originals and relevance roles are available; force a brief or substitute a merely related artifact."
+      ],
+      "humanSelectionExpectations": {
+        "actualSelectionRequired": false,
+        "substitutionAllowed": false,
+        "selections": [],
+        "briefExpectation": "No useful implementation artifact is selected and no paid brief is submitted. Record actual empty selection and bounded negative assessment. Do not create an empty/fake brief or select a context artifact to manufacture workflow completion."
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "profileId": "issue32-exposed-openrouter-gpt-6-luna-v1",
+  "provider": "openrouter",
+  "model": "openai/gpt-6-luna",
+  "api": "chat-completions",
+  "origin": "https://openrouter.ai",
+  "serviceTier": "default",
+  "maxTokens": 16384,
+  "stream": false,
+  "reasoning": {
+    "effort": "none"
+  },
+  "routing": {
+    "only": ["openai"],
+    "order": ["openai"],
+    "allowFallbacks": false,
+    "requireParameters": true
+  }
+}

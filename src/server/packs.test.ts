@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { AssessmentResult, BriefItem, BriefResult, Claim, Selection } from "../shared/protocol.ts";
-import { EvidenceUnavailable, loadCorpus, type CorpusManifest, type CorpusSnapshot } from "./corpus.ts";
+import { assessmentPassageIds, EvidenceUnavailable, loadCorpus, type CorpusManifest, type CorpusSnapshot } from "./corpus.ts";
 import { HttpFailure } from "./errors.ts";
 import type { JobRecord } from "./jobs.ts";
 import type { Env } from "./env.ts";
 import { buildStarterPack, starterPackMarkdown } from "./packs.ts";
 import { app } from "./http.ts";
 import { buildCheckedBrief, revalidateBrief, validateBriefDraft, validateSupportReview, withAssessmentConstraintFloor } from "./gates.ts";
-import { briefSupportReviewSchema, reviewSchema } from "./schemas.ts";
+import { briefDraftSchemaFor, briefSupportReviewSchema, reviewSchema } from "./schemas.ts";
+import { requestSpans } from "./request-constraints.ts";
+import { applySourceHistoryQualifications } from "./source-history.ts";
 
 async function fixture() {
   const manifest: CorpusManifest = JSON.parse(await readFile(new URL("../../corpus/manifest.json", import.meta.url), "utf8"));
@@ -27,20 +29,20 @@ async function fixture() {
   const claims: Claim[] = selections.flatMap((selection, index) => {
     const sourceRefs = [{ caseId: selection.caseId, artifactId: selection.artifactId, versionId: selection.versionId, passageId: selection.passageIds[0] }];
     return [
-      { claimId: `fact-${index}`, text: "Recorded source context.", kind: "source_fact", sourceRefs, requestQuotes: [], dependsOnClaimIds: [] },
+      { claimId: `fact-${index}`, text: corpus.passages.get(selection.passageIds[0])!.excerpt, kind: "source_fact", sourceRefs, requestQuotes: [], dependsOnClaimIds: [] },
       { claimId: `check-${index}`, text: "Check client scope before use; unresolved scope blocks unchanged reuse.", kind: "recommendation", sourceRefs, requestQuotes: ["client scope"], dependsOnClaimIds: [`fact-${index}`] },
     ];
   });
   const items: BriefItem[] = selections.map((selection, index) => ({ ...selection, disposition: index === 0 ? "reuse" : index === 1 ? "adapt" : "verify", dispositionClaimId: `check-${index}`, claimIds: [`fact-${index}`, `check-${index}`] }));
   const brief: BriefResult = { reuse: items.filter((item) => item.disposition === "reuse"), adapt: items.filter((item) => item.disposition === "adapt"), verify: items.filter((item) => item.disposition === "verify"), claims, constraintReviews: selections.map(({ caseId, artifactId, versionId }) => ({ caseId, artifactId, versionId, requestQuotes: ["client scope"] })), withheldClaimCount: 2 };
   const assessment: AssessmentResult = {
-    conclusion: "cannot_be_established", clarifyingClaimIds: [], comparisons: [], nextActions: [], leads: [], contrasts: [], claims: [...claims], withheldClaimCount: 0,
+    conclusion: "cannot_be_established", clarifyingClaimIds: [], comparisons: [], nextActions: [], leads: [], contrasts: [], claims: structuredClone(claims), withheldClaimCount: 0,
     requestConstraints: { product_version: [], environment: [], scale: [], identity_access: [], recovery_operations: [] },
     artifactReviews: pastCase.artifacts.map((artifact) => ({ caseId: pastCase.caseId, artifactId: artifact.artifactId, role: "starting_point" })),
     cases: [{ caseId: pastCase.caseId, availability: "available", outcome: "unknown", outcomeClaimIds: [], claimIds: claims.map((claim) => claim.claimId), artifactWork: items.map((item) => ({ artifactId: item.artifactId, availability: "available", exclusionReasons: [], disposition: item.disposition, dispositionClaimId: item.dispositionClaimId, claimIds: item.claimIds, blockerClaimIds: [], verificationClaimIds: item.disposition === "verify" ? [item.dispositionClaimId] : [] })) }],
   };
   for (const work of assessment.cases[0].artifactWork) {
-    const recommendation = claims.find((claim) => claim.claimId === work.dispositionClaimId)!;
+    const recommendation = assessment.claims.find((claim) => claim.claimId === work.dispositionClaimId)!;
     const classificationId = `classification-${work.dispositionClaimId}`;
     assessment.claims.push({
       ...recommendation, claimId: classificationId, kind: "interpretation",
@@ -49,7 +51,7 @@ async function fixture() {
     work.claimIds = [...work.claimIds, classificationId];
   }
   const job: JobRecord = {
-    id: "00000000-0000-4000-8000-000000000005", request_text: "Check client scope", corpus_version: manifest.corpusVersion, corpus_sha256: corpus.manifestSha256,
+    id: "00000000-0000-4000-8000-000000000005", request_text: "client scope", corpus_version: manifest.corpusVersion, corpus_sha256: corpus.manifestSha256,
     stage: "ready", assessment_state: "ready", brief_state: "ready", assessment_result: assessment, brief_result: brief, brief_selections: selections, error_code: null,
     created_at: new Date("2026-10-15T00:00:00Z"), expires_at: new Date("2099-10-22T00:00:00Z"), assessment_queued_at: new Date("2026-10-15T00:00:00Z"), assessment_processing_started_at: null, assessment_finished_at: null, brief_queued_at: null, brief_processing_started_at: null, brief_finished_at: null,
   };
@@ -124,7 +126,7 @@ test("checked briefs and both portable formats retain independently reviewed exa
   const draft = { reuse: [], adapt: [item], verify: [], claims: [fact, recommendation] };
   const key = `${selection.caseId}/${selection.artifactId}/${selection.versionId}`;
   const schema = reviewSchema({ claimIds: draft.claims.map((claim) => claim.claimId), selections: [selection] }, job.request_text);
-  const wireReview = { constraintQuotes: { [key]: [job.request_text] }, claimVerdicts: Object.fromEntries(draft.claims.map((claim) => [claim.claimId, "supported"])) };
+  const wireReview = { constraintQuotes: { [key]: [requestSpans(job.request_text)[0].spanId] }, claimVerdicts: Object.fromEntries(draft.claims.map((claim) => [claim.claimId, "supported"])) };
   const review = briefSupportReviewSchema.parse(schema.parse(wireReview));
   const requirements = { request: job.request_text, constraintReviews: review.constraintReviews };
   const check = (candidate = draft, verdicts = validateSupportReview(candidate.claims, review)) =>
@@ -177,12 +179,12 @@ test("an assessment-accepted duration stays in the checked brief and both export
   const sibling = job.brief_result!.reuse[0];
   job.request_text = `Check client scope for ${duration}.`;
   const recommendation = job.assessment_result!.claims.find((claim) => claim.claimId === adapt.dispositionClaimId)!;
-  recommendation.requestQuotes = [duration];
-  recommendation.text = `The request asks for ${duration} of named access.`;
-  job.assessment_result!.requestConstraints.identity_access = [duration];
+  recommendation.requestQuotes = [job.request_text];
+  recommendation.text = `The request states: ${job.request_text} Check named access before adaptation.`;
+  job.assessment_result!.requestConstraints.identity_access = [job.request_text];
   const reviews = job.brief_result!.constraintReviews.map((review) => ({ ...review, requestQuotes: [] as string[] }));
   const floored = withAssessmentConstraintFloor(reviews, job.assessment_result!, job.request_text);
-  assert.deepEqual(floored.find((review) => review.versionId === adapt.versionId)?.requestQuotes, [duration]);
+  assert.deepEqual(floored.find((review) => review.versionId === adapt.versionId)?.requestQuotes, [job.request_text]);
   assert.deepEqual(floored.find((review) => review.versionId === sibling.versionId)?.requestQuotes, ["client scope"]);
   const generic = structuredClone(job.brief_result!);
   generic.constraintReviews = floored;
@@ -192,8 +194,10 @@ test("an assessment-accepted duration stays in the checked brief and both export
   const withheld = buildCheckedBrief(generic, new Map(generic.claims.map((claim) => [claim.claimId, "supported" as const])), new Set(), { request: job.request_text, constraintReviews: floored });
   assert.equal(withheld.adapt.length, 0);
   assert.equal(withheld.claims.some((claim) => claim.text.includes(duration)), false);
-  adaptClaim.requestQuotes = [duration, "client scope"];
-  adaptClaim.text = `Before adaptation, check client scope for the requested ${duration} access period. Audit and removal remain unverified.`;
+  for (const claim of generic.claims.filter((claim) => claim.kind === "recommendation")) {
+    claim.requestQuotes = [job.request_text];
+    claim.text = `${job.request_text} Check this requirement before use. Audit and removal remain unverified.`;
+  }
   const checked = buildCheckedBrief(generic, new Map(generic.claims.map((claim) => [claim.claimId, "supported" as const])), validateBriefDraft(generic, job.request_text, job.brief_selections!, corpus), { request: job.request_text, constraintReviews: floored });
   assert.equal(checked.adapt[0]?.versionId, adapt.versionId);
   assert.equal(checked.reuse[0]?.versionId, sibling.versionId);
@@ -222,7 +226,7 @@ test("case-level requirement claims do not floor another item's brief coverage",
     sourceRefs: recommendation.sourceRefs, requestQuotes: [], dependsOnClaimIds: [],
   });
   job.assessment_result!.comparisons.push({
-    caseId: adapt.caseId, dimension: "recovery_operations", requirementClaimId: "unrelated-requirement",
+    caseId: adapt.caseId, artifactId: adapt.artifactId, implicationEffect: "missing_evidence", dimension: "recovery_operations", requirementClaimId: "unrelated-requirement",
     evidenceClaimId: recommendation.claimId, relation: "unknown",
     assessmentClaimId: recommendation.claimId, implicationClaimId: recommendation.claimId,
   });
@@ -259,4 +263,79 @@ test("missing or malformed capability cannot access either export format", async
     assert.equal(response.status, 404);
     assert.equal((await response.json() as { error: { code: string } }).error.code, "JOB_NOT_FOUND");
   }
+});
+
+test("normalized clause coverage retains a decisive sentence tail through checked read and both exports", async () => {
+  const { corpus, job } = await fixture();
+  const selection = job.brief_selections![1];
+  job.request_text = `client scope requires ${"documented 😀 capabilities and ".repeat(22)}a bulk asynchronous route; the retired route is prohibited until explicit authorization.`;
+  const spans = requestSpans(job.request_text);
+  const schema = briefDraftSchemaFor(job.request_text, [selection], corpus, job.assessment_result!);
+  const key = `${selection.caseId}/${selection.artifactId}/${selection.versionId}`;
+  const label = assessmentPassageIds(corpus).get(selection.passageIds[0])!;
+  const wire = { items: { [key]: {
+    disposition: "adapt",
+    recommendation: { text: "Adapt this checked work only after the explicit prerequisites.", sourceRefs: [label], requestQuotes: [], dependsOnClaimIds: [] },
+    claims: spans.map((span) => ({ kind: "recommendation", text: "Verify this entire requested constraint before use.", sourceRefs: [label], requestQuotes: [span.spanId], dependsOnClaimIds: [] })),
+  } } };
+  const draft = schema.parse(wire);
+  const review = briefSupportReviewSchema.parse(reviewSchema({ claimIds: draft.claims.map((claim) => claim.claimId), selections: [selection] }, job.request_text).parse({
+    constraintQuotes: { [key]: [spans[0].spanId] }, claimVerdicts: Object.fromEntries(draft.claims.map((claim) => [claim.claimId, "supported"])),
+  }));
+  const requirements = { request: job.request_text, constraintReviews: review.constraintReviews, assessment: job.assessment_result! };
+  const verdicts = validateSupportReview(draft.claims, review);
+  const firstOnly = schema.parse({ items: { [key]: { ...wire.items[key], claims: wire.items[key].claims.slice(0, 1) } } });
+  assert.deepEqual(buildCheckedBrief(firstOnly, verdicts, new Set(), requirements).adapt, []);
+  const checked = buildCheckedBrief(draft, verdicts, validateBriefDraft(draft, job.request_text, [selection], corpus), requirements);
+  assert.equal(checked.adapt[0]?.versionId, selection.versionId);
+  assert.deepEqual(revalidateBrief(checked, job.request_text, corpus, job.assessment_result!), checked);
+  job.brief_selections = [selection];
+  job.brief_result = checked;
+  const pack = buildStarterPack(job, corpus, "https://demo.example");
+  const json = JSON.parse(JSON.stringify(pack));
+  assert.ok(json.brief.claims.some((claim: Claim) => claim.text.includes("the retired route is prohibited until explicit authorization.")));
+  assert.ok(starterPackMarkdown(pack).includes("the retired route is prohibited until explicit authorization"));
+});
+
+test("Ibis outcome excerpts retain failed-attempt and correction qualifications across parser, read and export", async () => {
+  const { corpus, job } = await fixture();
+  const source = [...corpus.passages.values()].find((passage) => passage.caseId === "ibis-verified-handover" && passage.artifactId === "operator-runbook" && passage.excerpt.includes("Exercise evidence:"))!;
+  const selection: Selection = { caseId: source.caseId, artifactId: source.artifactId, versionId: source.versionId, passageIds: [source.passageId] };
+  const ref = { caseId: source.caseId, artifactId: source.artifactId, versionId: source.versionId, passageId: source.passageId };
+  const recommendation: Claim = { claimId: "ibis-decision", kind: "recommendation", text: "Adapt the test-environment runbook after checking client scope.", sourceRefs: [ref], requestQuotes: ["client scope"], dependsOnClaimIds: [] };
+  const classification: Claim = { ...recommendation, claimId: "classification-ibis-decision", kind: "interpretation", text: "Artifact disposition: adapt.", dependsOnClaimIds: [recommendation.claimId] };
+  const assessment = job.assessment_result!;
+  assessment.claims = applySourceHistoryQualifications(corpus, [...assessment.claims, recommendation, classification]);
+  const pastCase = corpus.manifest.cases.find((item) => item.caseId === source.caseId)!;
+  assessment.cases.push({
+    caseId: source.caseId, availability: "available", outcome: "unknown", outcomeClaimIds: [],
+    claimIds: assessment.claims.filter((claim) => claim.sourceRefs.some((item) => item.caseId === source.caseId)).map((claim) => claim.claimId),
+    artifactWork: pastCase.artifacts.map((artifact) => ({
+      artifactId: artifact.artifactId, availability: "available", exclusionReasons: [],
+      disposition: artifact.artifactId === source.artifactId ? "adapt" : null,
+      dispositionClaimId: artifact.artifactId === source.artifactId ? recommendation.claimId : null,
+      claimIds: artifact.artifactId === source.artifactId ? [recommendation.claimId, classification.claimId] : [],
+      blockerClaimIds: [], verificationClaimIds: [],
+    })),
+  });
+  assessment.artifactReviews.push(...pastCase.artifacts.map((artifact) => ({ caseId: source.caseId, artifactId: artifact.artifactId, role: artifact.artifactId === source.artifactId ? "starting_point" as const : "context_only" as const })));
+  const key = `${selection.caseId}/${selection.artifactId}/${selection.versionId}`;
+  const label = assessmentPassageIds(corpus).get(source.passageId)!;
+  const draft = briefDraftSchemaFor(job.request_text, [selection], corpus, assessment).parse({ items: { [key]: {
+    disposition: "adapt", recommendation: { text: "Adapt the checked test procedure after verifying client scope.", sourceRefs: [label], requestQuotes: [requestSpans(job.request_text)[0].spanId], dependsOnClaimIds: [] },
+    claims: [{ kind: "source_fact", sourceRefs: [label], requestQuotes: [], dependsOnClaimIds: [] }],
+  } } });
+  const requirements = { request: job.request_text, assessment, constraintReviews: [{ caseId: ref.caseId, artifactId: ref.artifactId, versionId: ref.versionId, requestQuotes: [job.request_text] }] };
+  const checked = buildCheckedBrief(draft, new Map(draft.claims.map((claim) => [claim.claimId, "supported" as const])), validateBriefDraft(draft, job.request_text, [selection], corpus), requirements);
+  assert.equal(checked.adapt.length, 1);
+  assert.deepEqual(revalidateBrief(checked, job.request_text, corpus, assessment), checked);
+  job.brief_result = checked;
+  job.brief_selections = [selection];
+  const pack = buildStarterPack(job, corpus, "https://demo.example");
+  const history = pack.brief.claims.find((claim) => claim.claimId.startsWith("source-history-"))!;
+  assert.ok(history.text.includes("first recovery attempt") && history.text.includes("corrected test archive"));
+  assert.ok(history.sourceRefs.some((item) => item.artifactId === "delivery-log"), "Required historical provenance is retained, not dropped for being outside the selected procedure.");
+  for (const citation of history.sourceRefs) assert.ok(pack.evidence.some((passage) => passage.passageId === citation.passageId));
+  assert.ok(JSON.parse(JSON.stringify(pack)).brief.claims.some((claim: Claim) => claim.claimId === history.claimId));
+  assert.ok(starterPackMarkdown(pack).includes("first recovery attempt"));
 });

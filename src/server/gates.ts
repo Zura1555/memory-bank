@@ -2,6 +2,8 @@ import type { ArtifactRole, AssessmentResult, BriefConstraintReview, BriefResult
 import { EvidenceUnavailable, type CorpusSnapshot } from "./corpus.ts";
 import type { AssessmentDraft, AssessmentReview, BriefDraft, SupportReview } from "./schemas.ts";
 import { artifactReviewsSchema, briefSupportReviewSchema, requestConstraintsSchema } from "./schemas.ts";
+import { completeRequestQuotes } from "./request-constraints.ts";
+import { invalidSourceHistoryQualifications, isSourceHistoryQualification } from "./source-history.ts";
 
 export class GateFailure extends Error {
   readonly code: string;
@@ -118,13 +120,17 @@ function validClaimReferences(claims: Claim[], request: string, corpus: CorpusSn
   const byId = new Map(claims.map((claim) => [claim.claimId, claim]));
   if (byId.size !== claims.length) throw new GateFailure("DUPLICATE_CLAIM_ID", "The model returned duplicate claim identities.");
   assertAcyclic(byId);
-  const invalid = new Set<string>();
+  const invalid = invalidSourceHistoryQualifications(corpus, claims);
   for (const claim of claims) {
     if (claim.sourceRefs.some((ref) => {
       const passage = corpus.passages.get(ref.passageId);
       return !passage || passage.caseId !== ref.caseId || passage.artifactId !== ref.artifactId || passage.versionId !== ref.versionId;
     })) invalid.add(claim.claimId);
     if (claim.requestQuotes.some((quote) => !request.includes(quote))) invalid.add(claim.claimId);
+    if (claim.sourceRefs.length === 0) invalid.add(claim.claimId);
+    if (claim.kind === "source_fact" && (claim.requestQuotes.length > 0
+      || (!isSourceHistoryQualification(corpus, claim)
+        && claim.text !== claim.sourceRefs.map((ref) => corpus.passages.get(ref.passageId)?.excerpt ?? "").join("\n")))) invalid.add(claim.claimId);
   }
   let changed = true;
   while (changed) {
@@ -152,12 +158,20 @@ export function validateAssessmentDraft(draft: AssessmentDraft, request: string,
     }
     if ((row.requirementClaimId !== null && (requirement?.kind !== "interpretation" || requirement.requestQuotes.length !== 1))
       || (row.requirementClaimId === null && row.relation !== "unknown")
-      || evidence?.kind !== "source_fact" || assessment?.kind !== "interpretation" || implication?.kind !== "recommendation"
+      || evidence?.kind !== "source_fact" || assessment?.kind !== "interpretation"
+      || implication?.kind !== (row.implicationEffect === "checked_decision" ? "recommendation" : "interpretation")
       || ![evidence, assessment, implication].every((item) => item?.sourceRefs.some((ref) => ref.caseId === row.caseId))
       || !assessment.dependsOnClaimIds.includes(row.evidenceClaimId)
       || (row.requirementClaimId !== null && !assessment.dependsOnClaimIds.includes(row.requirementClaimId))
       || !implication.dependsOnClaimIds.includes(row.assessmentClaimId)) {
       throw new GateFailure("INVALID_COMPARISON_CLAIMS", "Comparison facts, relation, and reuse implication require scoped, dependent reviewed claims; absent requirements are unknown.");
+    }
+    const work = draft.cases.find((item) => item.caseId === row.caseId)?.artifactWork.find((item) => item.artifactId === row.artifactId);
+    if (!work || !["checked_decision", "context_only", "missing_evidence"].includes(row.implicationEffect)
+      || (row.implicationEffect === "checked_decision"
+        && (!implication.dependsOnClaimIds.includes(work.dispositionClaimId)
+          || !implication.dependsOnClaimIds.includes(`classification-${work.dispositionClaimId}`)))) {
+      throw new GateFailure("INVALID_IMPLICATION_DECISION", "A positive implication must depend on its exact artifact disposition and classification.");
     }
   }
   const claimLinks = [
@@ -199,6 +213,9 @@ export function validateBriefDraft(draft: BriefDraft, request: string, selection
       }
       dispositionClaimIds.add(item.dispositionClaimId);
       for (const claimId of item.claimIds) {
+        if (claims.get(claimId)?.dependsOnClaimIds.some((dependency) => claims.has(dependency) && !item.claimIds.includes(dependency))) {
+          throw new GateFailure("BRIEF_DEPENDENCY_SCOPE", "A brief claim depends on another item's claims.");
+        }
         if (!claims.get(claimId)?.sourceRefs.some((ref) => ref.caseId === item.caseId && ref.artifactId === item.artifactId && ref.versionId === item.versionId)) {
           throw new GateFailure("CLAIM_VERSION_SCOPE", "A brief item lacks evidence from its exact selected source version.");
         }
@@ -234,6 +251,7 @@ export function validateArtifactReview(draft: AssessmentDraft, review: Assessmen
 
 function supportedClaims(claims: Claim[], verdicts: Map<string, SupportVerdict>, referenceInvalid: Set<string>) {
   const all = new Map(claims.map((claim) => [claim.claimId, claim]));
+  assertAcyclic(all);
   const accepted = new Set<string>();
   for (const claim of claims) if (!referenceInvalid.has(claim.claimId) && verdicts.get(claim.claimId) === "supported") accepted.add(claim.claimId);
   let changed = true;
@@ -245,6 +263,10 @@ function supportedClaims(claims: Claim[], verdicts: Map<string, SupportVerdict>,
         changed = true;
       }
     }
+  }
+  for (const claim of claims) {
+    if (accepted.has(claim.claimId) && claim.claimId.startsWith("source-history-")
+      && !claims.some((consumer) => accepted.has(consumer.claimId) && consumer.dependsOnClaimIds.includes(claim.claimId))) accepted.delete(claim.claimId);
   }
   return { accepted, visible: claims.filter((claim) => accepted.has(claim.claimId)), withheld: claims.length - accepted.size };
 }
@@ -269,13 +291,25 @@ export function buildCheckedAssessment(
     || Object.values(draftConstraints.data).some((quotes) => quotes.some((quote) => !requirementReview.request.includes(quote)))) {
     throw new GateFailure("INVALID_REQUEST_CONSTRAINT_REVIEW", "Draft and independent review need every request-constraint dimension with exact request quotations.");
   }
+  try {
+    for (const inventory of [constraints.data, draftConstraints.data]) {
+      for (const quotes of Object.values(inventory)) {
+        if (completeRequestQuotes(requirementReview.request, quotes).some((quote) => !quotes.includes(quote))) {
+          throw new Error("Incomplete sentence coverage");
+        }
+      }
+    }
+  } catch {
+    throw new GateFailure("INVALID_REQUEST_CONSTRAINT_REVIEW", "A request-constraint inventory omits part of a selected sentence.");
+  }
   const knownArtifacts = new Set(corpus.manifest.cases.flatMap((item) => item.artifacts.map((artifact) => `${item.caseId}/${artifact.artifactId}`)));
   if ([...artifactRoles.keys()].some((key) => !knownArtifacts.has(key))
     || draft.cases.some((item) => item.artifactWork.some((work) => !artifactRoles.has(`${item.caseId}/${work.artifactId}`)))) {
     throw new GateFailure("INCOMPLETE_ARTIFACT_REVIEW", "Missing or unknown artifact-role review.");
   }
   let requirementConflict = (Object.keys(constraints.data) as (keyof RequestConstraints)[])
-    .some((dimension) => (constraints.data[dimension].length === 0) !== (draftConstraints.data[dimension].length === 0));
+    .some((dimension) => constraints.data[dimension].some((quote) => !draftConstraints.data[dimension].includes(quote))
+      || draftConstraints.data[dimension].some((quote) => !constraints.data[dimension].includes(quote)));
   for (const row of draft.comparisons) {
     if ((row.requirementClaimId === null) !== (constraints.data[row.dimension].length === 0)
       || (row.requirementClaimId === null) !== (draftConstraints.data[row.dimension].length === 0)) {
@@ -297,11 +331,60 @@ export function buildCheckedAssessment(
         rejected.add(work.dispositionClaimId);
       }
       const role = artifactRoles.get(`${item.caseId}/${work.artifactId}`);
-      if (((work.disposition === "reuse" || work.disposition === "adapt") && role !== "starting_point")
-        || (work.disposition === "verify" && role === "not_relevant")) {
+      if (work.disposition !== null && role !== "starting_point") {
         rejected.add(work.dispositionClaimId);
       }
     }
+  }
+  const offeringIds = new Set<string>();
+  for (const item of draft.cases) for (const work of item.artifactWork) {
+    offeringIds.add(work.dispositionClaimId);
+    const rejectedDecision = work.disposition === null || rejected.has(work.dispositionClaimId)
+      || verdicts.get(work.dispositionClaimId) !== "supported"
+      || verdicts.get(`classification-${work.dispositionClaimId}`) !== "supported";
+    for (const claimId of work.claimIds) {
+      const claim = draftClaims.get(claimId);
+      if (claim?.kind === "recommendation") {
+        offeringIds.add(claimId);
+        if (rejectedDecision) rejected.add(claimId);
+      } else if (claim?.kind === "interpretation" && claimId !== work.dispositionClaimId
+        && claimId !== `classification-${work.dispositionClaimId}` && rejectedDecision) {
+        rejected.add(claimId);
+      }
+    }
+  }
+  for (const row of draft.comparisons) {
+    const implication = draftClaims.get(row.implicationClaimId);
+    const work = draft.cases.find((item) => item.caseId === row.caseId)?.artifactWork.find((item) => item.artifactId === row.artifactId);
+    if (!work || !implication) {
+      rejected.add(row.assessmentClaimId);
+      rejected.add(row.implicationClaimId);
+      continue;
+    }
+    if (draftClaims.get(row.assessmentClaimId)?.text !== `Recorded evidence has relation ${row.relation} to the current ${row.dimension} requirement; unestablished applicability remains unknown.`) rejected.add(row.assessmentClaimId);
+    if (row.implicationEffect === "checked_decision") {
+      offeringIds.add(implication.claimId);
+      if (implication.kind !== "recommendation" || work.disposition === null
+        || !implication.dependsOnClaimIds.includes(work.dispositionClaimId)
+        || !implication.dependsOnClaimIds.includes(`classification-${work.dispositionClaimId}`)) rejected.add(implication.claimId);
+      if (implication.text !== `Checked artifact decision: ${draftClaims.get(work.dispositionClaimId)?.text}`) rejected.add(implication.claimId);
+    } else {
+      const expected = row.implicationEffect === "context_only" ? "Context only; no implementation starting work is offered."
+        : row.implicationEffect === "missing_evidence" ? "Missing evidence must be obtained before a starting-work decision; no implementation starting work is offered." : null;
+      if (implication.kind !== "interpretation" || implication.text !== expected) rejected.add(implication.claimId);
+    }
+  }
+  const structuredInterpretations = new Set([
+    ...draft.cases.flatMap((item) => [...item.outcomeClaimIds, ...item.artifactWork.flatMap((work) => work.claimIds)]),
+    ...draft.comparisons.flatMap((row) => [row.requirementClaimId, row.assessmentClaimId, row.implicationClaimId]),
+  ]);
+  for (const claim of draft.claims) {
+    if (claim.kind === "recommendation" && !offeringIds.has(claim.claimId)) rejected.add(claim.claimId);
+    if (claim.kind === "interpretation" && !structuredInterpretations.has(claim.claimId)
+      && claim.text !== `The current request states: ${claim.requestQuotes.map((quote) => JSON.stringify(quote)).join(" ")}`) rejected.add(claim.claimId);
+  }
+  for (const item of [...draft.leads, ...draft.contrasts]) {
+    for (const claimId of item.reasonClaimIds) if (draftClaims.get(claimId)?.kind !== "source_fact") rejected.add(claimId);
   }
   const checked = supportedClaims(draft.claims, verdicts, rejected);
   const cases: CaseAssessment[] = draft.cases.map((item, caseIndex) => {
@@ -333,13 +416,15 @@ export function buildCheckedAssessment(
         && checked.accepted.has(work.dispositionClaimId)
         && checked.accepted.has(`classification-${work.dispositionClaimId}`)
         && !(work.disposition === "reuse" && (work.blockerClaimIds.length > 0 || work.verificationClaimIds.length > 0));
+      const excluded = work?.disposition === null && checked.accepted.has(work.dispositionClaimId)
+        && checked.accepted.has(`classification-${work.dispositionClaimId}`);
       return {
         artifactId: artifact.artifactId,
         availability,
         exclusionReasons,
         disposition: accepted ? work.disposition : null,
-        dispositionClaimId: accepted ? work.dispositionClaimId : null,
-        claimIds: accepted ? work.claimIds.filter((id) => checked.accepted.has(id)) : [],
+        dispositionClaimId: accepted || excluded ? work.dispositionClaimId : null,
+        claimIds: accepted || excluded ? work.claimIds.filter((id) => checked.accepted.has(id)) : [],
         blockerClaimIds: accepted ? work.blockerClaimIds.filter((id) => checked.accepted.has(id)) : [],
         verificationClaimIds: accepted ? work.verificationClaimIds.filter((id) => checked.accepted.has(id)) : [],
       };
@@ -489,18 +574,19 @@ export function buildCheckedBrief(
       const claim = claims.get(id);
       return claim?.kind === "recommendation" ? [claim] : [];
     });
-    // Item-level coverage rejection applies only to quotations bound to
-    // this item by the independently reviewed checked assessment (for
-    // stored records presented without one, the whole recorded inventory
-    // and draft-declared quotations stay enforced, as before). A quotation
-    // the draft alone associated with the item is covered opportunistically:
-    // carried when its claims pass review, simply not covered when they
-    // are withheld singly. One uncertain check therefore cannot erase an
-    // item whose assessment-bound coverage is complete, while a missing
-    // assessment-bound quotation still withholds the whole item.
-    const bound = requirementReview.assessment
-      ? new Set(boundAssessmentQuotes(requirementReview.assessment, item))
-      : new Set([...inventory.get(identity(item))!, ...recommendations.flatMap((claim) => claim.requestQuotes)]);
+    if (requirementReview.assessment) {
+      const work = requirementReview.assessment.cases.find((candidate) => candidate.caseId === item.caseId)?.artifactWork.find((candidate) => candidate.artifactId === item.artifactId);
+      if (!work?.disposition || work.disposition !== item.disposition) {
+        for (const claim of recommendations) rejected.add(claim.claimId);
+      }
+    }
+    // Every independent inventory and every declared/assessment-bound quotation
+    // is mandatory. Clause selection carries its whole sentence, never a tail-less fragment.
+    const bound = new Set(completeRequestQuotes(requirementReview.request, [...new Set([
+      ...inventory.get(identity(item))!,
+      ...recommendations.flatMap((claim) => claim.requestQuotes),
+      ...(requirementReview.assessment ? boundAssessmentQuotes(requirementReview.assessment, item) : []),
+    ])]));
     if ([...bound].some((quote) => !requirementReview.request.includes(quote)
       || !recommendations.some((claim) => supported.accepted.has(claim.claimId)
         && claim.requestQuotes.includes(quote) && claim.text.includes(quote)))) {
@@ -547,7 +633,7 @@ export function revalidateAssessment(result: AssessmentResult, request: string, 
     ...result,
     cases: result.cases.map((item) => ({
       ...item,
-      artifactWork: item.artifactWork.flatMap((work) => work.disposition !== null && work.dispositionClaimId !== null
+      artifactWork: item.artifactWork.flatMap((work) => work.dispositionClaimId !== null
         ? [{ ...work, disposition: work.disposition, dispositionClaimId: work.dispositionClaimId }]
         : []),
     })),

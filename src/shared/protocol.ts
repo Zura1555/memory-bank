@@ -92,6 +92,8 @@ export interface Lead {
 
 export interface ComparisonRow {
   caseId: string;
+  artifactId: string;
+  implicationEffect: "checked_decision" | "context_only" | "missing_evidence";
   dimension: "product_version" | "environment" | "scale" | "identity_access" | "recovery_operations";
   requirementClaimId: string | null;
   evidenceClaimId: string;

@@ -6,6 +6,11 @@ import type { AddressInfo } from "node:net";
 import { once } from "node:events";
 import type { Env } from "./env.ts";
 import { callModel, ModelCallError, modelConfig } from "./model.ts";
+import { requestSpans } from "./request-constraints.ts";
+import { validateBriefDraft } from "./gates.ts";
+import { briefDraftSchemaFor } from "./schemas.ts";
+
+const checkedBriefDecisions = { cases: [{ caseId: "case-1", artifactWork: [{ artifactId: "art", disposition: "adapt" as const }] }] };
 
 test("an interrupted provider body keeps its generation ID and cannot be treated as a free failure", async () => {
   const originalFetch = globalThis.fetch;
@@ -19,6 +24,7 @@ test("an interrupted provider body keeps its generation ID and cannot be treated
     await assert.rejects(
       callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "assessment_review", {
         instructions: "Review fictional evidence", untrustedData: {},
+        currentRequest: "current request",
         reviewTargets: { claimIds: ["claim-one"], artifacts: [] },
       }),
       (error: unknown) => {
@@ -49,6 +55,7 @@ test("brief review cannot accept a verdict for a background assessment claim", a
     await assert.rejects(
       callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_review", {
         instructions: "Review the brief", untrustedData: {},
+        currentRequest: "current request",
         reviewTargets: { claimIds: ["brief-only"], selections: [{ caseId: "case", artifactId: "artifact", versionId: "version" }] },
       }),
       (error: unknown) => {
@@ -364,8 +371,7 @@ test("Responses refuses partial, refused, ambiguous, or non-JSON outputs and pre
     globalThis.fetch = originalFetch;
   }
 });
-test("brief provider grammar omits sentence patterns while runtime parsing composes the declared visible quotation", async () => {
-  const { briefDraftSchemaFor } = await import("./schemas.ts");
+test("provider output selects a request identity whose original quotation remains visible after normalization", async () => {
   const request = "Check the target window first.";
   const corpus = {
     manifest: { schemaVersion: 2, corpusVersion: "test", cases: [{
@@ -381,30 +387,19 @@ test("brief provider grammar omits sentence patterns while runtime parsing compo
     versions: new Map(),
   } as never;
   const selected = [{ caseId: "case-1", artifactId: "art", versionId: "art-v1", passageIds: ["p1"] }];
-  const prompt = { instructions: "Draft a brief", untrustedData: {}, responseSchema: briefDraftSchemaFor(request, selected, corpus) };
+  const prompt = { instructions: "Draft a brief", untrustedData: {}, responseSchema: briefDraftSchemaFor(request, selected, corpus, checkedBriefDecisions) };
   const wire = (text: string) => JSON.stringify({
-    items: { "case-1/art/art-v1": { disposition: "adapt", dispositionClaimId: "c1", claimIds: ["c1"] } },
-    claims: [{ claimId: "c1", kind: "recommendation", text, sourceRefs: ["e1"], requestQuotes: [request], dependsOnClaimIds: [] }],
+    items: { "case-1/art/art-v1": {
+      disposition: "adapt",
+      recommendation: { text, sourceRefs: ["e1"], requestQuotes: [requestSpans(request)[0].spanId], dependsOnClaimIds: [] },
+      claims: [],
+    } },
   });
   const originalFetch = globalThis.fetch;
   try {
-    let capturedSchema = "";
-    globalThis.fetch = async (_input, init) => {
-      capturedSchema = JSON.stringify(JSON.parse(init!.body as string).response_format.json_schema.schema);
-      return Response.json({ id: "gen-brief-visible-quote", choices: [{ finish_reason: "stop", message: { content: wire(`Adapt only after this check: ${request}`) } }] });
-    };
+    globalThis.fetch = async () => Response.json({ id: "gen-brief-visible-quote", choices: [{ finish_reason: "stop", message: { content: wire(`Adapt only after this check: ${request}`) } }] });
     const accepted = await callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt);
     assert.equal((accepted.output as { adapt: unknown[] }).adapt.length, 1);
-    const patterns: string[] = [];
-    const collect = (node: unknown): void => {
-      if (Array.isArray(node)) return node.forEach(collect);
-      if (typeof node !== "object" || node === null) return;
-      for (const [key, value] of Object.entries(node)) { if (key === "pattern") patterns.push(String(value)); collect(value); }
-    };
-    collect(JSON.parse(capturedSchema));
-    assert.ok(!patterns.some((pattern) => pattern.includes("Check the target")), "Provider schema must not embed the request sentence as a text pattern");
-    assert.ok(capturedSchema.includes("^[a-z0-9]"), "Anchored identity patterns stay in the provider grammar");
-
     globalThis.fetch = async () => Response.json({
       id: "gen-brief-hidden-quote", choices: [{ finish_reason: "stop", message: { content: wire("Adapt after checking compatibility.") } }],
     });
@@ -443,6 +438,7 @@ test("unusable output retains reported usage and distinguishes safe failure cond
       };
       await assert.rejects(callModel({ OPENROUTER_API_KEY: "synthetic-only" } as Env, "assessment_review", {
         instructions: "Synthetic output failure", untrustedData: {},
+        currentRequest: "current request",
         reviewTargets: { claimIds: ["claim-one"], artifacts: [] },
       }), (error: unknown) => {
         assert.ok(error instanceof ModelCallError);
@@ -493,6 +489,7 @@ test("provider redirects are rejected without forwarding the request or retrying
         OPENROUTER_API_KEY: "synthetic-only",
       } as Env, "assessment_review", {
         instructions: "Synthetic redirect check", untrustedData: {},
+        currentRequest: "current request",
         reviewTargets: { claimIds: [], artifacts: [] },
       }), {
         code: "MODEL_PROVIDER_REJECTED", status, uncertain: false, failurePhase: "response_headers",
@@ -506,8 +503,7 @@ test("provider redirects are rejected without forwarding the request or retrying
   }
 });
 
-test("brief wire format includes the disposition claim in its item even when the draft omits it from claimIds", async () => {
-  const { briefDraftSchemaFor } = await import("./schemas.ts");
+test("brief containment derives membership and never repairs missing dependencies", async () => {
   const request = "Check the target window first.";
   const corpus = {
     manifest: { schemaVersion: 2, corpusVersion: "test", cases: [{
@@ -523,19 +519,26 @@ test("brief wire format includes the disposition claim in its item even when the
     versions: new Map(),
   } as never;
   const selected = [{ caseId: "case-1", artifactId: "art", versionId: "art-v1", passageIds: ["p1"] }];
-  const parsed = briefDraftSchemaFor(request, selected, corpus).parse({
-    items: { "case-1/art/art-v1": { disposition: "adapt", dispositionClaimId: "c1", claimIds: ["c2"] } },
-    claims: [
-      { claimId: "c1", kind: "recommendation", text: `Adapt only after this check: ${request}`, sourceRefs: ["e1"], requestQuotes: [request], dependsOnClaimIds: [] },
-      { claimId: "c2", kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] },
-    ],
-  });
-  assert.deepEqual(parsed.adapt[0].claimIds, ["c1", "c2"],
-    "The disposition claim is part of its item by construction; existence and kind are still validated downstream.");
+  const schema = briefDraftSchemaFor(request, selected, corpus, checkedBriefDecisions);
+  const wire = {
+    items: { "case-1/art/art-v1": {
+      disposition: "adapt",
+      recommendation: { text: "Adapt after the required check.", sourceRefs: ["e1"], requestQuotes: [requestSpans(request)[0].spanId], dependsOnClaimIds: [] as string[] },
+      claims: [{ kind: "source_fact", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] }],
+    } },
+  };
+  const parsed = schema.parse(wire);
+  assert.deepEqual(parsed.adapt[0].claimIds, ["brief-0-disposition", "brief-0-claim-0"]);
+  assert.equal(validateBriefDraft(parsed, request, selected, corpus).size, 0);
+  wire.items["case-1/art/art-v1"].recommendation.dependsOnClaimIds = ["m-scale"];
+  const dangling = schema.parse(wire);
+  assert.deepEqual(dangling.claims[0].dependsOnClaimIds, ["m-scale"]);
+  assert.throws(() => validateBriefDraft(dangling, request, selected, corpus), /dependency is missing/);
+  assert.equal(schema.safeParse({ ...wire, claims: [] }).success, false);
+  assert.equal(schema.safeParse({ items: { "case-1/art/art-v1": { ...wire.items["case-1/art/art-v1"], claimIds: ["m-scale"] } } }).success, false);
 });
 
 test("brief wire format composes a declared quotation verbatim instead of requiring retyped prose", async () => {
-  const { briefDraftSchemaFor } = await import("./schemas.ts");
   const request = "Check the target window first. Preserve the audit trail after cutover.";
   const corpus = {
     manifest: { schemaVersion: 2, corpusVersion: "test", cases: [{
@@ -551,26 +554,31 @@ test("brief wire format composes a declared quotation verbatim instead of requir
     versions: new Map(),
   } as never;
   const selected = [{ caseId: "case-1", artifactId: "art", versionId: "art-v1", passageIds: ["p1"] }];
-  const schema = briefDraftSchemaFor(request, selected, corpus);
-  const draft = (claims: unknown[]) => ({
-    items: { "case-1/art/art-v1": { disposition: "adapt", dispositionClaimId: "c1", claimIds: ["c1", "c2"] } },
-    claims,
+  const schema = briefDraftSchemaFor(request, selected, corpus, checkedBriefDecisions);
+  const draft = (claims: { kind: string; text: string; sourceRefs: string[]; requestQuotes: string[]; dependsOnClaimIds: string[] }[]) => ({
+    items: { "case-1/art/art-v1": {
+      disposition: "adapt", recommendation: {
+        text: claims[0].text, sourceRefs: claims[0].sourceRefs,
+        requestQuotes: claims[0].requestQuotes.map((quote) => requestSpans(request).find((span) => span.text === quote)!.spanId),
+        dependsOnClaimIds: claims[0].dependsOnClaimIds,
+      }, claims: claims.slice(1).map(({ text, ...claim }) => claim.kind === "source_fact" ? claim : { ...claim, text }),
+    } },
   });
   // The claim declares its sentence exactly but states only the check in
   // prose: the declared sentence is composed verbatim into the stored text.
   const parsed = schema.parse(draft([
-    { claimId: "c1", kind: "recommendation", text: "Adapt only after confirming the window with the client.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."], dependsOnClaimIds: [] },
-    { claimId: "c2", kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] },
+    { kind: "recommendation", text: "Adapt only after confirming the window with the client.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."], dependsOnClaimIds: [] },
+    { kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] },
   ]));
-  assert.ok(parsed.adapt[0].claimIds.includes("c1"));
-  const composed = parsed.claims.find((claim) => claim.claimId === "c1")!;
+  assert.ok(parsed.adapt[0].claimIds.includes("brief-0-disposition"));
+  const composed = parsed.claims.find((claim) => claim.claimId === "brief-0-disposition")!;
   assert.ok(composed.text.startsWith("Check the target window first. "),
     "The declared quotation heads the stored claim text verbatim.");
   assert.ok(composed.text.includes("confirming the window with the client."));
   // Prose carrying a different complete request sentence than the declared
   // one is still rejected at parse time; composition never repairs that.
   assert.throws(() => schema.parse(draft([
-    { claimId: "c1", kind: "recommendation", text: "Preserve the audit trail after cutover. Then adapt.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."], dependsOnClaimIds: [] },
-    { claimId: "c2", kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] },
+    { kind: "recommendation", text: "Preserve the audit trail after cutover. Then adapt.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."], dependsOnClaimIds: [] },
+    { kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] },
   ])));
 });

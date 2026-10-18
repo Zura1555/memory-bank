@@ -1,6 +1,6 @@
 import type { ArtifactAssessment, CaseAvailability, Claim, SourceRef } from "../shared/protocol.ts";
 
-// Only accepted work claims authorize selectable passages (the server uses the same boundary).
+// Checked claims pin source versions; selection may use any verified original passage in those versions.
 export function checkedArtifactRefs(caseId: string, availability: CaseAvailability, item: ArtifactAssessment, claims: Map<string, Claim>): SourceRef[] {
   if (item.availability === "unavailable" || !["available", "partial"].includes(availability)) return [];
   const refs = new Map<string, SourceRef>();
