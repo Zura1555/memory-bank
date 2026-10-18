@@ -9,6 +9,7 @@ import { Collapsible } from "@base-ui/react/collapsible";
 import { AppShell } from "./shell";
 import type {
   ArtifactAssessment,
+  ArtifactReview,
   ArtifactRole,
   AssessmentResult,
   AssessmentConclusion,
@@ -168,6 +169,23 @@ function isRequestConstraints(value: unknown): value is RequestConstraints {
     && ["product_version", "environment", "scale", "identity_access", "recovery_operations"]
       .every((dimension) => isTextList(value[dimension]) && value[dimension].length <= 64);
 }
+function isArtifactReview(value: unknown): value is ArtifactReview {
+  if (!isRecord(value) || !isText(value.caseId) || !isText(value.artifactId)
+    || !["starting_point", "context_only", "not_relevant", "unresolved"].includes(value.role as string)
+    || !["supported", "unsupported", "uncertain"].includes(value.verdict as string)
+    || !isRecord(value.decision) || !Array.isArray(value.reasons)) return false;
+  const decision = value.decision;
+  const condition = (item: unknown) => isRecord(item) && isText(item.text) && isSourceRefs(item.sourceRefs) && isTextList(item.requestQuotes);
+  return (decision.disposition === null || dispositions.includes(decision.disposition as BriefDisposition))
+    && isSourceRefs(decision.historicalEvidence) && isTextList(decision.requestQuotes)
+    && Array.isArray(decision.adaptations) && decision.adaptations.every(condition)
+    && Array.isArray(decision.checks) && decision.checks.every(condition)
+    && (value.verdict === "supported" || value.reasons.length > 0)
+    && value.reasons.every((reason: unknown) => isRecord(reason)
+      && ["history", "request_constraint", "adaptation", "check", "disposition"].includes(reason.target as string)
+      && isText(reason.explanation) && isSourceRefs(reason.sourceRefs) && isTextList(reason.requestQuotes));
+}
+
 
 function isAssessment(value: unknown, request: string): value is AssessmentResult {
   if (!isRecord(value)
@@ -178,8 +196,7 @@ function isAssessment(value: unknown, request: string): value is AssessmentResul
     || !isAssessmentConclusion(value.conclusion)
     || !isTextList(value.clarifyingClaimIds)
     || !isRequestConstraints(value.requestConstraints)
-    || !Array.isArray(value.artifactReviews) || !value.artifactReviews.every((item: unknown) =>
-      isRecord(item) && isText(item.caseId) && isText(item.artifactId) && ["starting_point", "context_only", "not_relevant", "unresolved"].includes(item.role as string))
+    || !Array.isArray(value.artifactReviews) || !value.artifactReviews.every(isArtifactReview)
     || !Array.isArray(value.comparisons) || value.comparisons.length > 24 || !value.comparisons.every(isComparison)
     || !Array.isArray(value.nextActions) || value.nextActions.length > 3
     || !value.nextActions.every((item: unknown) => isRecord(item) && isText(item.caseId) && isText(item.artifactId) && isText(item.claimId))
@@ -211,11 +228,10 @@ function isAssessment(value: unknown, request: string): value is AssessmentResul
   })) return false;
   if (!value.cases.every((item: CaseAssessment) => item.artifactWork.every((work) => {
     if (work.dispositionClaimId === null) return work.disposition === null;
-    const classification = claims.get(`classification-${work.dispositionClaimId}`);
+    const review = (value.artifactReviews as ArtifactReview[]).find((review) => review.caseId === item.caseId && review.artifactId === work.artifactId);
     return claims.get(work.dispositionClaimId)?.kind === (work.disposition === null ? "interpretation" : "recommendation")
-      && classification?.kind === "interpretation"
-      && classification.text === `Artifact disposition: ${work.disposition === null ? "excluded" : work.disposition}.`
-      && classification.dependsOnClaimIds.includes(work.dispositionClaimId);
+      && review?.verdict === "supported" && review.decision.disposition === work.disposition
+      && (work.disposition === null || review.role === "starting_point");
   }))) return false;
   if (value.conclusion === "precedent_found") return value.leads.length > 0;
   return true;
@@ -869,7 +885,7 @@ function WorkCard({
   item,
   caseId,
   availability,
-  reviewRole,
+  review,
   selectionRefs,
   claims,
   draft,
@@ -879,13 +895,14 @@ function WorkCard({
   item: ArtifactAssessment;
   caseId: string;
   availability: CaseAvailability;
-  reviewRole: ArtifactRole | undefined;
+  review: ArtifactReview | undefined;
   selectionRefs: SourceRef[];
   claims: ClaimMap;
   draft: WorkDraft;
   onChange: (next: WorkDraft) => void;
   inspect: InspectPassage;
 }) {
+  const reviewRole = review?.role;
   const otherClaimIds = item.claimIds.filter((id) => id !== item.dispositionClaimId);
   const hasSupportedWorkClaim = claimsFor(item.claimIds, claims).length > 0;
   const refs = checkedArtifactRefs(caseId, availability, item, claims);
@@ -894,7 +911,7 @@ function WorkCard({
   const passageRefs = Array.from(new Map(
     selectionRefs.filter((ref) => ref.versionId === selectedVersion).map((ref) => [ref.passageId, ref]),
   ).values());
-  const canSelect = reviewRole === "starting_point" && item.disposition !== null && item.availability !== "unavailable" && (availability === "available" || availability === "partial") && hasSupportedWorkClaim && versions.length > 0;
+  const canSelect = review?.verdict === "supported" && review.decision.disposition === item.disposition && reviewRole === "starting_point" && item.disposition !== null && item.availability !== "unavailable" && (availability === "available" || availability === "partial") && hasSupportedWorkClaim && versions.length > 0;
   const blocked = item.availability === "unavailable" || availability === "failed" || availability === "unavailable";
   const secondaryCount = otherClaimIds.length + item.blockerClaimIds.length + item.verificationClaimIds.length;
   return (
@@ -919,6 +936,14 @@ function WorkCard({
         </div>
       </div>
       <ClaimGroup title="Reviewed disposition recommendation" ids={item.dispositionClaimId ? [item.dispositionClaimId] : []} claims={claims} inspect={inspect} />
+      {review && review.reasons.length > 0 && <section className="inline-blocker" aria-label="Decision rejection reasons">
+        <p><strong>Disposition withheld</strong> — relevance alone does not approve this proposal.</p>
+        {review.reasons.map((reason, index) => <div key={index}>
+          <p>{label(reason.target)}: {reason.explanation}</p>
+          {reason.requestQuotes.map((quote) => <blockquote key={quote}>{quote}</blockquote>)}
+          <SourceLinks refs={reason.sourceRefs} inspect={inspect} />
+        </div>)}
+      </section>}
       {secondaryCount > 0 && (
         <details className="claims-disclosure">
           <summary>Supporting work claims, blockers &amp; checks ({secondaryCount})</summary>
@@ -1660,7 +1685,7 @@ function App({ active }: { active: boolean }) {
   const questionClaims = assessmentAvailable ? assessmentClaims : new Map((questions?.claims ?? []).map((claim) => [claim.claimId, claim]));
   const selectableWorkChoices = useMemo(() => workChoices.filter(({ caseId, availability, item, selectionRefs }) =>
     item.disposition !== null && item.availability !== "unavailable" && (availability === "available" || availability === "partial")
-    && assessment?.artifactReviews.some((review) => review.caseId === caseId && review.artifactId === item.artifactId && review.role === "starting_point")
+    && assessment?.artifactReviews.some((review) => review.caseId === caseId && review.artifactId === item.artifactId && review.role === "starting_point" && review.verdict === "supported" && review.decision.disposition === item.disposition)
     && claimsFor(item.claimIds, assessmentClaims).length > 0 && selectionRefs.length > 0), [workChoices, assessmentClaims, assessment]);
   const nonSelectableWorkChoices = useMemo(() => {
     const eligibleKeys = new Set(selectableWorkChoices.map((w) => w.key));
@@ -1969,7 +1994,7 @@ function App({ active }: { active: boolean }) {
                 {selectableWorkChoices.length > 0 && (
                   <div className="work-list">
                     {selectableWorkChoices.map(({ caseId, availability, item, selectionRefs, key }) => (
-                      <WorkCard key={key} caseId={caseId} availability={availability} item={item} selectionRefs={selectionRefs} reviewRole={assessment.artifactReviews.find((review) => review.caseId === caseId && review.artifactId === item.artifactId)?.role} claims={assessmentClaims} draft={getDraft(key, selectionRefs)} onChange={(next) => updateDraft(key, next)} inspect={setPassageRef} />
+                      <WorkCard key={key} caseId={caseId} availability={availability} item={item} selectionRefs={selectionRefs} review={assessment.artifactReviews.find((review) => review.caseId === caseId && review.artifactId === item.artifactId)} claims={assessmentClaims} draft={getDraft(key, selectionRefs)} onChange={(next) => updateDraft(key, next)} inspect={setPassageRef} />
                     ))}
                   </div>
                 )}
@@ -1978,7 +2003,7 @@ function App({ active }: { active: boolean }) {
                     <summary><span>Other corpus artifacts (not eligible for selection)</span><Badge>{`${nonSelectableWorkChoices.length}`}</Badge></summary>
                     <div className="disclosure-body work-list">
                       {nonSelectableWorkChoices.map(({ caseId, availability, item, selectionRefs, key }) => (
-                        <WorkCard key={key} caseId={caseId} availability={availability} item={item} selectionRefs={selectionRefs} reviewRole={assessment.artifactReviews.find((review) => review.caseId === caseId && review.artifactId === item.artifactId)?.role} claims={assessmentClaims} draft={getDraft(key, selectionRefs)} onChange={(next) => updateDraft(key, next)} inspect={setPassageRef} />
+                        <WorkCard key={key} caseId={caseId} availability={availability} item={item} selectionRefs={selectionRefs} review={assessment.artifactReviews.find((review) => review.caseId === caseId && review.artifactId === item.artifactId)} claims={assessmentClaims} draft={getDraft(key, selectionRefs)} onChange={(next) => updateDraft(key, next)} inspect={setPassageRef} />
                       ))}
                     </div>
                   </details>

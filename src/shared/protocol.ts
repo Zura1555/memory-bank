@@ -57,9 +57,30 @@ export interface ClaimReview {
 }
 
 export type ArtifactRole = "starting_point" | "context_only" | "not_relevant" | "unresolved";
+export interface DecisionCondition {
+  text: string;
+  sourceRefs: SourceRef[];
+  requestQuotes: string[];
+}
+export interface ArtifactDecision {
+  disposition: BriefDisposition | null;
+  historicalEvidence: SourceRef[];
+  requestQuotes: string[];
+  adaptations: DecisionCondition[];
+  checks: DecisionCondition[];
+}
+export interface DecisionReason {
+  target: "history" | "request_constraint" | "adaptation" | "check" | "disposition";
+  explanation: string;
+  sourceRefs: SourceRef[];
+  requestQuotes: string[];
+}
 export interface ArtifactReview {
   caseId: string;
   artifactId: string;
+  decision: ArtifactDecision;
+  verdict: SupportVerdict;
+  reasons: DecisionReason[];
   role: ArtifactRole;
 }
 

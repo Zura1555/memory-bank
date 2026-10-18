@@ -18,20 +18,16 @@ export function validateSelections(selections: Selection[], assessment: Assessme
     const reviews = assessment.artifactReviews.filter((item) => item.caseId === selection.caseId && item.artifactId === selection.artifactId);
     const source = corpus.versions.get(selection.versionId);
     const dispositionId = work?.dispositionClaimId;
-    const classificationId = dispositionId ? `classification-${dispositionId}` : null;
     const disposition = dispositionId ? claims.get(dispositionId) : undefined;
-    const classification = classificationId ? claims.get(classificationId) : undefined;
     const exactVersionWitnessed = work?.claimIds.some((claimId) => claims.get(claimId)?.sourceRefs.some((ref) =>
       ref.caseId === selection.caseId && ref.artifactId === selection.artifactId && ref.versionId === selection.versionId,
     )) ?? false;
     if (!caseResult || caseResult.availability === "unavailable" || caseResult.availability === "failed"
       || !work || work.availability === "unavailable" || work.disposition === null || !dispositionId
-      || !work.claimIds.includes(dispositionId) || !classificationId || !work.claimIds.includes(classificationId)
+      || !work.claimIds.includes(dispositionId)
       || disposition?.kind !== "recommendation"
-      || classification?.kind !== "interpretation"
-      || classification.text !== `Artifact disposition: ${work.disposition}.`
-      || !classification.dependsOnClaimIds.includes(dispositionId)
-      || reviews.length !== 1 || reviews[0].role !== "starting_point"
+      || reviews.length !== 1 || reviews[0].role !== "starting_point" || reviews[0].verdict !== "supported"
+      || reviews[0].decision.disposition !== work.disposition
       || !exactVersionWitnessed
       || !source || source.version.versionId !== selection.versionId
       || source.pastCase.caseId !== selection.caseId || source.artifact.artifactId !== selection.artifactId

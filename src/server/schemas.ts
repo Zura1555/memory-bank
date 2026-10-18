@@ -1,5 +1,5 @@
 import * as z from "zod";
-import type { BriefDisposition, ComparisonRow, Selection } from "../shared/protocol.ts";
+import type { ArtifactDecision, AssessmentResult, BriefDisposition, ComparisonRow, Selection } from "../shared/protocol.ts";
 import { assessmentPassageIds, type CorpusSnapshot } from "./corpus.ts";
 import { completeRequestQuotes, requestSpans } from "./request-constraints.ts";
 import { applySourceHistoryQualifications } from "./source-history.ts";
@@ -28,22 +28,23 @@ const artifactFact = assessmentClaim.omit({ claimId: true, text: true }).extend(
   kind: z.literal("source_fact"), sourceRefs: z.array(id).length(1), requestQuotes: z.array(claim.shape.requestQuotes.element).max(0),
 });
 const artifactAuthoredClaim = assessmentClaim.omit({ claimId: true }).extend({ kind: z.enum(["interpretation", "recommendation"]) });
-const artifactClaim = z.union([artifactFact, artifactAuthoredClaim]);
-function artifactWorkFor(sourceRefs: z.ZodType<string[], string[]>, requestQuotes: z.ZodType<string[], string[]> = assessmentClaim.shape.requestQuotes) {
-  const authored = artifactAuthoredClaim.extend({ sourceRefs, requestQuotes });
-  const localClaim = z.union([artifactFact.extend({ sourceRefs: sourceRefs.refine((refs) => refs.length === 1) }), authored]);
+function artifactWorkFor(sourceRefs: z.ZodArray<z.ZodType<string, string>>, requestQuotes: z.ZodArray<z.ZodType<string, string>> = assessmentClaim.shape.requestQuotes) {
+  const condition = z.strictObject({
+    text: z.string().min(1).max(600),
+    sourceRefs,
+    requestQuotes: z.array(requestQuotes.element).max(1),
+  });
   const fields = {
-    usefulForLead: z.boolean(),
-    recommendation: assessmentClaim.omit({ claimId: true, kind: true }).extend({ sourceRefs, requestQuotes }),
-    supportingClaims: z.array(localClaim).max(32),
-    blockerClaims: z.array(localClaim).max(16),
-    verificationClaims: z.array(authored.extend({ kind: z.literal("recommendation") })).max(16),
+    historicalEvidence: sourceRefs,
+    requestQuotes,
+    adaptations: z.array(condition).max(8),
+    checks: z.array(condition).max(8),
   };
   return z.union([
-    z.strictObject({ disposition: z.literal("reuse"), ...fields, blockerClaims: z.array(localClaim).max(0), verificationClaims: z.array(localClaim).max(0) }),
-    z.strictObject({ disposition: z.literal("adapt"), ...fields }),
-    z.strictObject({ disposition: z.literal("verify"), ...fields, usefulForLead: z.literal(false), verificationClaims: z.array(authored.extend({ kind: z.literal("recommendation") })).min(1).max(16) }),
-    z.strictObject({ disposition: z.null(), ...fields, usefulForLead: z.literal(false), recommendation: fields.recommendation.extend({ dependsOnClaimIds: z.array(id).max(0) }), supportingClaims: z.array(localClaim).max(0), blockerClaims: z.array(localClaim).max(0), verificationClaims: z.array(localClaim).max(0) }),
+    z.strictObject({ disposition: z.literal("reuse"), ...fields, adaptations: z.array(condition).max(0), checks: z.array(condition).max(0) }),
+    z.strictObject({ disposition: z.literal("adapt"), ...fields, adaptations: z.array(condition).min(1).max(8), checks: z.array(condition).min(1).max(8) }),
+    z.strictObject({ disposition: z.literal("verify"), ...fields, adaptations: z.array(condition).max(0), checks: z.array(condition).min(1).max(8) }),
+    z.strictObject({ disposition: z.null(), ...fields, adaptations: z.array(condition).max(0), checks: z.array(condition).max(0) }),
   ]);
 }
 const artifactWork = z.union(artifactWorkFor(assessmentClaim.shape.sourceRefs).options.map((option) => option.extend({ artifactId: id })));
@@ -136,20 +137,20 @@ export function assessmentDraftSchemaFor(request: string, sources: { caseId: str
     const scope = { caseId: z.literal(item.caseId), sourceRefs: z.array(z.enum(item.passageIds)).min(1).max(16) };
     return [
       globalAssessmentClaim.options[0].extend({ ...scope, requestQuotes }),
-      globalAssessmentClaim.options[1].extend({ ...scope, sourceRefs: scope.sourceRefs.length(1) }),
+      globalAssessmentClaim.options[1].extend({ ...scope, sourceRefs: z.array(scope.sourceRefs.element).length(1) }),
     ];
   });
   const rankedCaseFor = (source: typeof sources[number]) => {
     const sourceRefs = z.array(source.passageIds.length ? z.enum(source.passageIds) : id).min(1).max(16);
     const ownComparison = z.union(comparison.options.map((option) => option.extend({
       requirementQuote: option.shape.requirementQuote instanceof z.ZodNull ? option.shape.requirementQuote : requestQuotes.element,
-      evidence: comparisonFields.evidence.extend({ sourceRefs: sourceRefs.length(1), requestQuotes: z.array(requestQuotes.element).max(0) }),
+      evidence: comparisonFields.evidence.extend({ sourceRefs: z.array(sourceRefs.element).length(1), requestQuotes: z.array(requestQuotes.element).max(0) }),
       assessment: comparisonFields.assessment.extend({ sourceRefs, requestQuotes }),
       implication: comparisonFields.implication.extend({ artifactId: source.artifacts.length ? z.enum(source.artifacts.map((artifact) => artifact.artifactId)) : id }),
     })));
     const comparisons = z.array(ownComparison).max(source.passageIds.length ? 24 : 0);
     const reasons = z.array(artifactFact.extend({
-      sourceRefs: sourceRefs.length(1), kind: z.literal("source_fact"), requestQuotes: z.array(requestQuotes.element).max(0),
+      sourceRefs: z.array(sourceRefs.element).length(1), kind: z.literal("source_fact"), requestQuotes: z.array(requestQuotes.element).max(0),
     })).min(1).max(16);
     const caseFields = {
       outcome: caseDraft.shape.outcome,
@@ -196,7 +197,7 @@ export function assessmentDraftSchemaFor(request: string, sources: { caseId: str
         const item = cases[caseId];
         return item.tier === "contrast" ? [{
           caseId, state: item.state, reasonClaimIds: item.reasons.map((_, index) => `reason-${caseIndex}-${index}`),
-          usefulArtifactIds: artifacts.filter(({ artifactId }) => item.artifactWork[artifactId].usefulForLead).map(({ artifactId }) => artifactId),
+          usefulArtifactIds: artifacts.filter(({ artifactId }) => ["reuse", "adapt"].includes(item.artifactWork[artifactId].disposition ?? "")).map(({ artifactId }) => artifactId),
           comparisons: item.comparisons,
         }] : [];
       }),
@@ -212,29 +213,31 @@ export const briefDraftSchema = z.strictObject({
 
 export function briefDraftSchemaFor(request: string, selected: Selection[], corpus: CorpusSnapshot, assessment: {
   cases: { caseId: string; artifactWork: { artifactId: string; disposition: BriefDisposition | null }[] }[];
+  artifactReviews: AssessmentResult["artifactReviews"];
 }) {
   if (selected.length === 0) throw new Error("BRIEF_SELECTION_REQUIRED");
   const labels = assessmentPassageIds(corpus);
   const spans = requestSpans(request);
   const inventory = selected.map((item, itemIndex) => {
     const work = assessment.cases.find((candidate) => candidate.caseId === item.caseId)?.artifactWork.find((candidate) => candidate.artifactId === item.artifactId);
-    if (!work?.disposition) throw new Error("BRIEF_CHECKED_DECISION_REQUIRED");
+    const review = assessment.artifactReviews.find((candidate) => candidate.caseId === item.caseId && candidate.artifactId === item.artifactId);
+    if (!work?.disposition || review?.verdict !== "supported" || review.role !== "starting_point" || review.decision.disposition !== work.disposition) throw new Error("BRIEF_CHECKED_DECISION_REQUIRED");
     const refs = new Map([...corpus.passages.values()].filter((passage) =>
       passage.caseId === item.caseId && passage.artifactId === item.artifactId && passage.versionId === item.versionId,
     ).map((passage) => [labels.get(passage.passageId)!, {
       caseId: passage.caseId, artifactId: passage.artifactId, versionId: passage.versionId, passageId: passage.passageId,
     }]));
     if (!refs.size) throw new Error("BRIEF_SELECTED_EVIDENCE_UNAVAILABLE");
-    const authored = artifactAuthoredClaim.extend({
+    const authored = artifactAuthoredClaim.omit({ dependsOnClaimIds: true }).extend({
       sourceRefs: z.array(z.enum([...refs.keys()])).min(1).max(16),
       requestQuotes: z.array(requestQuoteIdentity(request)).max(1),
       text: z.string().min(1).max(3_499),
     });
-    const local = z.union([artifactFact.extend({ sourceRefs: authored.shape.sourceRefs.length(1) }), authored]);
+    const local = z.union([artifactFact.omit({ dependsOnClaimIds: true }).extend({ sourceRefs: z.array(authored.shape.sourceRefs.element).length(1) }), authored]);
     const schema = z.strictObject({
       disposition: z.literal(work.disposition),
       recommendation: authored.omit({ kind: true }),
-      claims: z.array(local).max(31),
+      claims: z.array(local).min(1).max(31),
     });
     return { key: `${item.caseId}/${item.artifactId}/${item.versionId}`, item, itemIndex, refs, schema };
   });
@@ -245,9 +248,25 @@ export function briefDraftSchemaFor(request: string, selected: Selection[], corp
     const entries = inventory.map(({ key, item, itemIndex, refs }) => {
       const decision = items[key];
       const dispositionClaimId = `brief-${itemIndex}-disposition`;
+      const evidence = new Map<string, string>();
+      decision.claims.forEach((value, index) => {
+        if (value.kind === "source_fact") evidence.set(value.sourceRefs[0], `brief-${itemIndex}-claim-${index}`);
+      });
       const inline = [{ ...decision.recommendation, kind: "recommendation" as const }, ...decision.claims];
       const claimIds = inline.map((value, index) => {
         const claimId = index === 0 ? dispositionClaimId : `brief-${itemIndex}-claim-${index - 1}`;
+        const dependsOnClaimIds = new Set<string>();
+        if (value.kind !== "source_fact") {
+          if (index > 0) dependsOnClaimIds.add(dispositionClaimId);
+          for (const label of value.sourceRefs) {
+            const evidenceId = evidence.get(label);
+            if (evidenceId) dependsOnClaimIds.add(evidenceId);
+            else ctx.addIssue({
+              code: "custom", path: ["items", key, index === 0 ? "recommendation" : "claims", ...(index === 0 ? [] : [index - 1]), "sourceRefs"],
+              message: "BRIEF_FACTUAL_EVIDENCE_REQUIRED",
+            });
+          }
+        }
         const sourceRefs = value.sourceRefs.map((label) => refs.get(label)!);
         const text = value.kind === "source_fact"
           ? sourceRefs.map((ref) => corpus.passages.get(ref.passageId)!.excerpt).join("\n")
@@ -258,7 +277,7 @@ export function briefDraftSchemaFor(request: string, selected: Selection[], corp
         }
         claims.push({
           ...value, claimId, text, sourceRefs,
-          dependsOnClaimIds: [...new Set([...value.dependsOnClaimIds, ...(index > 0 && value.kind !== "source_fact" ? [dispositionClaimId] : [])])],
+          dependsOnClaimIds: [...dependsOnClaimIds],
         });
         return claimId;
       });
@@ -294,20 +313,42 @@ export const briefSupportReviewSchema = supportReviewSchema.extend({
     requestQuotes: z.array(z.string().min(1).max(500)).max(64),
   })).max(32),
 });
-export const artifactReviewsSchema = z.array(z.strictObject({
-  caseId: id,
-  artifactId: id,
+const decisionCondition = z.strictObject({
+  text: z.string().min(1).max(600), sourceRefs: z.array(sourceRef).min(1).max(16), requestQuotes: claim.shape.requestQuotes,
+});
+const artifactDecision = z.strictObject({
+  disposition: z.enum(["reuse", "adapt", "verify"]).nullable(),
+  historicalEvidence: z.array(sourceRef).min(1).max(16),
+  requestQuotes: z.array(z.string().min(1).max(500)).max(64),
+  adaptations: z.array(decisionCondition).max(8),
+  checks: z.array(decisionCondition).max(8),
+});
+const decisionReason = z.strictObject({
+  target: z.enum(["history", "request_constraint", "adaptation", "check", "disposition"]),
+  explanation: z.string().min(1).max(600),
+  sourceRefs: z.array(sourceRef).min(1).max(16),
+  requestQuotes: claim.shape.requestQuotes,
+});
+const reviewFields = {
   role: z.enum(["starting_point", "context_only", "not_relevant", "unresolved"]),
+  verdict: z.enum(["supported", "unsupported", "uncertain"]),
+  reasons: z.array(decisionReason).max(8),
+};
+export const artifactReviewsSchema = z.array(z.strictObject({
+  caseId: id, artifactId: id, decision: artifactDecision, ...reviewFields,
 })).max(256);
 export const assessmentReviewSchema = z.strictObject({
   requestConstraints: requestConstraintsSchema,
-  artifactReviews: artifactReviewsSchema,
+  artifactReviews: z.array(z.strictObject({
+    caseId: id, artifactId: id, disposition: artifactDecision.shape.disposition, ...reviewFields,
+  })).max(256),
   claimReviews: supportReviewSchema.shape.claimReviews,
 });
 
 export interface ReviewTargets {
   claimIds: string[];
-  artifacts?: { caseId: string; artifactId: string }[];
+  artifacts?: { caseId: string; artifactId: string; disposition: BriefDisposition | null }[];
+  sourceRefs?: Record<string, z.infer<typeof sourceRef>>;
   selections?: Pick<Selection, "caseId" | "artifactId" | "versionId">[];
 }
 
@@ -326,12 +367,26 @@ export function reviewSchema(targets: ReviewTargets, request: string) {
       claimReviews: normalizeClaims(claimVerdicts),
     })).pipe(briefSupportReviewSchema);
   }
-  if (!targets.artifacts) throw new Error("REVIEW_TARGETS_REQUIRED");
+  if (!targets.artifacts || (targets.artifacts.length > 0 && (!targets.sourceRefs || !Object.keys(targets.sourceRefs).length))) throw new Error("REVIEW_TARGETS_REQUIRED");
+  const entries = targets.artifacts.map((item) => ({ item, key: `${item.caseId}/${item.artifactId}` }));
+  const reasons = z.array(decisionReason.extend({
+    sourceRefs: z.array(targets.sourceRefs && Object.keys(targets.sourceRefs).length ? z.enum(Object.keys(targets.sourceRefs)) : id).min(1).max(16)
+      .transform((labels) => labels.map((label) => targets.sourceRefs![label])),
+    requestQuotes: z.array(requestQuoteIdentity(request)).max(8),
+  })).max(8);
+  const decisions = z.strictObject(Object.fromEntries(entries.map(({ item, key }) => [key, z.union([
+    z.strictObject({ disposition: item.disposition === null ? z.null() : z.literal(item.disposition), role: reviewFields.role, verdict: z.literal("supported"), reasons: z.array(reasons.element).max(0) }),
+    z.strictObject({ disposition: item.disposition === null ? z.null() : z.literal(item.disposition), role: reviewFields.role, verdict: z.enum(["unsupported", "uncertain"]), reasons: z.array(reasons.element).min(1).max(8) }),
+  ])])));
   return z.strictObject({
     requestConstraints: requestInventoryFor(request),
-    artifactReviews: artifactReviewsSchema.length(targets.artifacts.length),
+    decisions,
     claimVerdicts,
-  }).transform(({ claimVerdicts, ...review }) => ({ ...review, claimReviews: normalizeClaims(claimVerdicts) })).pipe(assessmentReviewSchema);
+  }).transform(({ decisions, claimVerdicts, ...review }) => ({
+    ...review,
+    artifactReviews: entries.map(({ item, key }) => ({ caseId: item.caseId, artifactId: item.artifactId, ...decisions[key] })),
+    claimReviews: normalizeClaims(claimVerdicts),
+  })).pipe(assessmentReviewSchema);
 }
 
 export type AssessmentOutput = z.infer<typeof assessmentDraftSchema>;
@@ -342,6 +397,7 @@ type ArtifactWork = {
   claimIds: string[];
   blockerClaimIds: string[];
   verificationClaimIds: string[];
+  decision: ArtifactDecision;
 };
 export type AssessmentDraft = Omit<AssessmentOutput, "cases" | "leads" | "contrasts" | "claims"> & {
   cases: (Omit<AssessmentOutput["cases"][number], "artifactWork"> & { claimIds: string[]; outcomeClaimIds: string[]; artifactWork: ArtifactWork[] })[];
@@ -392,14 +448,14 @@ export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): As
     if (workIndex < 0) throw new Error("UNKNOWN_IMPLICATION_ARTIFACT");
     const work = output.cases[caseIndex].artifactWork[workIndex];
     const dispositionId = `disposition-${caseIndex}-${workIndex}`;
-    const decisionDependencies = implication.effect === "checked_decision" ? [dispositionId, `classification-${dispositionId}`] : [];
+    const decisionDependencies = implication.effect === "checked_decision" ? [dispositionId] : [];
     const implicationText = implication.effect === "checked_decision"
-      ? `Checked artifact decision: ${work.recommendation.text}`
+      ? `Checked artifact decision: ${work.disposition ?? "excluded"}; proposed changes and required checks are not established client capabilities.`
       : implication.effect === "context_only" ? "Context only; no implementation starting work is offered."
         : "Missing evidence must be obtained before a starting-work decision; no implementation starting work is offered.";
     claims.push(
       { ...assessment, text: `Recorded evidence has relation ${row.relation} to the current ${row.dimension} requirement; unestablished applicability remains unknown.`, sourceRefs: assessmentRefs, claimId: assessmentClaimId, kind: "interpretation", dependsOnClaimIds: [...new Set([...assessment.dependsOnClaimIds, evidenceClaimId, ...(requirementClaimId === null ? [] : [requirementClaimId])])] },
-      { text: implicationText, sourceRefs: resolveRefs(work.recommendation.sourceRefs), requestQuotes: work.recommendation.requestQuotes, claimId: implicationClaimId, kind: implication.effect === "checked_decision" ? "recommendation" : "interpretation", dependsOnClaimIds: [assessmentClaimId, ...decisionDependencies] },
+      { text: implicationText, sourceRefs: resolveRefs(work.historicalEvidence), requestQuotes: work.requestQuotes, claimId: implicationClaimId, kind: implication.effect === "checked_decision" ? "recommendation" : "interpretation", dependsOnClaimIds: [assessmentClaimId, ...decisionDependencies] },
     );
     return { ...row, artifactId: implication.artifactId, implicationEffect: implication.effect, evidenceClaimId, requirementClaimId, assessmentClaimId, implicationClaimId };
   });
@@ -432,48 +488,54 @@ export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): As
     outcomeClaimIds: outcomeClaimIdsByCase.get(item.caseId)!,
     artifactWork: item.artifactWork.map((work, workIndex) => {
       const dispositionClaimId = `disposition-${caseIndex}-${workIndex}`;
-      claims.push({ ...work.recommendation, text: work.disposition === null ? "This artifact is excluded; no implementation starting work is offered." : work.recommendation.text, sourceRefs: resolveRefs(work.recommendation.sourceRefs), claimId: dispositionClaimId, kind: work.disposition === null ? "interpretation" : "recommendation" });
-      const addClaims = (role: string, items: z.infer<typeof artifactClaim>[]): string[] => items.map((claim, index) => {
+      const historicalLabels = [...new Set(work.historicalEvidence)];
+      const historicalEvidence = resolveRefs(historicalLabels);
+      const evidenceIds = new Map(historicalLabels.map((label, index) => [label, `artifact-${caseIndex}-${workIndex}-history-${index}`]));
+      const decision: ArtifactDecision = {
+        disposition: work.disposition,
+        historicalEvidence,
+        requestQuotes: work.requestQuotes,
+        adaptations: work.adaptations.map((condition) => ({ ...condition, sourceRefs: resolveRefs(condition.sourceRefs) })),
+        checks: work.checks.map((condition) => ({ ...condition, sourceRefs: resolveRefs(condition.sourceRefs) })),
+      };
+      for (const [index, ref] of historicalEvidence.entries()) {
+        claims.push({ claimId: evidenceIds.get(historicalLabels[index])!, text: sourceText([ref]), kind: "source_fact", sourceRefs: [ref], requestQuotes: [], dependsOnClaimIds: [] });
+      }
+      const addConditions = (role: string, items: typeof work.checks): string[] => items.map((condition, index) => {
+        const evidence = condition.sourceRefs.map((label) => {
+          const claimId = evidenceIds.get(label);
+          if (!claimId) throw new Error("ARTIFACT_FACTUAL_EVIDENCE_REQUIRED");
+          return claimId;
+        });
         const claimId = `artifact-${caseIndex}-${workIndex}-${role}-${index}`;
-        const sourceRefs = resolveRefs(claim.sourceRefs);
         claims.push({
-          ...claim, sourceRefs, claimId, text: claim.kind === "source_fact" ? sourceText(sourceRefs) : claim.text,
-          dependsOnClaimIds: [...new Set([...claim.dependsOnClaimIds, ...(claim.kind === "source_fact" ? [] : [dispositionClaimId])])],
+          ...condition, claimId, kind: "recommendation", sourceRefs: resolveRefs(condition.sourceRefs),
+          text: `${role === "adapt" ? "Proposed adaptation" : "Required pre-use check"}: ${condition.text}${condition.requestQuotes.map((quote) => ` Current request: ${quote}`).join("")}`,
+          dependsOnClaimIds: [dispositionClaimId, ...evidence],
         });
         return claimId;
       });
-      const supportingClaimIds = addClaims("support", work.supportingClaims);
-      const blockerClaimIds = addClaims("blocker", work.blockerClaims);
-      const verificationClaimIds = addClaims("verify", work.verificationClaims);
-      const classificationId = `classification-${dispositionClaimId}`;
-      const claimIds = [dispositionClaimId, ...supportingClaimIds, ...blockerClaimIds, ...verificationClaimIds];
+      const adaptationClaimIds = addConditions("adapt", work.adaptations);
+      const verificationClaimIds = addConditions("check", work.checks);
       claims.push({
-        claimId: classificationId,
-        text: `Artifact disposition: ${work.disposition === null ? "excluded" : work.disposition}.`,
-        kind: "interpretation",
-        sourceRefs: resolveRefs(work.recommendation.sourceRefs),
-        requestQuotes: work.recommendation.requestQuotes,
-        // The classification is a server-generated label of the disposition
-        // recommendation alone. Depending on every supporting/blocker/
-        // verification claim made one peripheral withheld claim erase the
-        // independently reviewed disposition through dependency closure;
-        // those claims are reviewed and filtered individually instead.
-        dependsOnClaimIds: [dispositionClaimId],
+        claimId: dispositionClaimId,
+        text: work.disposition === null ? "This artifact is excluded; no implementation starting work is offered."
+          : `${work.disposition === "adapt" ? "Conditional Adapt" : work.disposition === "reuse" ? "Reuse" : "Verify"} starting material; proposed changes and required checks do not establish current-client capabilities, combined acceptance or production readiness.`,
+        kind: work.disposition === null ? "interpretation" : "recommendation",
+        sourceRefs: historicalEvidence, requestQuotes: work.requestQuotes,
+        dependsOnClaimIds: [...evidenceIds.values()],
       });
       return {
-        artifactId: work.artifactId,
-        disposition: work.disposition,
-        dispositionClaimId,
-        claimIds: [...claimIds, classificationId],
-        blockerClaimIds,
-        verificationClaimIds,
+        artifactId: work.artifactId, disposition: work.disposition, decision, dispositionClaimId,
+        claimIds: [dispositionClaimId, ...evidenceIds.values(), ...adaptationClaimIds, ...verificationClaimIds],
+        blockerClaimIds: [], verificationClaimIds,
       };
     }),
   }));
   const leads = output.leads.map(({ comparisons: _, ...lead }) => ({
     ...lead,
     usefulArtifactIds: output.cases.find((item) => item.caseId === lead.caseId)?.artifactWork
-      .filter((work) => work.usefulForLead).map((work) => work.artifactId) ?? [],
+      .filter((work) => work.disposition === "reuse" || work.disposition === "adapt").map((work) => work.artifactId) ?? [],
   }));
   const contrasts = output.contrasts.map(({ comparisons: _, ...contrast }) => contrast);
   const qualified = applySourceHistoryQualifications(corpus, claims);
@@ -487,7 +549,17 @@ export function openRouterSchema(name: string, schema: z.ZodType): {
   type: "json_schema";
   json_schema: { name: string; strict: true; schema: Record<string, unknown> };
 } {
-  const generated = z.toJSONSchema(schema, { target: "draft-7", io: "input", reused: "ref" }) as Record<string, unknown>;
+  // Draft 7 wraps constrained reused schemas in allOf, forbidden by strict outputs.
+  // Fresh cardinality-specific arrays above keep refs free of assertion siblings.
+  const generated = z.toJSONSchema(schema, {
+    target: "draft-2020-12", io: "input", reused: "ref",
+    override: ({ jsonSchema }) => {
+      if (jsonSchema.const !== undefined) {
+        jsonSchema.enum = [jsonSchema.const];
+        delete jsonSchema.const;
+      }
+    },
+  }) as Record<string, unknown>;
   delete generated.$schema;
   return { type: "json_schema", json_schema: { name, strict: true, schema: generated } };
 }

@@ -5,12 +5,17 @@ import type { IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import { once } from "node:events";
 import type { Env } from "./env.ts";
+import type { ArtifactReview, SupportVerdict } from "../shared/protocol.ts";
 import { callModel, ModelCallError, modelConfig } from "./model.ts";
 import { requestSpans } from "./request-constraints.ts";
-import { validateBriefDraft } from "./gates.ts";
+import { buildCheckedBrief, validateBriefDraft } from "./gates.ts";
 import { briefDraftSchemaFor } from "./schemas.ts";
 
-const checkedBriefDecisions = { cases: [{ caseId: "case-1", artifactWork: [{ artifactId: "art", disposition: "adapt" as const }] }] };
+const checkedReview = (artifactId: string): ArtifactReview => ({
+  caseId: "case-1", artifactId, role: "starting_point", verdict: "supported", reasons: [],
+  decision: { disposition: "adapt", historicalEvidence: [{ caseId: "case-1", artifactId, versionId: `${artifactId}-v1`, passageId: "p1" }], requestQuotes: [], adaptations: [], checks: [] },
+});
+const checkedBriefDecisions = { cases: [{ caseId: "case-1", artifactWork: [{ artifactId: "art", disposition: "adapt" as const }] }], artifactReviews: [checkedReview("art")] };
 
 test("an interrupted provider body keeps its generation ID and cannot be treated as a free failure", async () => {
   const originalFetch = globalThis.fetch;
@@ -391,8 +396,8 @@ test("provider output selects a request identity whose original quotation remain
   const wire = (text: string) => JSON.stringify({
     items: { "case-1/art/art-v1": {
       disposition: "adapt",
-      recommendation: { text, sourceRefs: ["e1"], requestQuotes: [requestSpans(request)[0].spanId], dependsOnClaimIds: [] },
-      claims: [],
+      recommendation: { text, sourceRefs: ["e1"], requestQuotes: [requestSpans(request)[0].spanId] },
+      claims: [{ kind: "source_fact", sourceRefs: ["e1"], requestQuotes: [] }],
     } },
   });
   const originalFetch = globalThis.fetch;
@@ -503,39 +508,95 @@ test("provider redirects are rejected without forwarding the request or retrying
   }
 });
 
-test("brief containment derives membership and never repairs missing dependencies", async () => {
+test("brief parsing derives factual dependencies and rejects model-authored graph structure", () => {
   const request = "Check the target window first.";
-  const corpus = {
-    manifest: { schemaVersion: 2, corpusVersion: "test", cases: [{
-      caseId: "case-1", title: "Case", fictional: true, records: [],
-      artifacts: [{ artifactId: "art", title: "Art", fictional: true, versions: [{
-        versionId: "art-v1", sourcePath: "corpora/test/originals/x", mimeType: "text/plain", sha256: "x",
+  const artifacts = ["art", "other-art"].map((artifactId, index) => {
+    const versionId = `${artifactId}-v1`;
+    const passageId = `p${index + 1}`;
+    return {
+      artifactId, title: artifactId, fictional: true,
+      versions: [{
+        versionId, sourcePath: `corpora/test/originals/${artifactId}`, mimeType: "text/plain", sha256: "x",
         statedDate: null, importedAt: "2026-01-01", extractionStatus: "complete", exclusionReasons: [],
-        passages: [{ passageId: "p1", excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }],
-      }] }],
-    }] },
-    manifestSha256: "x", availableVersions: new Set(["art-v1"]), caseAvailability: new Map(),
-    passages: new Map([["p1", { caseId: "case-1", artifactId: "art", versionId: "art-v1", passageId: "p1", title: "Art", fictional: true, statedDate: null, excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }]]),
+        passages: [{ passageId, excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }],
+      }],
+    };
+  });
+  const corpus = {
+    manifest: { schemaVersion: 2, corpusVersion: "test", cases: [{ caseId: "case-1", title: "Case", fictional: true, records: [], artifacts }] },
+    manifestSha256: "x",
+    availableVersions: new Set(artifacts.map((artifact) => artifact.versions[0].versionId)),
+    caseAvailability: new Map(),
+    passages: new Map(artifacts.map((artifact, index) => {
+      const passage = artifact.versions[0].passages[0];
+      return [passage.passageId, {
+        caseId: "case-1", artifactId: artifact.artifactId, versionId: artifact.versions[0].versionId,
+        passageId: passage.passageId, title: artifact.title, fictional: true, statedDate: null,
+        excerpt: passage.excerpt, sourceKind: passage.sourceKind, location: passage.location,
+      }];
+    })),
     versions: new Map(),
   } as never;
-  const selected = [{ caseId: "case-1", artifactId: "art", versionId: "art-v1", passageIds: ["p1"] }];
-  const schema = briefDraftSchemaFor(request, selected, corpus, checkedBriefDecisions);
-  const wire = {
-    items: { "case-1/art/art-v1": {
-      disposition: "adapt",
-      recommendation: { text: "Adapt after the required check.", sourceRefs: ["e1"], requestQuotes: [requestSpans(request)[0].spanId], dependsOnClaimIds: [] as string[] },
-      claims: [{ kind: "source_fact", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] }],
-    } },
-  };
+  const selected = artifacts.map((artifact) => ({
+    caseId: "case-1", artifactId: artifact.artifactId, versionId: artifact.versions[0].versionId,
+    passageIds: [artifact.versions[0].passages[0].passageId],
+  }));
+  const keys = selected.map((item) => `${item.caseId}/${item.artifactId}/${item.versionId}`);
+  const schema = briefDraftSchemaFor(request, selected, corpus, {
+    cases: [{ caseId: "case-1", artifactWork: artifacts.map(({ artifactId }) => ({ artifactId, disposition: "adapt" as const })) }],
+    artifactReviews: artifacts.map(({ artifactId }) => checkedReview(artifactId)),
+  });
+  const inlineItem = (label: string) => ({
+    disposition: "adapt",
+    recommendation: { text: "Adapt after checking the target window.", sourceRefs: [label], requestQuotes: [] },
+    claims: [
+      { kind: "source_fact", sourceRefs: [label], requestQuotes: [] },
+      { kind: "recommendation", text: "Check the target window before use.", sourceRefs: [label], requestQuotes: [] },
+    ],
+  });
+  const wire = { items: Object.fromEntries(keys.map((key, index) => [key, inlineItem(index === 0 ? "e1" : "e2")])) };
   const parsed = schema.parse(wire);
-  assert.deepEqual(parsed.adapt[0].claimIds, ["brief-0-disposition", "brief-0-claim-0"]);
+  assert.deepEqual(parsed.adapt.map((item) => item.claimIds), [
+    ["brief-0-disposition", "brief-0-claim-0", "brief-0-claim-1"],
+    ["brief-1-disposition", "brief-1-claim-0", "brief-1-claim-1"],
+  ]);
+  assert.equal(parsed.claims.length, 6);
+  const byId = new Map(parsed.claims.map((claim) => [claim.claimId, claim]));
+  assert.deepEqual(byId.get("brief-0-claim-0")!.dependsOnClaimIds, []);
+  assert.deepEqual(byId.get("brief-0-disposition")!.dependsOnClaimIds, ["brief-0-claim-0"]);
+  assert.deepEqual(byId.get("brief-0-claim-1")!.dependsOnClaimIds, ["brief-0-disposition", "brief-0-claim-0"]);
   assert.equal(validateBriefDraft(parsed, request, selected, corpus).size, 0);
-  wire.items["case-1/art/art-v1"].recommendation.dependsOnClaimIds = ["m-scale"];
-  const dangling = schema.parse(wire);
-  assert.deepEqual(dangling.claims[0].dependsOnClaimIds, ["m-scale"]);
-  assert.throws(() => validateBriefDraft(dangling, request, selected, corpus), /dependency is missing/);
-  assert.equal(schema.safeParse({ ...wire, claims: [] }).success, false);
-  assert.equal(schema.safeParse({ items: { "case-1/art/art-v1": { ...wire.items["case-1/art/art-v1"], claimIds: ["m-scale"] } } }).success, false);
+
+  const missingFact = structuredClone(wire);
+  missingFact.items[keys[0]].claims.shift();
+  const missingEvidence = schema.safeParse(missingFact);
+  assert.equal(missingEvidence.success, false, "Authored evidence selections need an inline source fact.");
+  if (!missingEvidence.success) assert.ok(missingEvidence.error.issues.some((issue) => issue.message === "BRIEF_FACTUAL_EVIDENCE_REQUIRED"));
+  const foreignItemRef = structuredClone(wire);
+  foreignItemRef.items[keys[0]].claims[0].sourceRefs = ["e2"];
+  assert.equal(schema.safeParse(foreignItemRef).success, false, "An item's evidence selection cannot point into another selected item.");
+
+  const forbiddenDependencies = [
+    (() => { const value = structuredClone(wire); Object.assign(value.items[keys[0]].recommendation, { dependsOnClaimIds: [] }); return value; })(),
+    (() => { const value = structuredClone(wire); Object.assign(value.items[keys[0]].claims[0], { dependsOnClaimIds: ["brief-0-disposition"] }); return value; })(),
+    (() => { const value = structuredClone(wire); Object.assign(value.items[keys[0]].claims[1], { dependsOnClaimIds: ["brief-0-claim-0"] }); return value; })(),
+  ];
+  for (const value of forbiddenDependencies) assert.equal(schema.safeParse(value).success, false, "Brief dependency edges are server-derived.");
+  assert.equal(schema.safeParse({ ...wire, claims: [] }).success, false, "The old global claims list is forbidden.");
+  const legacyMembership = structuredClone(wire);
+  Object.assign(legacyMembership.items[keys[0]], { dispositionClaimId: "model-id", claimIds: ["model-id"] });
+  assert.equal(schema.safeParse(legacyMembership).success, false, "The old item membership/identity fields are forbidden.");
+
+  const verdicts = new Map<string, SupportVerdict>(parsed.claims.map((claim) => [claim.claimId, "supported"]));
+  verdicts.set("brief-0-claim-0", "unsupported");
+  const checked = buildCheckedBrief(parsed, verdicts, validateBriefDraft(parsed, request, selected, corpus), {
+    request,
+    constraintReviews: selected.map(({ caseId, artifactId, versionId }) => ({ caseId, artifactId, versionId, requestQuotes: [] })),
+  });
+  assert.deepEqual(checked.adapt.map((item) => item.artifactId), ["other-art"]);
+  assert.deepEqual(checked.claims.map((claim) => claim.claimId), [
+    "brief-1-disposition", "brief-1-claim-0", "brief-1-claim-1",
+  ]);
 });
 
 test("brief wire format composes a declared quotation verbatim instead of requiring retyped prose", async () => {
@@ -555,20 +616,19 @@ test("brief wire format composes a declared quotation verbatim instead of requir
   } as never;
   const selected = [{ caseId: "case-1", artifactId: "art", versionId: "art-v1", passageIds: ["p1"] }];
   const schema = briefDraftSchemaFor(request, selected, corpus, checkedBriefDecisions);
-  const draft = (claims: { kind: string; text: string; sourceRefs: string[]; requestQuotes: string[]; dependsOnClaimIds: string[] }[]) => ({
+  const draft = (claims: { kind: string; text: string; sourceRefs: string[]; requestQuotes: string[] }[]) => ({
     items: { "case-1/art/art-v1": {
       disposition: "adapt", recommendation: {
         text: claims[0].text, sourceRefs: claims[0].sourceRefs,
         requestQuotes: claims[0].requestQuotes.map((quote) => requestSpans(request).find((span) => span.text === quote)!.spanId),
-        dependsOnClaimIds: claims[0].dependsOnClaimIds,
       }, claims: claims.slice(1).map(({ text, ...claim }) => claim.kind === "source_fact" ? claim : { ...claim, text }),
     } },
   });
   // The claim declares its sentence exactly but states only the check in
   // prose: the declared sentence is composed verbatim into the stored text.
   const parsed = schema.parse(draft([
-    { kind: "recommendation", text: "Adapt only after confirming the window with the client.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."], dependsOnClaimIds: [] },
-    { kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] },
+    { kind: "recommendation", text: "Adapt only after confirming the window with the client.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."] },
+    { kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [] },
   ]));
   assert.ok(parsed.adapt[0].claimIds.includes("brief-0-disposition"));
   const composed = parsed.claims.find((claim) => claim.claimId === "brief-0-disposition")!;
@@ -578,7 +638,7 @@ test("brief wire format composes a declared quotation verbatim instead of requir
   // Prose carrying a different complete request sentence than the declared
   // one is still rejected at parse time; composition never repairs that.
   assert.throws(() => schema.parse(draft([
-    { kind: "recommendation", text: "Preserve the audit trail after cutover. Then adapt.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."], dependsOnClaimIds: [] },
-    { kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] },
+    { kind: "recommendation", text: "Preserve the audit trail after cutover. Then adapt.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."] },
+    { kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [] },
   ])));
 });

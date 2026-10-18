@@ -179,7 +179,7 @@ export class MemoryBankWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> 
         await setStage(this.env, params, "support_review");
         const reviewAttemptId = await paidStep(this.env, params, step, "assessment-support-review", 2, "assessment_review", reviewPrompt);
         const review = assessmentReviewSchema.parse(await loadStageOutput(this.env, reviewAttemptId));
-        const verdicts = validateSupportReview(draft.claims, review);
+        const verdicts = validateSupportReview(draft.claims.filter((claim) => reviewPrompt.reviewTargets!.claimIds.includes(claim.claimId)), review);
         const artifactRoles = validateArtifactReview(draft, review);
         const checked = buildCheckedAssessment(draft, verdicts, invalidRefs, corpus, artifactRoles, { request, constraints: review.requestConstraints });
         await finishPhase(this.env, params, checked);

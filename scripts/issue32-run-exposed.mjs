@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import * as z from 'zod';
 import {
-  EXPOSED_REQUEST_ORDER, buildExposedCampaign, parseFixedCampaign, parseRuntimeProfile,
+  EXPOSED_REQUEST_ORDER, buildExposedCampaign, exposedCreditBasisSchema, exposedCreditPlan, parseFixedCampaign, parseRuntimeProfile,
   selectionsMatch, verifyRunCapture, writeImmutableCapture,
 } from '../src/server/campaign-protocol.ts';
 
@@ -82,6 +82,7 @@ const authorizationSchema = z.strictObject({
   requestOrder: z.array(z.enum(EXPOSED_REQUEST_ORDER)),
   approvedMaxCalls: z.literal(12),
   approvedMaxUsd: z.literal(1),
+  creditBasis: exposedCreditBasisSchema,
   noAutomaticRetry: z.literal(true),
 });
 
@@ -379,6 +380,7 @@ async function runPaid(options) {
       authorizationId: authorization.authorization.authorizationId,
       approvedMaxCalls: 12,
       approvedMaxUsd: 1,
+      creditBasis: authorization.authorization.creditBasis,
       requestOrder: [...EXPOSED_REQUEST_ORDER],
       startedAt: new Date().toISOString(),
       providerCalls: 0,
@@ -551,16 +553,11 @@ async function runPaid(options) {
     assert.equal(creditResponse.status, 200);
     const credit = (await creditResponse.json()).data;
     const remainingMicroUsd = Math.floor((credit.total_credits - credit.total_usage) * 1_000_000);
-    const availableRisk = remainingMicroUsd - before.campaign.heldMicroUsd;
-    assert.ok(availableRisk >= 1_000_000, 'Insufficient unreserved provider credit for approved campaign');
-    cappedCredit = Math.min(
-      before.campaign.availableCreditMicroUsd,
-      before.campaign.reconciledSpendMicroUsd + before.campaign.heldMicroUsd + 1_000_000,
-    );
-    assert.ok(cappedCredit - before.campaign.reconciledSpendMicroUsd - before.campaign.heldMicroUsd >= 600_000);
+    const creditPlan = exposedCreditPlan(remainingMicroUsd, before.campaign, authorization.authorization.creditBasis);
+    cappedCredit = creditPlan.cappedCreditMicroUsd;
     await writeImmutableCapture(out, 'credit-preflight.json', {
-      remainingMicroUsd, oldHeldMicroUsd: before.campaign.heldMicroUsd, availableRiskMicroUsd: availableRisk,
-      cappedCreditMicroUsd: cappedCredit, purchase: false,
+      remainingMicroUsd, oldHeldMicroUsd: before.campaign.heldMicroUsd,
+      ...creditPlan, purchase: false, holdsReleased: false,
     });
 
     const getJob = async (receipt) => api(`/api/jobs/${receipt.jobId}`, { headers: { Authorization: `Bearer ${receipt.capability}` } });

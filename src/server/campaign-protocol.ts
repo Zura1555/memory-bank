@@ -8,6 +8,26 @@ export const EXPOSED_REQUEST_ORDER = ["g2", "g3", "g4"] as const;
 type ExposedRequestId = typeof EXPOSED_REQUEST_ORDER[number];
 type JsonPrimitive = string | number | boolean | null;
 
+export const exposedCreditBasisSchema = z.enum(["unreserved", "owner-accepted-hold-overlap"]);
+
+export function exposedCreditPlan(remainingMicroUsd: number, budget: {
+  heldMicroUsd: number; reconciledSpendMicroUsd: number; availableCreditMicroUsd: number; limitMicroUsd: number;
+}, creditBasis: z.infer<typeof exposedCreditBasisSchema>) {
+  const overlapApproved = exposedCreditBasisSchema.parse(creditBasis) === "owner-accepted-hold-overlap";
+  const unreservedMicroUsd = remainingMicroUsd - budget.heldMicroUsd;
+  const spendableMicroUsd = overlapApproved ? remainingMicroUsd : unreservedMicroUsd;
+  if (!Number.isSafeInteger(remainingMicroUsd) || spendableMicroUsd < 1_000_000) {
+    throw new Error("Insufficient provider credit for approved campaign credit basis");
+  }
+  const runCeiling = budget.reconciledSpendMicroUsd + budget.heldMicroUsd + 1_000_000;
+  const cappedCreditMicroUsd = Math.min(budget.limitMicroUsd,
+    overlapApproved ? runCeiling : Math.min(budget.availableCreditMicroUsd, runCeiling));
+  if (cappedCreditMicroUsd - budget.reconciledSpendMicroUsd - budget.heldMicroUsd < 600_000) {
+    throw new Error("Insufficient campaign headroom for a phase reservation");
+  }
+  return { creditBasis, unreservedMicroUsd, spendableMicroUsd, cappedCreditMicroUsd };
+}
+
 export interface Criterion {
   criterionId: string;
   expected: JsonPrimitive | JsonPrimitive[];

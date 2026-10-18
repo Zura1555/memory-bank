@@ -8,12 +8,31 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { AssessmentResult, Claim, Selection } from "../shared/protocol.ts";
 import {
-  EXPOSED_REQUEST_ORDER, buildExposedCampaign, deriveHGate, gradeCampaign,
+  EXPOSED_REQUEST_ORDER, buildExposedCampaign, deriveHGate, exposedCreditPlan, gradeCampaign,
   selectionsMatch, verifyRunCapture, writeImmutableCapture,
 } from "./campaign-protocol.ts";
 import type { CandidateBinding, FixedCampaign, VerifiedRunCapture } from "./campaign-protocol.ts";
 import { validateSelections } from "./selections.ts";
 import type { Artifact, CorpusSnapshot, IndexedPassage, PastCase, SourceVersion } from "./corpus.ts";
+
+test("credit overlap requires explicit owner approval, preserves holds and never exceeds the run or campaign ceiling", () => {
+  const budget = { heldMicroUsd: 1_800_000, reconciledSpendMicroUsd: 1_875_662, availableCreditMicroUsd: 4_319_578, limitMicroUsd: 5_000_000 };
+  const original = structuredClone(budget);
+  assert.throws(() => exposedCreditPlan(2_420_916, budget, "unreserved"), /Insufficient provider credit/);
+  assert.throws(() => exposedCreditPlan(2_420_916, budget, undefined as never));
+  const approved = exposedCreditPlan(2_420_916, budget, "owner-accepted-hold-overlap");
+  assert.equal(approved.unreservedMicroUsd, 620_916);
+  assert.equal(approved.spendableMicroUsd, 2_420_916);
+  assert.equal(approved.cappedCreditMicroUsd - budget.reconciledSpendMicroUsd - budget.heldMicroUsd, 1_000_000);
+  assert.ok(approved.cappedCreditMicroUsd <= budget.limitMicroUsd);
+  assert.deepEqual(budget, original, "Accepting overlap is not a release or reconciliation of old reservations.");
+  const unreserved = exposedCreditPlan(3_000_000, budget, "unreserved");
+  assert.equal(unreserved.cappedCreditMicroUsd, budget.availableCreditMicroUsd);
+  for (const remaining of [999_999, NaN, Infinity]) {
+    assert.throws(() => exposedCreditPlan(remaining, budget, "owner-accepted-hold-overlap"), /Insufficient provider credit/);
+  }
+  assert.throws(() => exposedCreditPlan(2_420_916, { ...budget, limitMicroUsd: 4_000_000 }, "owner-accepted-hold-overlap"), /Insufficient campaign headroom/);
+});
 
 const selection = (caseId: string, artifactId: string, versionId: string, passageIds: string[]): Selection => ({
   caseId, artifactId, versionId, passageIds,
@@ -175,22 +194,18 @@ function selectionFixture(role: "starting_point" | "context_only" | "not_relevan
     claimId: "decision", text: "Adapt this checked source.", kind: "recommendation",
     sourceRefs: [{ caseId, artifactId, versionId: "source-v1", passageId: "p-cited" }], requestQuotes: [], dependsOnClaimIds: [],
   };
-  const classificationClaim: Claim = {
-    claimId: "classification-decision", text: "Artifact disposition: adapt.", kind: "interpretation",
-    sourceRefs: dispositionClaim.sourceRefs, requestQuotes: [], dependsOnClaimIds: ["decision"],
-  };
   const assessment: AssessmentResult = {
     conclusion: "precedent_found", clarifyingClaimIds: [], comparisons: [],
     requestConstraints: { product_version: [], environment: [], scale: [], identity_access: [], recovery_operations: [] },
-    artifactReviews: [{ caseId, artifactId, role }], nextActions: [],
+    artifactReviews: [{ caseId, artifactId, role, verdict: "supported", reasons: [], decision: { disposition: "adapt", historicalEvidence: dispositionClaim.sourceRefs, requestQuotes: [], adaptations: [], checks: [] } }], nextActions: [],
     cases: [{
       caseId, availability: "available", outcome: "unknown", outcomeClaimIds: [], claimIds: ["decision"],
       artifactWork: [{
         artifactId, availability: "available", exclusionReasons: [], disposition: "adapt", dispositionClaimId: "decision",
-        claimIds: ["decision", "classification-decision"], blockerClaimIds: [], verificationClaimIds: [],
+        claimIds: ["decision"], blockerClaimIds: [], verificationClaimIds: [],
       }],
     }],
-    leads: [], contrasts: [], claims: [dispositionClaim, classificationClaim], withheldClaimCount: 0,
+    leads: [], contrasts: [], claims: [dispositionClaim], withheldClaimCount: 0,
   };
   return { caseId, artifactId, assessment, corpus };
 }
