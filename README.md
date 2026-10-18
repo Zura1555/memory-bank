@@ -257,7 +257,7 @@ After integrating the workspace shell, Chromium also verified that leaving Ask c
 
 ### Evidence inspector
 
-The evidence inspector uses Base UI Dialog with the existing CSS tokens, including dark mode. Escape, the close button, or an outside press dismiss it; focus returns to the invoking inspection control. Each selected source reference mounts fresh passage state, aborting retrieval on close or replacement so a late response cannot overwrite another passage. Validation and exact-original downloads still use the existing evidence endpoints.
+The evidence inspector uses Base UI Dialog with the shared light-theme CSS tokens. Escape, the close button, or an outside press dismiss it; focus returns to the invoking inspection control. Each selected source reference mounts fresh passage state, aborting retrieval on close or replacement so a late response cannot overwrite another passage. Validation and exact-original downloads still use the existing evidence endpoints.
 
 The dialog always identifies the **requested** case, artifact, retained version, and passage, including loading/failure states; this is not a claim that retrieval succeeded. Only a response matching all four identities can display an excerpt or an original-download link. Source-kind labels distinguish native text, audited OCR transcription, audited visual observation, and audited visual interpretation; observations/interpretations are never relabelled as native text or generated summaries. Sources cards explicitly label each retained version rather than implying “latest.”
 
@@ -265,7 +265,7 @@ The dialog always identifies the **requested** case, artifact, retained version,
 
 The document-first hierarchy, muted provenance, neutral dismissal, and separated header follow public Anduin [document review](https://support.anduintransact.com/en_US/investor-data-management/review-submitted-requests) and [source-linked review](https://developers.anduintransact.com/docs/handling-digital-vs-ocr-processed-subscriptions) references. These are observed product patterns, not access to Anduin's private design tokens; no second theme is introduced.
 
-For a browser regression smoke, open checked passages from both checked examples and selected work. Verify Tab/Shift+Tab containment, visible focus, Escape/close focus return, loading, failed and mismatched-source responses, and closing/reopening another passage while retrieval is delayed. Check exact-original bytes against the retained source, then inspect 320px-wide and dark-mode layouts. Replaying an existing checked assessment avoids new paid model calls; it does not qualify the AI workflow.
+For a browser regression smoke, open checked passages from both checked examples and selected work. Verify Tab/Shift+Tab containment, visible focus, Escape/close focus return, loading, failed and mismatched-source responses, and closing/reopening another passage while retrieval is delayed. Check exact-original bytes against the retained source, then inspect 320px-wide layouts under both system color preferences; the app must remain light. Replaying an existing checked assessment avoids new paid model calls; it does not qualify the AI workflow.
 
 ### Evidence-linked starter packs
 
@@ -281,15 +281,15 @@ Observed local verification (2026-10-15): the existing checked Cedar mapping bri
 
 ### Retained-version picker
 
-Selected work uses Base UI Select for artifacts with multiple checked retained versions. The picker follows the work draft; changing versions clears passage selections. Checkboxes and textareas remain native, and the picker uses the shared CSS tokens in light and dark mode.
+Selected work uses Base UI Select for artifacts with multiple checked retained versions. The picker follows the work draft; changing versions clears passage selections. Checkboxes and textareas remain native, and the picker uses the shared light-theme CSS tokens.
 
-For a browser smoke, choose a multi-version artifact, select a passage, and switch versions by pointer and by keyboard (Arrow keys/Home/End, then Enter). Confirm the previous passages are cleared, the brief action stays disabled until a new passage is selected, and the submitted brief contains only the chosen version and its passages. Verify the “Retained version” label, announced selected value, visible keyboard focus, Escape dismissal/focus return, draft persistence after going back to checked examples, and open/closed layouts at 320px and in dark mode. Browser-only assessment fixtures exercise the UI without paid calls; they do not qualify the model or Worker workflow.
+For a browser smoke, choose a multi-version artifact, select a passage, and switch versions by pointer and by keyboard (Arrow keys/Home/End, then Enter). Confirm the previous passages are cleared, the brief action stays disabled until a new passage is selected, and the submitted brief contains only the chosen version and its passages. Verify the “Retained version” label, announced selected value, visible keyboard focus, Escape dismissal/focus return, draft persistence after going back to checked examples, and open/closed layouts at 320px under a dark system preference (the app remains light). Browser-only assessment fixtures exercise the UI without paid calls; they do not qualify the model or Worker workflow.
 
 ### Shared Anduin colors
 
 `web/styles.css` owns the app’s shared design tokens: semantic colors, spacing, type sizes, radii, motion, shadows, and focus/selection rings. Components consume CSS variables directly; the SVG chart shares its color roles with the legend. Repeated scale values preserve the existing layout; one-off geometry and breakpoints remain local.
 
-The light theme retains Anduin-inspired blue `#0158AE` and navy `#162950`, with app-derived surfaces and contrast-safe text/control boundaries. `prefers-color-scheme: dark` overrides the same semantic roles automatically, including native form controls, dialogs, pickers, source status, and evidence surfaces. Success/warning/error/unknown remain distinct and visibly labelled. Reduced-motion preference shortens transitions; no theme toggle, token generator, or new dependency is introduced.
+The app always uses its light palette: white surfaces, the incumbent pale page background, Anduin-inspired blue `#0158AE` and navy `#162950`, and contrast-safe text/control boundaries. System dark-mode preferences do not change the app, including native form controls, dialogs, pickers, source status, and evidence surfaces. Success/warning/error/unknown remain distinct and visibly labelled. Reduced-motion preference shortens transitions; no theme toggle, token generator, or new dependency is introduced.
 
 See the [current token contract, public-source observations, measured contrast pairs, and dated browser evidence](docs/anduin-palette-2026-10-15.md). This is website-matched branding, not a claim of access to private product tokens. Browser replay proof is separate from paid workflow qualification.
 
