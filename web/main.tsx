@@ -6,6 +6,9 @@ import { Button } from "@base-ui/react/button";
 import { Field } from "@base-ui/react/field";
 import { Input } from "@base-ui/react/input";
 import { Collapsible } from "@base-ui/react/collapsible";
+import { Popover } from "@base-ui/react/popover";
+import { Tabs } from "@base-ui/react/tabs";
+import { WorkflowDrawer } from "./workflow-drawer";
 import { AppShell } from "./shell";
 import type {
   ArtifactAssessment,
@@ -1185,12 +1188,54 @@ function EvidenceWorkspace({ sourceRef, onInspect, children }: {
 
 const stepNames = ["Client request", "Checked examples", "Selected work", "Checked brief"];
 
+const assessmentSteps = [
+  ["assembling", "Assembling source evidence"],
+  ["drafting", "Drafting comparisons — not yet checked"],
+  ["reference_check", "Checking source references"],
+  ["support_review", "Independent support review"],
+] as const;
+
+function AssessmentProgress({ stage }: { stage?: JobStage }) {
+  const current = assessmentSteps.findIndex(([key]) => key === stage);
+  return <ol className="assessment-progress" aria-label="Evidence check stages">{assessmentSteps.map(([key, title], index) => (
+    <li key={key} aria-current={current === index ? "step" : undefined} data-complete={index < current || undefined}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+        {index < current ? <path d="m5 12 4 4 10-10" /> : <circle cx="12" cy="12" r={current === index ? 6 : 8} fill={current === index ? "currentColor" : "none"} />}
+      </svg>{title}
+    </li>
+  ))}</ol>;
+}
+
 // Authored from public fictional corpus requests, never held-out evaluation requests.
 const suggestedRequests: { title: string; basis: string; focus: string; tone: AvatarTone; request: string }[] = [
   { title: "Plan a sandbox CSV import", basis: "Cedar Supply", focus: "CSV mapping & reconciliation", tone: "blue", request: "Plan a sandbox import of active supplier records from a UTF-8 CSV. Preserve source keys and reconcile accepted, rejected, and duplicate rows. What past mapping and reconciliation work could help, and what must we verify for a new target? No production writes are authorized." },
   { title: "Scope temporary support access", basis: "Grove Clinic", focus: "Read-only access & MFA log", tone: "sky", request: "Two external support engineers need temporary read-only access to import errors in a test workspace. Require named accounts, MFA, expiry, and an access log; exclude patient charts and configuration changes. Find useful prior access work and identify unverified lifecycle or audit controls." },
   { title: "Prepare an operator handover", basis: "Ibis Foods", focus: "Runbook & recovery drill", tone: "amber", request: "Prepare a test-environment handover of a nightly inventory import to a primary and backup operator. We need a runbook, escalation contact, recovery procedure, and witnessed recovery exercise. Which past work is useful, and which acceptance gaps remain? Production scheduling is out of scope." },
 ];
+
+function SuggestionList({ suggestions, onChoose }: { suggestions: typeof suggestedRequests; onChoose: (request: string) => void }) {
+  return <div className="suggestion-list">{suggestions.map((suggestion) => <Button key={suggestion.title} type="button" className="suggestion-row" onClick={() => onChoose(suggestion.request)}>
+    <AvatarCircle name={suggestion.basis} tone={suggestion.tone} />
+    <span className="suggestion-copy"><strong>{suggestion.title}</strong><span>{suggestion.basis}</span><span>{suggestion.focus}</span></span>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+  </Button>)}</div>;
+}
+
+function TemplatePicker({ onChoose }: { onChoose: (request: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const applied = useRef(false);
+  const matches = suggestedRequests.filter((item) => `${item.title} ${item.basis} ${item.focus}`.toLowerCase().includes(query.trim().toLowerCase()));
+  return <WorkflowDrawer open={open} onOpenChange={(next) => { if (next) applied.current = false; setOpen(next); }}
+    trigger={<Button type="button" className="text-button">Use a template</Button>}
+    title="Use a template" description="Choose a fictional scenario, then edit it for your client. Nothing is submitted automatically."
+    finalFocus={() => applied.current ? document.getElementById("client-request") : true}>
+    <label className="field-label" htmlFor="template-search">Search templates</label>
+    <Input id="template-search" className="source-search" value={query} onValueChange={setQuery} placeholder="Search scenarios, clients, or focus…" />
+    <SuggestionList suggestions={matches} onChoose={(value) => { applied.current = true; onChoose(value); setOpen(false); }} />
+    {matches.length === 0 && <div className="empty-state"><p>No templates match “{query}”.</p><Button type="button" className="secondary-button" onClick={() => setQuery("")}>Clear search</Button></div>}
+  </WorkflowDrawer>;
+}
 
 function App({ active }: { active: boolean }) {
   const [step, setStep] = useState(1);
@@ -1223,6 +1268,7 @@ function App({ active }: { active: boolean }) {
   const [submittingBrief, setSubmittingBrief] = useState(false);
   const [localData, setLocalData] = useState(readBrowserJobs);
   const [library, setLibrary] = useState<"History" | "Saved">("History");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const sessionGeneration = useRef(0);
   const requestSubmissionId = useRef(0);
   const requestController = useRef<AbortController | null>(null);
@@ -1299,7 +1345,7 @@ function App({ active }: { active: boolean }) {
       document.removeEventListener("visibilitychange", expire);
     };
   }, [session]);
-  useEffect(() => { if (!active) setPassageRef(null); }, [active]);
+  useEffect(() => { if (!active) { setPassageRef(null); setHistoryOpen(false); } }, [active]);
 
   useEffect(() => {
     if (!previousJob) return;
@@ -1639,23 +1685,16 @@ function App({ active }: { active: boolean }) {
       <section className="workflow" aria-labelledby="workflow-title">
         <div className="intro-toolbar">
           <div className="intro">
-            <p className="eyebrow">Ask Memory Bank · Fictional Evidence</p>
+            <Badge tone="fictional">Fictional examples only</Badge>
             <h1 id="workflow-title">What can past work help you deliver?</h1>
-            <span className="title-accent-bar" aria-hidden="true" />
             <p>Match client constraints against verified past examples and assemble an evidence-grounded reuse brief.</p>
           </div>
-          {(session || previousJob || step > 1) && <div className="workflow-actions"><Button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</Button></div>}
-        </div>
-        <details className="local-library">
-          <summary>
-            <span>History and Saved</span>
-            <Badge>{`${localData.entries.length}`}</Badge>
-          </summary>
+          <div className="workflow-actions">
+            <WorkflowDrawer open={historyOpen && active} onOpenChange={setHistoryOpen}
+              trigger={<Button className="secondary-button" type="button">History &amp; Saved <Badge>{`${localData.entries.length}`}</Badge></Button>}
+              title="History and Saved" description="This browser/device only. Bookmarks expire seven days after creation; reopening checks live status without regenerating.">
+              <div className="local-library">
           <div className="local-library-header">
-            <div>
-              <h2 id="local-library-title">History and Saved</h2>
-              <p className="field-hint">This browser/device only — bookmarks expire 7 days after job creation. Reopen checks live server status without regenerating.</p>
-            </div>
             <div className="action-row" role="group" aria-label="Local job lists">
               <button className="secondary-button" type="button" aria-pressed={library === "History"} onClick={() => setLibrary("History")}>History</button>
               <button className="secondary-button" type="button" aria-pressed={library === "Saved"} onClick={() => setLibrary("Saved")}>Saved</button>
@@ -1674,7 +1713,7 @@ function App({ active }: { active: boolean }) {
                   </div>
                 </div>
                 <div className="action-row">
-                  <button className="secondary-button" type="button" onClick={() => reopen(entry)} aria-label={`Reopen ${entry.label}`}>Reopen ›</button>
+                  <button className="secondary-button" type="button" onClick={() => { setHistoryOpen(false); reopen(entry); }} aria-label={`Reopen ${entry.label}`}>Reopen ›</button>
                   {entry.saved && <button className="text-button" type="button" onClick={() => changeLocalJobs((entries) => entries.map((item) => item.jobId === entry.jobId ? { ...item, saved: false } : item))} aria-label={`Unsave ${entry.label}`}>Unsave</button>}
                   <button className="text-button" type="button" onClick={() => changeLocalJobs((entries) => entries.filter((item) => item.jobId !== entry.jobId))} aria-label={`Remove ${entry.label}`}>Remove</button>
                 </div>
@@ -1682,7 +1721,11 @@ function App({ active }: { active: boolean }) {
             ))}
           </ul>
           {!localData.entries.some((entry) => library === "History" || entry.saved) && <p className="empty-state">No local {library.toLowerCase()} entries.</p>}
-        </details>
+              </div>
+            </WorkflowDrawer>
+            {(session || previousJob || step > 1) && <Button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</Button>}
+          </div>
+        </div>
         <nav className="step-nav" aria-label="Workflow steps">
           <ol>{stepNames.map((name, index) => (
             <li key={name} className={step === index + 1 ? "step-current" : step > index + 1 ? "step-complete" : ""} aria-current={step === index + 1 ? "step" : undefined}>
@@ -1709,24 +1752,23 @@ function App({ active }: { active: boolean }) {
         </section>}
         {step > 1 && job && <JobTimings job={job} />}
 
-        {step === 1 && (
+        {step === 1 && active && (
           <div className="step-one-grid">
-            <section className="screen" aria-labelledby="request-title">
-              <div className="screen-heading">
-                <div className="card-icon-title">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
-                  <h2 id="request-title">What does the client need?</h2>
-                </div>
-                <span className="title-accent-bar" aria-hidden="true" />
-                <p>Step 1 of 4 · Describe the onboarding scope and constraints to evaluate against verified past cases.</p>
-              </div>
+            <section className="screen request-composer" aria-labelledby="request-title">
+              <div className="composer-heading"><h2 id="request-title">Describe request</h2><TemplatePicker onChoose={setRequest} /></div>
               <form onSubmit={submitRequest} className="request-form">
                 <Field.Root name="request">
                   <Field.Label htmlFor="client-request">Client request <span className="required-star" aria-hidden="true">*</span></Field.Label>
                   <Field.Description id="request-hint" className="field-hint">Target environment, scale, access requirements, and acceptance criteria. Do not include sensitive personal data.</Field.Description>
-                  <Field.Control render={<textarea id="client-request" aria-describedby="request-hint request-processing request-retention" rows={6} maxLength={6000} required={!attachmentIds.length} placeholder="Enter client onboarding scope and constraints..." />} value={request} onValueChange={setRequest} />
-                  <details className="privacy-disclosure">
-                    <summary>Data processing &amp; 7-day retention policy</summary>
+                  <Field.Control render={<textarea id="client-request" aria-describedby="request-hint request-privacy-summary" rows={8} maxLength={6000} required={!attachmentIds.length} placeholder="Enter client onboarding scope and constraints…" />} value={request} onValueChange={setRequest} />
+                  <span className="request-character-count">{request.length.toLocaleString()} / 6,000</span>
+                </Field.Root>
+                <RequestAttachments selected={attachmentIds} onChange={setAttachmentIds} />
+                <p id="request-privacy-summary" className="field-hint">Sent to the configured model. Application access expires after 7 days.</p>
+                <Popover.Root>
+                  <Popover.Trigger render={<Button className="privacy-trigger" type="button" />}>Data processing &amp; 7-day retention policy <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg></Popover.Trigger>
+                  <Popover.Portal><Popover.Positioner side="bottom" align="start" sideOffset={8} className="privacy-positioner"><Popover.Popup className="privacy-popover">
+                    <div className="workflow-drawer-header"><Popover.Title>Data processing &amp; retention</Popover.Title><Popover.Close className="icon-button" aria-label="Close data policy">Close</Popover.Close></div>
                     <p id="request-processing" className="field-hint">
                       {modelInfo ? <>Requests, fictional evidence, and generated drafts/reviews are sent to <a href={modelInfo.endpoint}>{modelInfo.endpoint}</a> using the {modelInfo.provider} API and model <code>{modelInfo.model}</code>.{" "}
                         {modelInfo.endpoint === "https://openrouter.ai" ? <><a href="https://openrouter.ai/privacy">OpenRouter</a> routes requests to <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI</a>.{" "}</>
@@ -1738,9 +1780,9 @@ function App({ active }: { active: boolean }) {
                       The deployed app uses <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a> for processing/storage and <a href="https://neon.com/privacy-policy">Neon</a> for job storage; development uses local platform/database equivalents.
                     </p>
                     <p id="request-retention" className="field-hint">Application request/results and job access expire seven days after creation; minimal billing and replay-prevention records remain. Provider/platform copies follow the linked policies, not this seven-day expiry; backup retention is separate. Downloaded packs remain on your device.</p>
-                  </details>
-                </Field.Root>
-                <RequestAttachments selected={attachmentIds} onChange={setAttachmentIds} />
+                  </Popover.Popup></Popover.Positioner></Popover.Portal>
+                </Popover.Root>
+                {modelInfoError && <p className="notice notice-error" role="alert">Model processing configuration is unavailable. Reload before submitting.</p>}
                 <div className="form-submit-row">
                   <Button className="primary-button" type="submit" disabled={submittingRequest || (!request.trim() && !attachmentIds.length) || attachmentIds.some((id) => !uploads.sources.some((source) => source.id === id && source.hasText)) || !modelInfo}>{submittingRequest ? "Sending request…" : "Check past examples"}</Button>
                 </div>
@@ -1748,31 +1790,11 @@ function App({ active }: { active: boolean }) {
             </section>
             <section className="screen request-suggestions" aria-labelledby="suggestions-title">
               <div className="suggestions-header">
-                <h3 id="suggestions-title">Starter templates</h3>
-                <p className="field-hint">Select a fictional scenario to populate the request editor above.</p>
+                <h3 id="suggestions-title">Suggested requests</h3>
+                <p className="field-hint">Start with a fictional scenario. Make it your own.</p>
               </div>
-              <div className="suggestion-table" role="list">
-                <div className="suggestion-table-head" aria-hidden="true">
-                  <span>Scenario</span>
-                  <span>Corpus case</span>
-                  <span>Focus</span>
-                  <span />
-                </div>
-                {suggestedRequests.map((suggestion) => <Button key={suggestion.title} type="button" className="suggestion-row" onClick={() => {
-                  setRequest(suggestion.request);
-                  document.getElementById("client-request")?.focus();
-                }}>
-                  <span className="suggestion-main">
-                    <AvatarCircle name={suggestion.basis} tone={suggestion.tone} />
-                    <span className="suggestion-title">{suggestion.title}</span>
-                  </span>
-                  <span className="suggestion-cell">{suggestion.basis}</span>
-                  <span className="suggestion-cell">{suggestion.focus}</span>
-                  <span className="suggestion-chevron" aria-hidden="true">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
-                  </span>
-                </Button>)}
-              </div>
+              <SuggestionList suggestions={suggestedRequests} onChoose={(value) => { setRequest(value); document.getElementById("client-request")?.focus(); }} />
+              <p className="suggestions-footnote">Templates fill the editor, not the submit button. Review the scope and constraints before checking.</p>
             </section>
           </div>
         )}
@@ -1791,7 +1813,7 @@ function App({ active }: { active: boolean }) {
             {(session || submittingRequest) && (assessmentState === "queued" || assessmentState === "running" || assessmentState === "not_started") && (
               <div className="status-panel" role="status" aria-live="polite">
                 <span className="status-indicator" aria-hidden="true" />
-                <div><strong>{submittingRequest ? "Submitting request for admission" : !job ? "Retrieving job status" : assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job.stage)}</strong><p>Results appear after reference checks and independent support review complete.</p></div>
+                <div><strong>{submittingRequest ? "Submitting request for admission" : !job ? "Retrieving job status" : assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job.stage)}</strong><p>Results appear after reference checks and independent support review complete.</p><AssessmentProgress stage={job?.stage} /></div>
               </div>
             )}
             {assessmentState === "failed" && <div className="notice notice-error" role="alert"><strong>Assessment failed.</strong> {job?.error?.message ?? "No checked past-example result is available."}</div>}
@@ -1799,7 +1821,13 @@ function App({ active }: { active: boolean }) {
             {assessmentState === "ready" && !assessment && <div className="notice notice-error" role="alert">The service did not return a supported checked assessment. No result is shown.</div>}
             {!session && !submittingRequest && <p className="notice notice-warning" role="status">No current checked answer is available. No selections or dependent brief remain.{previousJob ? " Previous content is historical only." : ""}</p>}
             {assessmentAvailable && (
-              <>
+              <Tabs.Root defaultValue="overview" className="assessment-tabs">
+                <Tabs.List className="workflow-tabs" aria-label="Assessment views">
+                  <Tabs.Tab value="overview">Overview</Tabs.Tab>
+                  <Tabs.Tab value="claims">Checked claims ({assessment.claims.length})</Tabs.Tab>
+                  <Tabs.Tab value="coverage">Evidence coverage ({assessment.cases.length})</Tabs.Tab>
+                </Tabs.List>
+                <Tabs.Panel value="overview">
                 <div className="anduin-overview-grid">
                   <div className={`conclusion-panel conclusion-${visibleConclusion(assessment, assessmentClaims)}`} role="status">
                     <span className="eyebrow">Assessment Conclusion</span>
@@ -1880,20 +1908,17 @@ function App({ active }: { active: boolean }) {
                     {unrankedComparisons.map(([caseId, rows]) => <div key={caseId}><h4>{caseId}</h4><ComparisonTable rows={rows} claims={assessmentClaims} inspect={setPassageRef} /></div>)}
                   </div>
                 </details>}
-                <details className="section-disclosure content-section">
-                  <summary><span id="claim-title">Checked claims — facts, interpretations &amp; recommendations</span><Badge>{`${assessment.claims.length}`}</Badge></summary>
-                  <div className="disclosure-body">
-                    {assessment.claims.length === 0 ? <p className="empty-state">No checked claims were returned.</p> : <div className="claim-list">{assessment.claims.map((claim) => <ClaimCard key={claim.claimId} claim={claim} inspect={setPassageRef} />)}</div>}
-                  </div>
-                </details>
-                <details className="section-disclosure content-section">
-                  <summary><span id="case-status-title">Evidence coverage across all cases</span><Badge>{`${assessment.cases.length}`}</Badge></summary>
-                  <div className="disclosure-body">
-                    {assessment.cases.length === 0 ? <p className="empty-state">No checked case records were returned.</p> : <div className="card-grid">{assessment.cases.map((item) => <CaseCard key={item.caseId} item={item} claims={assessmentClaims} inspect={setPassageRef} />)}</div>}
-                  </div>
-                </details>
+                </Tabs.Panel>
+                <Tabs.Panel value="claims">
+                  <h3>Checked facts, interpretations &amp; recommendations</h3>
+                  {assessment.claims.length === 0 ? <p className="empty-state">No checked claims were returned.</p> : <div className="claim-list">{assessment.claims.map((claim) => <ClaimCard key={claim.claimId} claim={claim} inspect={setPassageRef} />)}</div>}
+                </Tabs.Panel>
+                <Tabs.Panel value="coverage">
+                  <h3>Evidence coverage across all cases</h3>
+                  {assessment.cases.length === 0 ? <p className="empty-state">No checked case records were returned.</p> : <div className="card-grid">{assessment.cases.map((item) => <CaseCard key={item.caseId} item={item} claims={assessmentClaims} inspect={setPassageRef} />)}</div>}
+                </Tabs.Panel>
                 <div className="action-row"><button className="primary-button" type="button" onClick={() => setStep(3)}>Choose work from these examples ›</button></div>
-              </>
+              </Tabs.Root>
             )}
             </section>
             {(assessmentAvailable || submittedClarification) && <aside className="clarification-section" aria-labelledby="clarification-title">
