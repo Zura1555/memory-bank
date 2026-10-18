@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@base-ui/react/button";
+import { Tabs } from "@base-ui/react/tabs";
+import { WorkflowDrawer } from "./workflow-drawer";
 import { isPrivateSource, UPLOAD_LIMIT, uploadAccept, uploadStateLabels, uploadTypes, type PrivateSource, type PrivateSourceDetail } from "../src/shared/uploads";
 
 const STORAGE_KEY = "memory-bank.uploads.v1";
@@ -203,19 +205,83 @@ export function UploadPicker() {
   </section>;
 }
 
+function AttachmentReview({ source, onBack }: { source: PrivateSource; onBack: () => void }) {
+  const library = usePrivateUploads();
+  const [detail, setDetail] = useState<PrivateSourceDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { heading.current?.focus(); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    setDetail(null); setError(null);
+    void library.detail(source.id, controller.signal).then((value) => {
+      if (!controller.signal.aborted) setDetail(value);
+    }).catch((failure: unknown) => {
+      if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "Content could not be retrieved.");
+    });
+    return () => controller.abort();
+  }, [source.id, source.updatedAt, library.token]);
+  return <section className="attachment-review">
+    <Button type="button" className="text-button" onClick={onBack}>Back to files</Button>
+    <h3 ref={heading} tabIndex={-1}>{source.name}</h3>
+    <p className="field-hint">Private client context, not checked historical evidence. Compare extracted text with the original before selecting it.</p>
+    <Tabs.Root defaultValue="content">
+      <Tabs.List className="workflow-tabs" aria-label="Attachment preview">
+        <Tabs.Tab value="content">Content</Tabs.Tab><Tabs.Tab value="details">Details</Tabs.Tab>
+      </Tabs.List>
+      <Tabs.Panel value="content">
+        {!detail && !error && <p role="status">Loading extracted content…</p>}
+        {error && <p className="notice notice-error" role="alert">{error}</p>}
+        {detail && <>{detail.warning && <p className="notice notice-warning">{detail.warning}</p>}
+          <p className="field-hint">{detail.textKind === "visual_interpretation" ? "Visual interpretation — not audited transcription" : detail.textKind === "native_text" ? "Native extracted text" : "Converted text — extraction may omit visual or embedded meaning"}</p>
+          {detail.text !== null ? <pre className="attachment-text">{detail.text}</pre> : <p className="empty-state">No extracted text is available. Review or process this file in Sources.</p>}
+        </>}
+      </Tabs.Panel>
+      <Tabs.Panel value="details"><dl className="location-list">
+        <div><dt>Type / size</dt><dd>{source.name.split(".").pop()?.toUpperCase()} · {(source.size / 1024).toFixed(1)} KiB</dd></div>
+        <div><dt>Status</dt><dd>{uploadStateLabels[source.state]}</dd></div>
+        <div><dt>Added</dt><dd>{new Date(source.createdAt).toLocaleString()}</dd></div>
+        <div><dt>Expires</dt><dd>{new Date(source.expiresAt).toLocaleString()}</dd></div>
+      </dl>{source.error && <p className="notice notice-error">{source.error}</p>}</Tabs.Panel>
+    </Tabs.Root>
+    <div className="action-row"><Button type="button" className="secondary-button" onClick={() => void library.download(source)}>Download original</Button>
+      <a href="/?sources" onClick={() => library.setFocusedId(source.id)}>Manage in Sources</a></div>
+  </section>;
+}
+
 export function RequestAttachments({ selected, onChange }: { selected: string[]; onChange: (ids: string[]) => void }) {
   const library = usePrivateUploads();
-  return <section className="request-attachments" aria-labelledby="attachments-title"><h3 id="attachments-title">Attach client context</h3>
-    <UploadPicker />
-    {library.sources.length > 0 && <fieldset className="attachment-options"><legend>Include reviewed file text in this request (up to five)</legend>
-      {library.sources.map((source) => <div className="attachment-option" key={source.id}>
-        <label><input type="checkbox" checked={selected.includes(source.id)} disabled={!source.hasText || (!selected.includes(source.id) && selected.length >= 5)}
-          onChange={(event) => onChange(event.currentTarget.checked ? [...selected, source.id] : selected.filter((id) => id !== source.id))} />
-          <span>{source.name}<small>{uploadStateLabels[source.state]}{source.hasText ? " · unreviewed client context" : " · waiting for extracted content"}</small></span></label>
-        <a href="/?sources" onClick={() => library.setFocusedId(source.id)}>Review</a>
-      </div>)}
-    </fieldset>}
-    {selected.some((id) => !library.sources.some((source) => source.id === id)) && <p className="notice notice-warning" role="alert">A selected file is no longer available in this browser. No request can be sent with it. <Button type="button" className="text-button" onClick={() => onChange(selected.filter((id) => library.sources.some((source) => source.id === id)))}>Remove unavailable attachments</Button></p>}
-    <p className="field-hint">Selected text is sent with your request to the configured model, within the existing 16 KiB combined limit. Submitted text follows that job’s original seven-day expiry, independently of the file’s expiry. Files are client context, not checked historical evidence. <a href="/?sources">Manage Sources</a></p>
+  const [open, setOpen] = useState(false);
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const source = library.sources.find((item) => item.id === reviewId);
+  return <section className="request-attachments" aria-label="Request files">
+    <WorkflowDrawer open={open} onOpenChange={(next) => { setOpen(next); if (!next) setReviewId(null); }}
+      trigger={<Button className="secondary-button attachment-trigger" type="button"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m21 11-8 8a6 6 0 0 1-8.5-8.5l8-8a4 4 0 0 1 5.7 5.7l-8 8a2 2 0 0 1-2.8-2.8l7.5-7.5" /></svg>Attach files{selected.length > 0 ? ` (${selected.length}/5)` : ""}</Button>}
+      title="Add files to your request" description="Upload, inspect, and select up to five files as client context. Closing keeps your selections.">
+      {source ? <AttachmentReview key={source.id} source={source} onBack={() => {
+        setReviewId(null);
+        // Restore after the drawer's next-frame recovery for the removed Back control.
+        requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-review-source="${source.id}"]`)?.focus()));
+      }} /> : <>
+        <UploadPicker />
+        {library.sources.length > 0 && <fieldset className="attachment-options"><legend>Include reviewed file text ({selected.length}/5 selected)</legend>
+          {library.sources.map((item) => <div className="attachment-option" key={item.id}>
+            <label><input type="checkbox" checked={selected.includes(item.id)} disabled={!item.hasText || (!selected.includes(item.id) && selected.length >= 5)}
+              onChange={(event) => onChange(event.currentTarget.checked ? [...selected, item.id] : selected.filter((id) => id !== item.id))} />
+              <span>{item.name}<small>{uploadStateLabels[item.state]}{item.hasText ? " · review before using" : " · no extracted text yet"}</small></span></label>
+            <Button type="button" className="text-button" data-review-source={item.id} aria-label={`Review ${item.name}`} onClick={() => setReviewId(item.id)}>Review</Button>
+          </div>)}
+        </fieldset>}
+        <p className="field-hint">Selected text is sent to the configured model within the 16 KiB combined request limit. Submitted text follows the job’s seven-day expiry, independently of the file. Files are client context, not checked historical evidence.</p>
+        <a href="/?sources">Manage Sources</a>
+      </>}
+    </WorkflowDrawer>
+    {selected.length > 0 && <ul className="attachment-chips" aria-label="Selected request files">{selected.map((id) => <li key={id}>
+      <Button type="button" className="attachment-chip" onClick={() => onChange(selected.filter((item) => item !== id))} aria-label={`Remove ${library.sources.find((item) => item.id === id)?.name ?? "unavailable file"} from request`}>
+        <span>{library.sources.find((item) => item.id === id)?.name ?? "Unavailable file"}</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg>
+      </Button>
+    </li>)}</ul>}
+    {library.uploading && !open && <p role="status" className="field-hint">{library.uploading}</p>}
+    {selected.some((id) => !library.sources.some((item) => item.id === id)) && <p className="notice notice-warning" role="alert">A selected file is no longer available. Remove it before submitting.</p>}
   </section>;
 }
