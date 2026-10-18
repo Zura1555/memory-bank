@@ -364,7 +364,7 @@ test("Responses refuses partial, refused, ambiguous, or non-JSON outputs and pre
     globalThis.fetch = originalFetch;
   }
 });
-test("brief provider grammar omits sentence patterns while runtime parsing still requires the visible quotation", async () => {
+test("brief provider grammar omits sentence patterns while runtime parsing composes the declared visible quotation", async () => {
   const { briefDraftSchemaFor } = await import("./schemas.ts");
   const request = "Check the target window first.";
   const corpus = {
@@ -408,11 +408,10 @@ test("brief provider grammar omits sentence patterns while runtime parsing still
     globalThis.fetch = async () => Response.json({
       id: "gen-brief-hidden-quote", choices: [{ finish_reason: "stop", message: { content: wire("Adapt after checking compatibility.") } }],
     });
-    await assert.rejects(callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt), (error: unknown) => {
-      assert.ok(error instanceof ModelCallError);
-      assert.equal(error.code, "MODEL_OUTPUT_SCHEMA_INVALID", "Hidden quotation metadata is still rejected before any brief is accepted");
-      return true;
-    });
+    const composed = await callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt);
+    const composedClaim = (composed.output as { claims: { text: string }[] }).claims[0];
+    assert.ok(composedClaim.text.startsWith("Check the target window first. "),
+      "Hidden quotation metadata is never trusted as-is: the declared sentence is composed verbatim into the visible claim text before any brief is accepted");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -533,4 +532,45 @@ test("brief wire format includes the disposition claim in its item even when the
   });
   assert.deepEqual(parsed.adapt[0].claimIds, ["c1", "c2"],
     "The disposition claim is part of its item by construction; existence and kind are still validated downstream.");
+});
+
+test("brief wire format composes a declared quotation verbatim instead of requiring retyped prose", async () => {
+  const { briefDraftSchemaFor } = await import("./schemas.ts");
+  const request = "Check the target window first. Preserve the audit trail after cutover.";
+  const corpus = {
+    manifest: { schemaVersion: 2, corpusVersion: "test", cases: [{
+      caseId: "case-1", title: "Case", fictional: true, records: [],
+      artifacts: [{ artifactId: "art", title: "Art", fictional: true, versions: [{
+        versionId: "art-v1", sourcePath: "corpora/test/originals/x", mimeType: "text/plain", sha256: "x",
+        statedDate: null, importedAt: "2026-01-01", extractionStatus: "complete", exclusionReasons: [],
+        passages: [{ passageId: "p1", excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }],
+      }] }],
+    }] },
+    manifestSha256: "x", availableVersions: new Set(["art-v1"]), caseAvailability: new Map(),
+    passages: new Map([["p1", { caseId: "case-1", artifactId: "art", versionId: "art-v1", passageId: "p1", title: "Art", fictional: true, statedDate: null, excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }]]),
+    versions: new Map(),
+  } as never;
+  const selected = [{ caseId: "case-1", artifactId: "art", versionId: "art-v1", passageIds: ["p1"] }];
+  const schema = briefDraftSchemaFor(request, selected, corpus);
+  const draft = (claims: unknown[]) => ({
+    items: { "case-1/art/art-v1": { disposition: "adapt", dispositionClaimId: "c1", claimIds: ["c1", "c2"] } },
+    claims,
+  });
+  // The claim declares its sentence exactly but states only the check in
+  // prose: the declared sentence is composed verbatim into the stored text.
+  const parsed = schema.parse(draft([
+    { claimId: "c1", kind: "recommendation", text: "Adapt only after confirming the window with the client.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."], dependsOnClaimIds: [] },
+    { claimId: "c2", kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] },
+  ]));
+  assert.ok(parsed.adapt[0].claimIds.includes("c1"));
+  const composed = parsed.claims.find((claim) => claim.claimId === "c1")!;
+  assert.ok(composed.text.startsWith("Check the target window first. "),
+    "The declared quotation heads the stored claim text verbatim.");
+  assert.ok(composed.text.includes("confirming the window with the client."));
+  // Prose carrying a different complete request sentence than the declared
+  // one is still rejected at parse time; composition never repairs that.
+  assert.throws(() => schema.parse(draft([
+    { claimId: "c1", kind: "recommendation", text: "Preserve the audit trail after cutover. Then adapt.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."], dependsOnClaimIds: [] },
+    { claimId: "c2", kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] },
+  ])));
 });

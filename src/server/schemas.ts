@@ -217,7 +217,14 @@ export function briefDraftSchemaFor(request: string, selected: Selection[], corp
   const quoteChoices = requestQuoteChoices(request);
   const quotedClaims = quoteChoices.map((quote) => localClaim.extend({
     kind: z.enum(["interpretation", "recommendation"]),
-    text: z.string().min(1).max(4_000).regex(new RegExp(quote.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))),
+    // The claim declares its one quotation exactly in requestQuotes; the
+    // transform below composes that declared sentence verbatim into the
+    // claim text, so the checked brief always states the constraint in the
+    // request's own words without depending on the model reproducing a long
+    // string inside prose. The 3,500 cap leaves room for the composed prefix
+    // within the stored claim's 4,000 bound. This only composes declared
+    // metadata; it never invents a quotation the claim did not declare.
+    text: z.string().min(1).max(3_499),
     requestQuotes: z.array(z.literal(quote)).length(1),
   }));
   const unquotedClaim = localClaim.extend({ requestQuotes: z.array(claim.shape.requestQuotes.element).max(0) });
@@ -258,7 +265,12 @@ export function briefDraftSchemaFor(request: string, selected: Selection[], corp
       reuse: entries.filter((item) => item.disposition === "reuse"),
       adapt: entries.filter((item) => item.disposition === "adapt"),
       verify: entries.filter((item) => item.disposition === "verify"),
-      claims: claims.map((claim) => ({ ...claim, sourceRefs: claim.sourceRefs.map((label) => refs.get(label)!) })),
+      claims: claims.map((claim) => ({
+        ...claim,
+        text: claim.requestQuotes.length === 1 && !claim.text.includes(claim.requestQuotes[0])
+          ? `${claim.requestQuotes[0]} ${claim.text}`
+          : claim.text,
+        sourceRefs: claim.sourceRefs.map((label) => refs.get(label)!) })),
     };
   }).pipe(briefDraftSchema);
 }

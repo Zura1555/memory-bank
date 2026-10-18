@@ -1175,7 +1175,9 @@ test("brief generation cannot add an unselected background artifact", async () =
   const lostQuote = structuredClone(wireOutput);
   lostQuote.claims[0].text = "Adapt after checking client compatibility.";
   assert.equal(validate(lostQuote), true, "The brief provider grammar omits long unanchored quote patterns; it no longer rejects hidden metadata by itself.");
-  assert.equal(prompt.responseSchema!.safeParse(lostQuote).success, false, "Runtime parsing still rejects hidden request metadata instead of visible recommendation constraints.");
+  const composedQuote = prompt.responseSchema!.safeParse(lostQuote);
+  assert.equal(composedQuote.success, true, "Runtime parsing composes the declared quotation into the visible claim text instead of trusting hidden metadata.");
+  if (composedQuote.success) assert.ok(composedQuote.data.claims[0].text.startsWith("current request "), "The stored claim states the constraint verbatim ahead of the model's check, so coverage never rests on metadata alone.");
   const requestAsHistory = structuredClone(wireOutput);
   requestAsHistory.claims[0].kind = "source_fact";
   assert.equal(validate(requestAsHistory), false);
@@ -1186,8 +1188,10 @@ test("brief generation cannot add an unselected background artifact", async () =
   literalWire.claims[0].text = `Verify the requested constraint: ${literalRequest}`;
   const validateLiteral = new Ajv({ strict: false }).compile(openRouterSchema("brief", literalPrompt.responseSchema!, { omitUnanchoredTextPatterns: true }).json_schema.schema);
   assert.equal(validateLiteral(literalWire), true);
-  literalWire.claims[0].text = "Verify the requested constraint: Use s.";
-  assert.equal(literalPrompt.responseSchema!.safeParse(literalWire).success, false, "Request punctuation is literal at runtime, not a user-supplied regular expression.");
+  literalWire.claims[0].text = "Verify the requested constraint in the sandbox.";
+  const literalParsed = literalPrompt.responseSchema!.safeParse(literalWire);
+  assert.equal(literalParsed.success, true);
+  if (literalParsed.success) assert.ok(literalParsed.data.claims[0].text.includes("Use [sandbox]."), "Request punctuation is composed literally at runtime, never treated as a user-supplied regular expression.");
   const multiRequest = "First decisive sentence. Second decisive sentence.";
   const multiPrompt = briefDraftPrompt(multiRequest, selected, corpus, checked);
   assert.match(multiPrompt.instructions, /dedicated atomic recommendation claim/);
