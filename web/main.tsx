@@ -766,7 +766,7 @@ function SourcesPage() {
       }
     }
   };
-  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow" aria-labelledby="sources-title">
+  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow sources-workflow" aria-labelledby="sources-title">
     <div className="intro"><h1 id="sources-title">Sources</h1>
       <p>Browse the fictional corpus and your private files. Inspect originals, extracted content and live indexing status.</p></div>
     <SourceLibrary sources={sources ?? []} indexStatus={indexStatus} renderSource={(source) => <section className="source-detail-evidence">
