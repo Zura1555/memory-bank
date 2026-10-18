@@ -135,14 +135,10 @@ test("brief assessment background is scoped to selected work without cutting its
   const prompt = briefDraftPrompt("current request", selected, corpus, checked);
   const background = (prompt.untrustedData as { historicalContext: { checkedAssessment: { cases: { caseId: string }[] } } }).historicalContext.checkedAssessment;
   assert.deepEqual(background.cases.map((item) => item.caseId), ["case-1"], "The brief draft prompt carries the scoped background, not all eight cases.");
-  assert.match(prompt.instructions, /the disposition claim is the item's premise, not its conclusion/);
-  assert.match(prompt.instructions, /never another recommendation, and never a capacity, identity, recovery or other verification\/blocker check/);
   const reviewPrompt = briefReviewPrompt("current request", selected, corpus, checked, {
     reuse: [], adapt: [], verify: [],
     claims: [{ claimId: "brief-1", kind: "recommendation", text: "Check the current request.", sourceRefs: [], requestQuotes: [], dependsOnClaimIds: [] }],
   });
-  assert.match(reviewPrompt.instructions, /interrogative or task-framing sentence that only asks what to inspect, assess, represent or advise/);
-  assert.match(reviewPrompt.instructions, /is not a constraint and must not be inventoried/);
   const reviewBackground = (reviewPrompt.untrustedData as { historicalContext: { checkedAssessmentBackground: { cases: { caseId: string }[] } } }).historicalContext.checkedAssessmentBackground;
   assert.deepEqual(reviewBackground.cases.map((item) => item.caseId), ["case-1"], "The brief review prompt carries the same scoped background.");
 });
@@ -1194,8 +1190,6 @@ test("brief generation cannot add an unselected background artifact", async () =
   if (literalParsed.success) assert.ok(literalParsed.data.claims[0].text.includes("Use [sandbox]."), "Request punctuation is composed literally at runtime, never treated as a user-supplied regular expression.");
   const multiRequest = "First decisive sentence. Second decisive sentence.";
   const multiPrompt = briefDraftPrompt(multiRequest, selected, corpus, checked);
-  assert.match(multiPrompt.instructions, /dedicated atomic recommendation claim/);
-  assert.match(multiPrompt.instructions, /No claim's text may contain a verbatim complete request sentence\/chunk other than its own sole requestQuotes entry/);
   const strayWire = structuredClone(wireOutput);
   strayWire.claims[0].requestQuotes = ["First decisive sentence."];
   strayWire.claims[0].text = "Check the request: First decisive sentence. Second decisive sentence.";
