@@ -10,7 +10,7 @@ import { requestSchema, startBriefSchema, passageSearchSchema } from "./schemas.
 import { exportStarterPack, starterPackMarkdown } from "./packs.ts";
 import { searchPassages } from "./search.ts";
 import { modelConfig } from "./model.ts";
-import { attachmentRequest, createUpload, limitUploads, listUploads, searchUploads, uploadDetail, uploadOriginal, uploadOwner } from "./uploads.ts";
+import { attachmentRequest, createUpload, deleteUpload, limitUploads, listUploads, searchUploads, updateUpload, uploadDetail, uploadOriginal, uploadOwner } from "./uploads.ts";
 import type { SourceIndexStatus } from "../shared/uploads.ts";
 import {
   operatorBudgetSchema,
@@ -187,6 +187,17 @@ app.post("/api/uploads/search", async (c) => {
   return c.json({ results: await searchUploads(c.env, owner, body.data.query) });
 });
 app.get("/api/uploads/:id", async (c) => c.json(await uploadDetail(c.env, await uploadOwner(c.req.header("Authorization") ?? null), c.req.param("id"))));
+app.patch("/api/uploads/:id", async (c) => {
+  const owner = await uploadOwner(c.req.header("Authorization") ?? null);
+  await limitUploads(c.env, c.req.header("CF-Connecting-IP"));
+  return c.json(await updateUpload(c.env, owner, c.req.param("id"), await readJsonBody(c.req.raw)));
+});
+app.delete("/api/uploads/:id", async (c) => {
+  const owner = await uploadOwner(c.req.header("Authorization") ?? null);
+  await limitUploads(c.env, c.req.header("CF-Connecting-IP"));
+  await deleteUpload(c.env, owner, c.req.param("id"));
+  return c.json({ deleted: true });
+});
 app.get("/api/uploads/:id/original", async (c) => uploadOriginal(c.env, await uploadOwner(c.req.header("Authorization") ?? null), c.req.param("id")));
 app.post("/api/uploads/:id/process", async (c) => {
   const owner = await uploadOwner(c.req.header("Authorization") ?? null);
