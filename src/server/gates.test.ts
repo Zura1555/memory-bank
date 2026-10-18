@@ -1401,3 +1401,52 @@ test("a combined brief survives a reviewer inventory naming another item's bound
   assert.deepEqual(withheld.adapt.map((item) => item.artifactId), ["handover"],
     "Dropping the item's own assessment-bound quotation still withholds that item.");
 });
+
+test("an uncertain carrier withholds only itself when its quotation is not assessment-bound", () => {
+  const corpus = fixture();
+  const request = "Alpha limit applies. Beta window applies.";
+  const QA = "Alpha limit applies.";
+  const QB = "Beta window applies.";
+  const refs = [{ caseId: "case-1", artifactId: "request", versionId: "request-v1", passageId: "p-request-v1" }];
+  const assessment = {
+    conclusion: "precedent_found",
+    clarifyingClaimIds: [],
+    comparisons: [],
+    requestConstraints: { product_version: [], environment: [], scale: [], identity_access: [], recovery_operations: [] },
+    artifactReviews: [],
+    nextActions: [],
+    leads: [],
+    contrasts: [],
+    withheldClaimCount: 0,
+    claims: [
+      { claimId: "a-bound", kind: "recommendation", text: `Recorded check: ${QA}`, sourceRefs: refs, requestQuotes: [QA], dependsOnClaimIds: [] },
+    ],
+    cases: [{
+      caseId: "case-1", availability: "available", outcome: "unknown", outcomeClaimIds: [], claimIds: [],
+      artifactWork: [
+        { artifactId: "request", availability: "available", exclusionReasons: [], disposition: "adapt", dispositionClaimId: "a-disposition", claimIds: ["a-bound"], blockerClaimIds: [], verificationClaimIds: [] },
+      ],
+    }],
+  } as unknown as AssessmentResult;
+  const draft: BriefDraft = {
+    reuse: [], verify: [],
+    adapt: [
+      { caseId: "case-1", artifactId: "request", versionId: "request-v1", disposition: "adapt", dispositionClaimId: "brief-disposition", claimIds: ["brief-disposition", "brief-bound-quote", "brief-extra-quote"] },
+    ],
+    claims: [
+      { claimId: "brief-disposition", kind: "recommendation", text: "Adapt this work after the checks below.", sourceRefs: refs, requestQuotes: [], dependsOnClaimIds: [] },
+      { claimId: "brief-bound-quote", kind: "recommendation", text: `Check first: ${QA}`, sourceRefs: refs, requestQuotes: [QA], dependsOnClaimIds: [] },
+      { claimId: "brief-extra-quote", kind: "recommendation", text: `Also consider: ${QB}`, sourceRefs: refs, requestQuotes: [QB], dependsOnClaimIds: [] },
+    ],
+  };
+  const selections = [{ caseId: "case-1", artifactId: "request", versionId: "request-v1" }];
+  const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
+  verdicts.set("brief-extra-quote", "uncertain");
+  const constraintReviews = [{ ...selections[0], requestQuotes: [QA, QB] }];
+  const checked = buildCheckedBrief(draft, verdicts, validateBriefDraft(draft, request, selections, corpus), { request, constraintReviews, assessment });
+  assert.deepEqual(checked.adapt.map((item) => item.artifactId), ["request"],
+    "The item stands on its complete assessment-bound coverage.");
+  assert.deepEqual(checked.adapt[0].claimIds, ["brief-disposition", "brief-bound-quote"],
+    "Only the uncertain claim is withheld.");
+  assert.equal(checked.withheldClaimCount, 1);
+});

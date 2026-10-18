@@ -489,25 +489,19 @@ export function buildCheckedBrief(
       const claim = claims.get(id);
       return claim?.kind === "recommendation" ? [claim] : [];
     });
-    // Coverage is enforced only for quotations bound to this item by the
-    // checked assessment or associated with it by the draft itself (declared
-    // or stated in an item claim). A brief reviewer inventorying another
-    // item's sentence under this item cannot by itself erase the item; the
-    // independently reviewed assessment binding is the per-item relevance
-    // record. Bound or draft-associated quotations remain fully enforced.
-    // Fresh builds always pass the checked assessment, so the filter is
-    // active in production and in revalidation (which receives the same
-    // assessment). It is inactive only for stored-record unit fixtures that
-    // present an already-floored inventory without its assessment.
-    const bound = requirementReview.assessment ? new Set(boundAssessmentQuotes(requirementReview.assessment, item)) : null;
-    const itemClaims = item.claimIds.flatMap((id) => {
-      const claim = claims.get(id);
-      return claim ? [claim] : [];
-    });
-    const quotes = new Set([...inventory.get(identity(item))!, ...recommendations.flatMap((claim) => claim.requestQuotes)]
-      .filter((quote) => bound === null || bound.has(quote)
-        || itemClaims.some((claim) => claim.requestQuotes.includes(quote) || claim.text.includes(quote))));
-    if ([...quotes].some((quote) => !requirementReview.request.includes(quote)
+    // Item-level coverage rejection applies only to quotations bound to
+    // this item by the independently reviewed checked assessment (for
+    // stored records presented without one, the whole recorded inventory
+    // and draft-declared quotations stay enforced, as before). A quotation
+    // the draft alone associated with the item is covered opportunistically:
+    // carried when its claims pass review, simply not covered when they
+    // are withheld singly. One uncertain check therefore cannot erase an
+    // item whose assessment-bound coverage is complete, while a missing
+    // assessment-bound quotation still withholds the whole item.
+    const bound = requirementReview.assessment
+      ? new Set(boundAssessmentQuotes(requirementReview.assessment, item))
+      : new Set([...inventory.get(identity(item))!, ...recommendations.flatMap((claim) => claim.requestQuotes)]);
+    if ([...bound].some((quote) => !requirementReview.request.includes(quote)
       || !recommendations.some((claim) => supported.accepted.has(claim.claimId)
         && claim.requestQuotes.includes(quote) && claim.text.includes(quote)))) {
       // A true source fact or hidden requestQuotes metadata cannot stand in for a visible requested check.
