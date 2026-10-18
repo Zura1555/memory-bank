@@ -1,6 +1,4 @@
 .workflow.sources-page {
-  width: 100%;
-  padding-top: 1.5rem;
   --source-private: #704099;
   --source-private-bg: #f4edfc;
 }
@@ -229,7 +227,6 @@
   .sources-toolbar select, .sources-query { min-height: 2.75rem; }
 }
 @media (max-width: 599px) {
-  .sources-page { padding-top: .5rem; }
   .sources-collection, .source-detail-panel { border-radius: .6rem; }
   .sources-heading h1 { font-size: 1.55rem; }
   .sources-heading p { font-size: .75rem; max-width: 23ch; }
