@@ -989,3 +989,55 @@ The checked brief retained **both** expected Adapt items with **zero withheld cl
 - Neither item claims the components were integrated or jointly accepted, and neither authorizes production writes.
 
 **Issue #34 is closable on this evidence.** Fresh untouched qualification under #32 and merge/deployment/release remain separately gated.
+
+## Issue #32 round-2 continuation: exposed verification fails full-content grading — 2026-10-18
+
+**Verdict: the exposed gate failed; the new untouched set was not dispatched. Issue #32 remains open.** Timing, selected-item survival, successful parsing and canonical references are necessary but do not establish semantic correctness. No result below is a fresh held-out pass.
+
+### Freeze, authority and execution boundaries
+
+The original g1–g4 untouched evaluation failed on integrated candidate `daa3046`; its separate historical record remains in [PR #56](https://github.com/Zura1555/memory-bank/pull/56) (`docs/32-untouched-result`). Those requests are now exposed regression material. Before subsequent behavior tuning, an independent author froze the new h1–h4 keys at **2026-10-17T12:09:23Z**, SHA-256 **`3b5fb7df790eed3022056247df73328cac452895c9cecc8cf79657cd8d9c6fdb`**. Their expectation content was not opened during this continuation; a final byte-hash check matched the receipt.
+
+The owner requested completion of the prepared protocol: one exposed g2 → g3 → g4 campaign, at most 12 calls / USD 1; only a passing exposed gate activates the separately approved h1–h4 one-shot, at most 16 calls / USD 1. The actual candidate was the clean dedicated `fix/32-round2-blockers` worktree at **`05494357e81bd4705200751b327c56bab38a5954`**, not the older `fix/34-carry-assessment-constraints` branch. Frozen source-inventory SHA-256: **`c03876319b600c278a0c9496676ff6f8e178656681d0f7aaf95f9586f2dde797`**; built Worker SHA-256: **`8d1a06d1ed38add3fca035cb3ef0e9d43584716bcd615e58fc5133666f46bef5`**; corpus SHA-256 remains **`fbc1d4ae92275efafb23b660446ac78a4b6c624e4ce603d67d2d320e142b63ca`**. The runner checked every source, configuration, input, observer, instrumentation and bundle hash against its prepared freeze before dispatch; the independent offline audit checked the source and bundle again before this documentation append.
+
+The profile stayed OpenRouter/OpenAI `openai/gpt-6-luna`, chat completions, default service tier, reasoning `none`, 16,384 output-token bound, OpenAI-only routing, no provider fallback and no automatic paid retry. Each exposed request was submitted once. The existing local Worker/Queue/Workflow/PostgreSQL/R2 path and durable accounting were used, not production admission. The predeclared exposed selection rule remained all checked Reuse/Adapt artifacts with their exact versions and currently cited passages, recorded before each brief. This differs from the original keys' fixed passage lists; it is disclosed, not silently counted as exact-key selection.
+
+### Preserved exposed attempts 1–5 and this run
+
+These are execution summaries from preserved captures, not retrospective independent all-criteria passes. A ready result or a successful narrow blocker check must not be relabeled full qualification.
+
+| Exposed attempt | Frozen candidate | Calls | Reported USD | Observed outcome |
+| --- | --- | ---: | ---: | --- |
+| 1 | `027915c` | 3 | 0.01630854225 | g2 selected Elm and Ibis; brief entered `reconciliation_required`; g3/g4 skipped. |
+| 2 | `027915c` | 7 | 0.03670868025 | g2 brief retained Ibis but withheld Elm; g3 brief entered `reconciliation_required`; g4 skipped. |
+| 3 | `6b87ba2` | 10 | 0.04070345895 | g2 brief retained neither selection; g3 retained Cedar; g4 returned bounded `no_useful_precedent`. |
+| 4 | `4749b03` | 9 | 0.03203140050 | g2 brief failed; g3 ready brief retained no item; g4 returned bounded `no_useful_precedent`. |
+| 5 | `c53a91a` | 7 | 0.02360613420 | g2 retained both Adapt items and exported both packs; g3 brief wire parsing failed; g4 skipped. |
+| 6 | `0549435` | 10 | 0.03490492500 | All workflows completed, all selected items survived, both brief formats exported; independent full-content grading failed g2, g3 and g4 below. |
+
+Attempts 1, 2 and 5 stopped after uncertain application dispatch state. Their task-owned brief phases were subsequently settled from the saved terminal provider envelopes at 2,081, 1,658 and 1,262 microUSD respectively, each phase sum rounded upward once; no historical hold was released. Attempt 5's generation was `gen-1792284139-UTwocyi6KtUMIzbAoYvc`. The preserved captures, original failures and accounting receipts were not repaired or replaced. The new candidate mechanizes the declared brief quotation's verbatim visible composition; attempt 6 confirms that its previously failing wire path can complete, not that all semantic criteria now pass.
+
+### Attempt 6: timing and checked-work observations
+
+Host `process.hrtime` durable-state reads supplied conservative processing upper bounds; queue wait below is the separate stored queue measurement, not included as processing evidence.
+
+| Request | Assessment bound, s (90 s) | Brief bound, s (30 s) | Assessment / brief queue wait, ms | Checked workflow |
+| --- | ---: | ---: | --- | --- |
+| g2 | 60.779 | 14.886 | 88 / 174 | `precedent_found`; Elm `batch-adapter-notes / adapter-2025-04-11` and Ibis `operator-runbook / runbook-2025-05-21` both selected and retained as Adapt; JSON and Markdown exported. |
+| g3 | 58.532 | 11.347 | 130 / 86 | `precedent_found`; Cedar `mapping / map-2025-02-11` selected and retained as Adapt; JSON and Markdown exported. |
+| g4 | 63.792 | — | 70 / — | `no_useful_precedent`; all eight cases and 24 artifact reviews present; actual empty selection; no brief forced or dispatched. |
+
+Every measured processing bound met its target, but the independent offline graders found the following content failures against the exposed keys and exact original passages:
+
+- **g2 — incomplete uncertainty preservation.** Checked assessment claim `c5` reports Elm's historical 598/600 accepted total without preserving the delivery log's separate four-malformed-amount statement and its unresolved relationship to the two second-batch rejects (`elm-bulk-integration/delivery-log`, `notes-2025-04-17`, lines 9–11). The key explicitly requires that source tension when totals are reported. The brief and exports do not repeat that total; they do not repair the assessment omission. The checked surfaces also omit an explicit new-tenant authentication check required by the key; generic evidence-access authorization boilerplate is not that check. Useful conditional work, the requested item cap and handover duration, terminal-status-before-resubmission, and test-only recovery boundaries otherwise survived.
+- **g2 — disclosed selection deviation, separate from content failure.** The blind derived selection included the adapter's additional batch-level validation-stop passage `p-b565c798ceaa8fb37c554fd6038e3ba2`, beyond the key's five fixed adapter passages. Both expected artifact/version identities and all expected passages were selected; the extra passage is legitimate source material. This follows the exposed campaign's predeclared rule, but is not an exact fixed-passage-key pass. g3's six selected mapping passages matched its key exactly.
+- **g3 — canonical citation, wrong semantic provenance.** Accepted `comparison-3-assessment` attributes missing-checkpoint and replay-risk history to the separate larger interrupted-import record, but cites only Cedar `mapping / map-2025-02-11 / p-7f1a25ed5a9ec4bf27bc83acaee2fa55`; its dependency chain also lacks the Ash source for that assertion. Ash evidence is correctly cited elsewhere in the assessment, not in this claim's evidence/dependency chain. The selected Cedar brief and both exports preserve its useful-work, scope, identity and deadline requirements; they do not fix the checked assessment's unsupported attribution.
+- **g4 — contradictory surviving recommendations.** Despite the bounded negative conclusion, context-only artifact roles and empty selection, accepted `comparison-7-implication` recommends adapting Ibis's procedural structure after validation, and `comparison-8-implication` calls its runbook a conditional procedural starting point. `reason-6-2` similarly describes conditional recovery building material. The key prohibits offering useful implementation starting material for this combined already-demonstrated requirement; withholding the Ibis disposition does not remove the contrary visible comparison recommendations. Complete coverage and the correct conclusion label alone therefore do not pass this case.
+
+### Integrity, accounting and remaining gate
+
+The no-provider-network audit reloaded the exact corpus and revalidated **three checked assessments, two checked briefs and 974 canonical claim references** without changing their checked results. It verified **all 24 original SHA-256 hashes**, exact JSON-brief equality, canonical exported passage excerpts/locations, and every visible brief claim in the Markdown exports after normal Markdown punctuation unescaping. All four exports passed those fidelity checks. Canonical identities and export fidelity do **not** establish semantic support; g3 demonstrates that distinction.
+
+All ten provider responses finished HTTP 200 / `stop` with reported usage. Completed phase sums reconciled upward once to **34,907 microUSD**. Final durable status: admission **disabled**, no active attempt, no pending job, historical hold **1,200,000 microUSD unchanged**, cumulative reconciled spend **1,826,414 microUSD**. The original g campaign plus the six exposed campaigns total **59 provider calls / USD 0.2526971634 reported usage**; this does not include older unrelated campaigns. Private before/after database dumps, envelopes, timing observations, independent criterion-level grades and the audit proof remain outside GitHub.
+
+**h1–h4 remain unrun and their expectation content remains sealed.** The exposed prerequisite failed, so its conditional paid approval was not exercised. No second attempt, prompt tuning, model/profile change, credit purchase, runtime-code change, merge, production deployment or public release followed this result. PR #57 contains the candidate fixes and this record; PR #56 remains the separate original-failure record, and neither was merged. No new isolate-memory or recovery measurement is claimed for this candidate; prior evidence retains its original scope. Closing #32 requires a corrected frozen candidate, separately authorized exposed verification that passes all criteria, and only then the genuinely untouched one-shot and its independent full pass.
