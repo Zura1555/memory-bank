@@ -592,6 +592,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .app-sidebar .sidebar-brand { display: flex; justify-content: center; padding-inline: 0; }
 .app-sidebar .brand > span:not(.brand-mark) { display: none; }
 .app-sidebar .workspace-caption { display: none; }
+.app-sidebar .shell-separator { display: none; }
+.app-sidebar .primary-nav { position: absolute; inset: 50% 0 auto; transform: translateY(-50%); }
 .shell-separator { flex-shrink: 0; height: 1px; margin-block: 1.25rem; background: var(--line); }
 .nav-group-label { padding-inline: .8rem; margin-bottom: .5rem; color: var(--muted); font-size: .68rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 .app-sidebar .nav-group-label { display: none; }
