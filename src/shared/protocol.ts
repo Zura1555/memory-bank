@@ -1,3 +1,4 @@
+import type { OperationCheckKind, OperationKind } from "./operations.ts";
 export type JobKind = "assessment" | "brief";
 export type PhaseState = "not_started" | "queued" | "running" | "ready" | "failed" | "reconciliation_required";
 export type JobStage = "queued" | "assembling" | "drafting" | "reference_check" | "support_review" | "ready" | "failed" | "reconciliation_required";
@@ -62,12 +63,19 @@ export interface DecisionCondition {
   sourceRefs: SourceRef[];
   requestQuotes: string[];
 }
+export interface OperationCheck {
+  kind: OperationCheckKind;
+  text: string;
+  sourceRefs: SourceRef[];
+  requestQuotes: string[];
+}
 export interface ArtifactDecision {
   disposition: BriefDisposition | null;
+  operation: OperationKind | null;
   historicalEvidence: SourceRef[];
   requestQuotes: string[];
   adaptations: DecisionCondition[];
-  checks: DecisionCondition[];
+  checks: OperationCheck[];
 }
 export interface DecisionReason {
   target: "history" | "request_constraint" | "adaptation" | "check" | "disposition";

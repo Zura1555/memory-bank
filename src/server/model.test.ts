@@ -6,15 +6,23 @@ import type { AddressInfo } from "node:net";
 import { once } from "node:events";
 import type { Env } from "./env.ts";
 import type { ArtifactReview, SupportVerdict } from "../shared/protocol.ts";
+import { OPERATION_CHECKS } from "../shared/operations.ts";
 import { callModel, ModelCallError, modelConfig } from "./model.ts";
 import { requestSpans } from "./request-constraints.ts";
 import { buildCheckedBrief, validateBriefDraft } from "./gates.ts";
 import { briefDraftSchemaFor } from "./schemas.ts";
 
-const checkedReview = (artifactId: string): ArtifactReview => ({
-  caseId: "case-1", artifactId, role: "starting_point", verdict: "supported", reasons: [],
-  decision: { disposition: "adapt", historicalEvidence: [{ caseId: "case-1", artifactId, versionId: `${artifactId}-v1`, passageId: "p1" }], requestQuotes: [], adaptations: [], checks: [] },
-});
+const checkedReview = (artifactId: string): ArtifactReview => {
+  const sourceRefs = [{ caseId: "case-1", artifactId, versionId: `${artifactId}-v1`, passageId: "p1" }];
+  return {
+    caseId: "case-1", artifactId, role: "starting_point", verdict: "supported", reasons: [],
+    decision: {
+      disposition: "adapt", operation: "api_adapter", historicalEvidence: sourceRefs, requestQuotes: [],
+      adaptations: [{ text: "Adapt the recorded adapter to the current client.", sourceRefs, requestQuotes: [] }],
+      checks: [{ kind: "client_api_access", text: OPERATION_CHECKS.api_adapter.client_api_access, sourceRefs, requestQuotes: [] }],
+    },
+  };
+};
 const checkedBriefDecisions = { cases: [{ caseId: "case-1", artifactWork: [{ artifactId: "art", disposition: "adapt" as const }] }], artifactReviews: [checkedReview("art")] };
 
 test("an interrupted provider body keeps its generation ID and cannot be treated as a free failure", async () => {
@@ -397,7 +405,7 @@ test("provider output selects a request identity whose original quotation remain
     items: { "case-1/art/art-v1": {
       disposition: "adapt",
       recommendation: { text, sourceRefs: ["e1"], requestQuotes: [requestSpans(request)[0].spanId] },
-      claims: [{ kind: "source_fact", sourceRefs: ["e1"], requestQuotes: [] }],
+      claims: [],
     } },
   });
   const originalFetch = globalThis.fetch;
@@ -508,33 +516,27 @@ test("provider redirects are rejected without forwarding the request or retrying
   }
 });
 
-test("brief parsing derives factual dependencies and rejects model-authored graph structure", () => {
+test("brief citations derive exact item-local facts and preserve independent rejection", () => {
   const request = "Check the target window first.";
-  const artifacts = ["art", "other-art"].map((artifactId, index) => {
-    const versionId = `${artifactId}-v1`;
-    const passageId = `p${index + 1}`;
-    return {
-      artifactId, title: artifactId, fictional: true,
-      versions: [{
-        versionId, sourcePath: `corpora/test/originals/${artifactId}`, mimeType: "text/plain", sha256: "x",
-        statedDate: null, importedAt: "2026-01-01", extractionStatus: "complete", exclusionReasons: [],
-        passages: [{ passageId, excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }],
-      }],
-    };
-  });
+  const artifacts = ["art", "other-art"].map((artifactId, index) => ({
+    artifactId, title: artifactId, fictional: true,
+    versions: [{
+      versionId: `${artifactId}-v1`, sourcePath: `corpora/test/originals/${artifactId}`, mimeType: "text/plain", sha256: "x",
+      statedDate: null, importedAt: "2026-01-01", extractionStatus: "complete", exclusionReasons: [],
+      passages: [
+        { passageId: `p${index * 2 + 1}`, excerpt: `Recorded ${artifactId} procedure.`, sourceKind: "source", location: "L1" },
+        { passageId: `p${index * 2 + 2}`, excerpt: `Stop ${artifactId} for client review on rejection.`, sourceKind: "source", location: "L2" },
+      ],
+    }],
+  }));
   const corpus = {
     manifest: { schemaVersion: 2, corpusVersion: "test", cases: [{ caseId: "case-1", title: "Case", fictional: true, records: [], artifacts }] },
-    manifestSha256: "x",
-    availableVersions: new Set(artifacts.map((artifact) => artifact.versions[0].versionId)),
-    caseAvailability: new Map(),
-    passages: new Map(artifacts.map((artifact, index) => {
-      const passage = artifact.versions[0].passages[0];
-      return [passage.passageId, {
-        caseId: "case-1", artifactId: artifact.artifactId, versionId: artifact.versions[0].versionId,
-        passageId: passage.passageId, title: artifact.title, fictional: true, statedDate: null,
-        excerpt: passage.excerpt, sourceKind: passage.sourceKind, location: passage.location,
-      }];
-    })),
+    manifestSha256: "x", availableVersions: new Set(artifacts.map((artifact) => artifact.versions[0].versionId)), caseAvailability: new Map(),
+    passages: new Map(artifacts.flatMap((artifact) => artifact.versions[0].passages.map((passage) => [passage.passageId, {
+      caseId: "case-1", artifactId: artifact.artifactId, versionId: artifact.versions[0].versionId,
+      passageId: passage.passageId, title: artifact.title, fictional: true, statedDate: null,
+      excerpt: passage.excerpt, sourceKind: passage.sourceKind, location: passage.location,
+    }]))),
     versions: new Map(),
   } as never;
   const selected = artifacts.map((artifact) => ({
@@ -546,57 +548,56 @@ test("brief parsing derives factual dependencies and rejects model-authored grap
     cases: [{ caseId: "case-1", artifactWork: artifacts.map(({ artifactId }) => ({ artifactId, disposition: "adapt" as const })) }],
     artifactReviews: artifacts.map(({ artifactId }) => checkedReview(artifactId)),
   });
-  const inlineItem = (label: string) => ({
+  const wire = { items: Object.fromEntries(keys.map((key, index) => [key, {
     disposition: "adapt",
-    recommendation: { text: "Adapt after checking the target window.", sourceRefs: [label], requestQuotes: [] },
-    claims: [
-      { kind: "source_fact", sourceRefs: [label], requestQuotes: [] },
-      { kind: "recommendation", text: "Check the target window before use.", sourceRefs: [label], requestQuotes: [] },
-    ],
-  });
-  const wire = { items: Object.fromEntries(keys.map((key, index) => [key, inlineItem(index === 0 ? "e1" : "e2")])) };
+    recommendation: { text: "Adapt after checking the target window.", sourceRefs: [`e${index * 2 + 1}`], requestQuotes: [] },
+    claims: [{ kind: "recommendation", text: "Stop for client review on rejection.", sourceRefs: [`e${index * 2 + 2}`, `e${index * 2 + 2}`], requestQuotes: [] }],
+  }])) };
   const parsed = schema.parse(wire);
-  assert.deepEqual(parsed.adapt.map((item) => item.claimIds), [
-    ["brief-0-disposition", "brief-0-claim-0", "brief-0-claim-1"],
-    ["brief-1-disposition", "brief-1-claim-0", "brief-1-claim-1"],
-  ]);
-  assert.equal(parsed.claims.length, 6);
-  const byId = new Map(parsed.claims.map((claim) => [claim.claimId, claim]));
-  assert.deepEqual(byId.get("brief-0-claim-0")!.dependsOnClaimIds, []);
-  assert.deepEqual(byId.get("brief-0-disposition")!.dependsOnClaimIds, ["brief-0-claim-0"]);
-  assert.deepEqual(byId.get("brief-0-claim-1")!.dependsOnClaimIds, ["brief-0-disposition", "brief-0-claim-0"]);
   assert.equal(validateBriefDraft(parsed, request, selected, corpus).size, 0);
-
-  const missingFact = structuredClone(wire);
-  missingFact.items[keys[0]].claims.shift();
-  const missingEvidence = schema.safeParse(missingFact);
-  assert.equal(missingEvidence.success, false, "Authored evidence selections need an inline source fact.");
-  if (!missingEvidence.success) assert.ok(missingEvidence.error.issues.some((issue) => issue.message === "BRIEF_FACTUAL_EVIDENCE_REQUIRED"));
-  const foreignItemRef = structuredClone(wire);
-  foreignItemRef.items[keys[0]].claims[0].sourceRefs = ["e2"];
-  assert.equal(schema.safeParse(foreignItemRef).success, false, "An item's evidence selection cannot point into another selected item.");
-
-  const forbiddenDependencies = [
-    (() => { const value = structuredClone(wire); Object.assign(value.items[keys[0]].recommendation, { dependsOnClaimIds: [] }); return value; })(),
-    (() => { const value = structuredClone(wire); Object.assign(value.items[keys[0]].claims[0], { dependsOnClaimIds: ["brief-0-disposition"] }); return value; })(),
-    (() => { const value = structuredClone(wire); Object.assign(value.items[keys[0]].claims[1], { dependsOnClaimIds: ["brief-0-claim-0"] }); return value; })(),
-  ];
-  for (const value of forbiddenDependencies) assert.equal(schema.safeParse(value).success, false, "Brief dependency edges are server-derived.");
-  assert.equal(schema.safeParse({ ...wire, claims: [] }).success, false, "The old global claims list is forbidden.");
-  const legacyMembership = structuredClone(wire);
-  Object.assign(legacyMembership.items[keys[0]], { dispositionClaimId: "model-id", claimIds: ["model-id"] });
-  assert.equal(schema.safeParse(legacyMembership).success, false, "The old item membership/identity fields are forbidden.");
-
+  for (const item of parsed.adapt) {
+    const owned = parsed.claims.filter((claim) => item.claimIds.includes(claim.claimId));
+    const facts = owned.filter((claim) => claim.kind === "source_fact");
+    const passages = artifacts.find((artifact) => artifact.artifactId === item.artifactId)!.versions[0].passages;
+    assert.deepEqual(new Set(facts.flatMap((claim) => claim.sourceRefs.map((ref) => ref.passageId))), new Set(passages.map((passage) => passage.passageId)));
+    assert.equal(facts.length, 2, "Repeated citations derive only one fact per passage.");
+    for (const fact of facts) {
+      assert.equal(fact.text, passages.find((passage) => passage.passageId === fact.sourceRefs[0].passageId)!.excerpt);
+      assert.deepEqual(fact.requestQuotes, []);
+      assert.deepEqual(fact.dependsOnClaimIds, []);
+    }
+    for (const authored of owned.filter((claim) => claim.kind !== "source_fact")) {
+      for (const ref of authored.sourceRefs) {
+        const fact = facts.find((claim) => claim.sourceRefs[0].passageId === ref.passageId)!;
+        assert.ok(authored.dependsOnClaimIds.includes(fact.claimId));
+      }
+      if (authored.claimId !== item.dispositionClaimId) assert.ok(authored.dependsOnClaimIds.includes(item.dispositionClaimId));
+    }
+  }
+  const foreign = structuredClone(wire);
+  foreign.items[keys[0]].claims[0].sourceRefs = ["e3"];
+  assert.equal(schema.safeParse(foreign).success, false, "Another selected artifact cannot supply a local fact.");
+  const unknown = structuredClone(wire);
+  unknown.items[keys[0]].claims[0].sourceRefs = ["missing"];
+  assert.equal(schema.safeParse(unknown).success, false);
+  const oldFactInventory = structuredClone(wire);
+  Object.assign(oldFactInventory.items[keys[0]].claims[0], { kind: "source_fact" });
+  assert.equal(schema.safeParse(oldFactInventory).success, false, "The redundant model-authored fact inventory is no longer wire input.");
+  for (const target of ["recommendation", "claims"] as const) {
+    const injected = structuredClone(wire);
+    Object.assign(target === "recommendation" ? injected.items[keys[0]].recommendation : injected.items[keys[0]].claims[0], { dependsOnClaimIds: [] });
+    assert.equal(schema.safeParse(injected).success, false, "The model cannot author dependency edges.");
+  }
+  assert.equal(schema.safeParse({ ...wire, claims: [] }).success, false);
   const verdicts = new Map<string, SupportVerdict>(parsed.claims.map((claim) => [claim.claimId, "supported"]));
-  verdicts.set("brief-0-claim-0", "unsupported");
+  const disposition = parsed.claims.find((claim) => claim.claimId === parsed.adapt[0].dispositionClaimId)!;
+  const decisiveFact = parsed.claims.find((claim) => claim.kind === "source_fact" && disposition.dependsOnClaimIds.includes(claim.claimId))!;
+  verdicts.set(decisiveFact.claimId, "unsupported");
   const checked = buildCheckedBrief(parsed, verdicts, validateBriefDraft(parsed, request, selected, corpus), {
-    request,
-    constraintReviews: selected.map(({ caseId, artifactId, versionId }) => ({ caseId, artifactId, versionId, requestQuotes: [] })),
+    request, constraintReviews: selected.map(({ caseId, artifactId, versionId }) => ({ caseId, artifactId, versionId, requestQuotes: [] })),
   });
   assert.deepEqual(checked.adapt.map((item) => item.artifactId), ["other-art"]);
-  assert.deepEqual(checked.claims.map((claim) => claim.claimId), [
-    "brief-1-disposition", "brief-1-claim-0", "brief-1-claim-1",
-  ]);
+  assert.ok(checked.claims.every((claim) => claim.sourceRefs.every((ref) => ref.artifactId === "other-art") || claim.kind === "source_fact"));
 });
 
 test("brief wire format composes a declared quotation verbatim instead of requiring retyped prose", async () => {
@@ -621,14 +622,13 @@ test("brief wire format composes a declared quotation verbatim instead of requir
       disposition: "adapt", recommendation: {
         text: claims[0].text, sourceRefs: claims[0].sourceRefs,
         requestQuotes: claims[0].requestQuotes.map((quote) => requestSpans(request).find((span) => span.text === quote)!.spanId),
-      }, claims: claims.slice(1).map(({ text, ...claim }) => claim.kind === "source_fact" ? claim : { ...claim, text }),
+      }, claims: claims.slice(1),
     } },
   });
   // The claim declares its sentence exactly but states only the check in
   // prose: the declared sentence is composed verbatim into the stored text.
   const parsed = schema.parse(draft([
     { kind: "recommendation", text: "Adapt only after confirming the window with the client.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."] },
-    { kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [] },
   ]));
   assert.ok(parsed.adapt[0].claimIds.includes("brief-0-disposition"));
   const composed = parsed.claims.find((claim) => claim.claimId === "brief-0-disposition")!;
@@ -639,6 +639,5 @@ test("brief wire format composes a declared quotation verbatim instead of requir
   // one is still rejected at parse time; composition never repairs that.
   assert.throws(() => schema.parse(draft([
     { kind: "recommendation", text: "Preserve the audit trail after cutover. Then adapt.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."] },
-    { kind: "source_fact", text: "Recorded procedure.", sourceRefs: ["e1"], requestQuotes: [] },
   ])));
 });

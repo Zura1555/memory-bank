@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { AssessmentResult, BriefItem, BriefResult, Claim, Selection } from "../shared/protocol.ts";
+import { OPERATION_CHECKS } from "../shared/operations.ts";
 import { assessmentPassageIds, EvidenceUnavailable, loadCorpus, type CorpusManifest, type CorpusSnapshot } from "./corpus.ts";
 import { HttpFailure } from "./errors.ts";
 import type { JobRecord } from "./jobs.ts";
@@ -39,10 +40,17 @@ async function fixture() {
   const assessment: AssessmentResult = {
     conclusion: "cannot_be_established", clarifyingClaimIds: [], comparisons: [], nextActions: [], leads: [], contrasts: [], claims: structuredClone(claims), withheldClaimCount: 0,
     requestConstraints: { product_version: [], environment: [], scale: [], identity_access: [], recovery_operations: [] },
-    artifactReviews: items.map((item) => ({
-      caseId: item.caseId, artifactId: item.artifactId, role: "starting_point", verdict: "supported", reasons: [],
-      decision: { disposition: item.disposition, historicalEvidence: structuredClone(claims.find((claim) => claim.claimId === item.dispositionClaimId)!.sourceRefs), requestQuotes: [], adaptations: [], checks: [] },
-    })),
+    artifactReviews: items.map((item) => {
+      const sourceRefs = structuredClone(claims.find((claim) => claim.claimId === item.dispositionClaimId)!.sourceRefs);
+      return {
+        caseId: item.caseId, artifactId: item.artifactId, role: "starting_point", verdict: "supported", reasons: [],
+        decision: {
+          disposition: item.disposition, operation: "access_provisioning", historicalEvidence: sourceRefs, requestQuotes: [],
+          adaptations: item.disposition === "adapt" ? [{ text: "Adapt the recorded access scope to the client.", sourceRefs, requestQuotes: [] }] : [],
+          checks: item.disposition === "reuse" ? [] : [{ kind: "identity_scope", text: OPERATION_CHECKS.access_provisioning.identity_scope, sourceRefs, requestQuotes: [] }],
+        },
+      };
+    }),
     cases: [{ caseId: pastCase.caseId, availability: "available", outcome: "unknown", outcomeClaimIds: [], claimIds: claims.map((claim) => claim.claimId), artifactWork: items.map((item) => ({ artifactId: item.artifactId, availability: "available", exclusionReasons: [], disposition: item.disposition, dispositionClaimId: item.dispositionClaimId, claimIds: item.claimIds, blockerClaimIds: [], verificationClaimIds: item.disposition === "verify" ? [item.dispositionClaimId] : [] })) }],
   };
   const job: JobRecord = {
@@ -273,7 +281,6 @@ test("normalized clause coverage retains a decisive sentence tail through checke
     recommendation: { text: "Adapt this checked work only after the explicit prerequisites.", sourceRefs: [label], requestQuotes: [] },
     claims: [
       ...spans.map((span) => ({ kind: "recommendation" as const, text: "Verify this entire requested constraint before use.", sourceRefs: [label], requestQuotes: [span.spanId] })),
-      { kind: "source_fact" as const, sourceRefs: [label], requestQuotes: [] },
     ],
   } } };
   const draft = schema.parse(wire);
@@ -282,7 +289,7 @@ test("normalized clause coverage retains a decisive sentence tail through checke
   }));
   const requirements = { request: job.request_text, constraintReviews: review.constraintReviews, assessment: job.assessment_result! };
   const verdicts = validateSupportReview(draft.claims, review);
-  const firstOnly = schema.parse({ items: { [key]: { ...wire.items[key], claims: [wire.items[key].claims[0], wire.items[key].claims[wire.items[key].claims.length - 1]] } } });
+  const firstOnly = schema.parse({ items: { [key]: { ...wire.items[key], claims: [wire.items[key].claims[0]] } } });
   assert.deepEqual(buildCheckedBrief(firstOnly, verdicts, new Set(), requirements).adapt, []);
   const checked = buildCheckedBrief(draft, verdicts, validateBriefDraft(draft, job.request_text, [selection], corpus), requirements);
   assert.equal(checked.adapt[0]?.versionId, selection.versionId);
@@ -324,7 +331,7 @@ test("only a supported recommendation for its own item satisfies required quote 
           text: index === 0 ? "Reuse the checked source for this request." : "Adapt the checked source for this request.",
           sourceRefs: [label], requestQuotes: [],
         },
-        claims: [{ kind: "source_fact" as const, sourceRefs: [label], requestQuotes: [] }, ...authored],
+        claims: authored,
       }];
     })) };
     const draft = schema.parse(wire);
@@ -393,13 +400,22 @@ test("Ibis outcome excerpts retain failed-attempt and correction qualifications 
   assessment.artifactReviews.push(...pastCase.artifacts.map((artifact) => ({
     caseId: source.caseId, artifactId: artifact.artifactId, role: artifact.artifactId === source.artifactId ? "starting_point" as const : "context_only" as const,
     verdict: "supported" as const, reasons: [],
-    decision: { disposition: artifact.artifactId === source.artifactId ? "adapt" as const : null, historicalEvidence: [ref], requestQuotes: [], adaptations: [], checks: [] },
+    decision: {
+      disposition: artifact.artifactId === source.artifactId ? "adapt" as const : null,
+      operation: artifact.artifactId === source.artifactId ? "recovery_handover" as const : null,
+      historicalEvidence: artifact.artifactId === source.artifactId ? [ref] : [{
+        caseId: source.caseId, artifactId: artifact.artifactId,
+        versionId: artifact.versions[0].versionId, passageId: artifact.versions[0].passages[0].passageId,
+      }], requestQuotes: [],
+      adaptations: artifact.artifactId === source.artifactId ? [{ text: "Adapt the recorded handover to the current client.", sourceRefs: [ref], requestQuotes: [] }] : [],
+      checks: artifact.artifactId === source.artifactId ? [{ kind: "checkpoint_replay" as const, text: OPERATION_CHECKS.recovery_handover.checkpoint_replay, sourceRefs: [ref], requestQuotes: [] }] : [],
+    },
   })));
   const key = `${selection.caseId}/${selection.artifactId}/${selection.versionId}`;
   const label = assessmentPassageIds(corpus).get(source.passageId)!;
   const draft = briefDraftSchemaFor(job.request_text, [selection], corpus, assessment).parse({ items: { [key]: {
     disposition: "adapt", recommendation: { text: "Adapt the checked test procedure after verifying client scope.", sourceRefs: [label], requestQuotes: [requestSpans(job.request_text)[0].spanId] },
-    claims: [{ kind: "source_fact", sourceRefs: [label], requestQuotes: [] }],
+    claims: [],
   } } });
   const requirements = { request: job.request_text, assessment, constraintReviews: [{ caseId: ref.caseId, artifactId: ref.artifactId, versionId: ref.versionId, requestQuotes: [job.request_text] }] };
   const checked = buildCheckedBrief(draft, new Map(draft.claims.map((claim) => [claim.claimId, "supported" as const])), validateBriefDraft(draft, job.request_text, [selection], corpus), requirements);

@@ -1,5 +1,6 @@
 import * as z from "zod";
 import type { ArtifactDecision, AssessmentResult, BriefDisposition, ComparisonRow, Selection } from "../shared/protocol.ts";
+import { OPERATION_CHECKS, renderOperationCheck, type OperationKind } from "../shared/operations.ts";
 import { assessmentPassageIds, type CorpusSnapshot } from "./corpus.ts";
 import { completeRequestQuotes, requestSpans } from "./request-constraints.ts";
 import { applySourceHistoryQualifications } from "./source-history.ts";
@@ -28,26 +29,57 @@ const artifactFact = assessmentClaim.omit({ claimId: true, text: true }).extend(
   kind: z.literal("source_fact"), sourceRefs: z.array(id).length(1), requestQuotes: z.array(claim.shape.requestQuotes.element).max(0),
 });
 const artifactAuthoredClaim = assessmentClaim.omit({ claimId: true }).extend({ kind: z.enum(["interpretation", "recommendation"]) });
+type OperationCheckKindTuple<Operation extends OperationKind> = [
+  keyof typeof OPERATION_CHECKS[Operation] & string,
+  ...(keyof typeof OPERATION_CHECKS[Operation] & string)[],
+];
+function operationSchemaFor<Operation extends OperationKind>(operation: Operation) {
+  const kinds = Object.keys(OPERATION_CHECKS[operation]) as OperationCheckKindTuple<Operation>;
+  return { identity: z.literal(operation), checkKind: z.enum(kinds) };
+}
+const operationSchemas = {
+  api_adapter: operationSchemaFor("api_adapter"),
+  recovery_handover: operationSchemaFor("recovery_handover"),
+  data_mapping: operationSchemaFor("data_mapping"),
+  access_provisioning: operationSchemaFor("access_provisioning"),
+};
+const unboundApiCheckKind = operationSchemas.api_adapter.checkKind.exclude(["client_operation_limits"]);
+const operationLimitCheckKind = z.literal("client_operation_limits");
+function operationCheckFor<Operation extends OperationKind>(operation: Operation, sourceRefs: z.ZodArray<z.ZodType<string, string>>, requestQuotes: z.ZodArray<z.ZodType<string, string>>) {
+  const check = z.strictObject({ kind: operationSchemas[operation].checkKind, sourceRefs, requestQuotes });
+  return operation === "api_adapter" ? z.union([
+    check.extend({ kind: unboundApiCheckKind }),
+    check.extend({ kind: operationLimitCheckKind, requestQuotes: z.array(requestQuotes.element).length(1) }),
+  ]) : check;
+}
 function artifactWorkFor(sourceRefs: z.ZodArray<z.ZodType<string, string>>, requestQuotes: z.ZodArray<z.ZodType<string, string>> = assessmentClaim.shape.requestQuotes) {
   const condition = z.strictObject({
     text: z.string().min(1).max(600),
     sourceRefs,
     requestQuotes: z.array(requestQuotes.element).max(1),
   });
-  const fields = {
-    historicalEvidence: sourceRefs,
-    requestQuotes,
-    adaptations: z.array(condition).max(8),
-    checks: z.array(condition).max(8),
+  const workFor = <Operation extends OperationKind>(operation: Operation) => {
+    const check = operationCheckFor(operation, sourceRefs, z.array(requestQuotes.element).max(1));
+    const fields = { operation: operationSchemas[operation].identity, historicalEvidence: sourceRefs, requestQuotes };
+    return [
+      z.strictObject({ disposition: z.literal("reuse"), ...fields, adaptations: z.array(condition).max(0), checks: z.array(check).max(0) }),
+      z.strictObject({ disposition: z.literal("adapt"), ...fields, adaptations: z.array(condition).min(1).max(8), checks: z.array(check).min(1).max(8) }),
+      z.strictObject({ disposition: z.literal("verify"), ...fields, adaptations: z.array(condition).max(0), checks: z.array(check).min(1).max(8) }),
+    ] as const;
   };
+  const noChecks = z.array(operationCheckFor("api_adapter", sourceRefs, z.array(requestQuotes.element).max(1))).max(0);
   return z.union([
-    z.strictObject({ disposition: z.literal("reuse"), ...fields, adaptations: z.array(condition).max(0), checks: z.array(condition).max(0) }),
-    z.strictObject({ disposition: z.literal("adapt"), ...fields, adaptations: z.array(condition).min(1).max(8), checks: z.array(condition).min(1).max(8) }),
-    z.strictObject({ disposition: z.literal("verify"), ...fields, adaptations: z.array(condition).max(0), checks: z.array(condition).min(1).max(8) }),
-    z.strictObject({ disposition: z.null(), ...fields, adaptations: z.array(condition).max(0), checks: z.array(condition).max(0) }),
+    ...workFor("api_adapter"),
+    ...workFor("recovery_handover"),
+    ...workFor("data_mapping"),
+    ...workFor("access_provisioning"),
+    z.strictObject({
+      disposition: z.null(), operation: z.null(), historicalEvidence: sourceRefs, requestQuotes,
+      adaptations: z.array(condition).max(0), checks: noChecks,
+    }),
   ]);
 }
-const artifactWork = z.union(artifactWorkFor(assessmentClaim.shape.sourceRefs).options.map((option) => option.extend({ artifactId: id })));
+const artifactWork = z.union(artifactWorkFor(z.array(id).min(1).max(16)).options.map((option) => option.extend({ artifactId: id })));
 const caseDraft = z.strictObject({
   caseId: id,
   outcome: z.enum(["observed_success", "partial", "failed", "unknown"]),
@@ -233,11 +265,10 @@ export function briefDraftSchemaFor(request: string, selected: Selection[], corp
       requestQuotes: z.array(requestQuoteIdentity(request)).max(1),
       text: z.string().min(1).max(3_499),
     });
-    const local = z.union([artifactFact.omit({ dependsOnClaimIds: true }).extend({ sourceRefs: z.array(authored.shape.sourceRefs.element).length(1) }), authored]);
     const schema = z.strictObject({
       disposition: z.literal(work.disposition),
       recommendation: authored.omit({ kind: true }),
-      claims: z.array(local).min(1).max(31),
+      claims: z.array(authored).max(31),
     });
     return { key: `${item.caseId}/${item.artifactId}/${item.versionId}`, item, itemIndex, refs, schema };
   });
@@ -248,31 +279,19 @@ export function briefDraftSchemaFor(request: string, selected: Selection[], corp
     const entries = inventory.map(({ key, item, itemIndex, refs }) => {
       const decision = items[key];
       const dispositionClaimId = `brief-${itemIndex}-disposition`;
-      const evidence = new Map<string, string>();
-      decision.claims.forEach((value, index) => {
-        if (value.kind === "source_fact") evidence.set(value.sourceRefs[0], `brief-${itemIndex}-claim-${index}`);
-      });
       const inline = [{ ...decision.recommendation, kind: "recommendation" as const }, ...decision.claims];
+      const evidence = new Map([...new Set(inline.flatMap((value) => value.sourceRefs))]
+        .map((label, index) => [label, `brief-${itemIndex}-fact-${index}`]));
       const claimIds = inline.map((value, index) => {
         const claimId = index === 0 ? dispositionClaimId : `brief-${itemIndex}-claim-${index - 1}`;
-        const dependsOnClaimIds = new Set<string>();
-        if (value.kind !== "source_fact") {
-          if (index > 0) dependsOnClaimIds.add(dispositionClaimId);
-          for (const label of value.sourceRefs) {
-            const evidenceId = evidence.get(label);
-            if (evidenceId) dependsOnClaimIds.add(evidenceId);
-            else ctx.addIssue({
-              code: "custom", path: ["items", key, index === 0 ? "recommendation" : "claims", ...(index === 0 ? [] : [index - 1]), "sourceRefs"],
-              message: "BRIEF_FACTUAL_EVIDENCE_REQUIRED",
-            });
-          }
-        }
+        const dependsOnClaimIds = new Set([
+          ...(index > 0 ? [dispositionClaimId] : []),
+          ...value.sourceRefs.map((label) => evidence.get(label)!),
+        ]);
         const sourceRefs = value.sourceRefs.map((label) => refs.get(label)!);
-        const text = value.kind === "source_fact"
-          ? sourceRefs.map((ref) => corpus.passages.get(ref.passageId)!.excerpt).join("\n")
-          : value.requestQuotes.length === 1 && !value.text.includes(value.requestQuotes[0])
-            ? `${value.requestQuotes[0]} ${value.text}` : value.text;
-        if (spans.some((span) => text.includes(span.text) && !value.requestQuotes.includes(span.text)) && value.kind !== "source_fact") {
+        const text = value.requestQuotes.length === 1 && !value.text.includes(value.requestQuotes[0])
+          ? `${value.requestQuotes[0]} ${value.text}` : value.text;
+        if (spans.some((span) => text.includes(span.text) && !value.requestQuotes.includes(span.text))) {
           ctx.addIssue({ code: "custom", path: ["items", key, index === 0 ? "recommendation" : "claims", ...(index === 0 ? [] : [index - 1]), "text"], message: "UNDECLARED_REQUEST_QUOTATION" });
         }
         claims.push({
@@ -281,6 +300,14 @@ export function briefDraftSchemaFor(request: string, selected: Selection[], corp
         });
         return claimId;
       });
+      for (const [label, claimId] of evidence) {
+        const ref = refs.get(label)!;
+        claims.push({
+          claimId, kind: "source_fact", text: corpus.passages.get(ref.passageId)!.excerpt,
+          sourceRefs: [ref], requestQuotes: [], dependsOnClaimIds: [],
+        });
+        claimIds.push(claimId);
+      }
       return { caseId: item.caseId, artifactId: item.artifactId, versionId: item.versionId, disposition: decision.disposition, dispositionClaimId, claimIds };
     });
     const qualified = applySourceHistoryQualifications(corpus, claims);
@@ -316,13 +343,53 @@ export const briefSupportReviewSchema = supportReviewSchema.extend({
 const decisionCondition = z.strictObject({
   text: z.string().min(1).max(600), sourceRefs: z.array(sourceRef).min(1).max(16), requestQuotes: claim.shape.requestQuotes,
 });
-const artifactDecision = z.strictObject({
-  disposition: z.enum(["reuse", "adapt", "verify"]).nullable(),
-  historicalEvidence: z.array(sourceRef).min(1).max(16),
-  requestQuotes: z.array(z.string().min(1).max(500)).max(64),
-  adaptations: z.array(decisionCondition).max(8),
-  checks: z.array(decisionCondition).max(8),
-});
+function canonicalOperationCheckFor<Operation extends OperationKind>(operation: Operation) {
+  const base = z.strictObject({
+    kind: operationSchemas[operation].checkKind,
+    text: z.string().min(1).max(500),
+    sourceRefs: z.array(sourceRef).min(1).max(16),
+    requestQuotes: z.array(claim.shape.requestQuotes.element).max(1),
+  });
+  const schema = operation === "api_adapter" ? z.union([
+    base.extend({ kind: unboundApiCheckKind }),
+    base.extend({
+      kind: operationLimitCheckKind, text: z.string().min(1).max(1_100),
+      requestQuotes: z.array(claim.shape.requestQuotes.element).length(1),
+    }),
+  ]) : base;
+  return schema.superRefine((check, context) => {
+    if (renderOperationCheck(operation, check.kind, check.requestQuotes) !== check.text) {
+      context.addIssue({ code: "custom", path: ["text"], message: "Rendered check text does not match its operation and kind." });
+    }
+  });
+}
+function canonicalDecisionFor<Operation extends OperationKind>(operation: Operation) {
+  const check = canonicalOperationCheckFor(operation);
+  const fields = {
+    operation: operationSchemas[operation].identity,
+    historicalEvidence: z.array(sourceRef).min(1).max(16),
+    requestQuotes: z.array(z.string().min(1).max(500)).max(64),
+  };
+  const checks = z.array(check).max(8);
+  return [
+    z.strictObject({ disposition: z.literal("reuse"), ...fields, adaptations: z.array(decisionCondition).max(0), checks: checks.max(0) }),
+    z.strictObject({ disposition: z.literal("adapt"), ...fields, adaptations: z.array(decisionCondition).min(1).max(8), checks: checks.min(1).max(8) }),
+    z.strictObject({ disposition: z.literal("verify"), ...fields, adaptations: z.array(decisionCondition).max(0), checks: checks.min(1).max(8) }),
+  ] as const;
+}
+const artifactDecision = z.union([
+  ...canonicalDecisionFor("api_adapter"),
+  ...canonicalDecisionFor("recovery_handover"),
+  ...canonicalDecisionFor("data_mapping"),
+  ...canonicalDecisionFor("access_provisioning"),
+  z.strictObject({
+    disposition: z.null(), operation: z.null(),
+    historicalEvidence: z.array(sourceRef).min(1).max(16),
+    requestQuotes: z.array(z.string().min(1).max(500)).max(64),
+    adaptations: z.array(decisionCondition).max(0),
+    checks: z.array(z.never()).max(0),
+  }),
+]);
 const decisionReason = z.strictObject({
   target: z.enum(["history", "request_constraint", "adaptation", "check", "disposition"]),
   explanation: z.string().min(1).max(600),
@@ -336,11 +403,21 @@ const reviewFields = {
 };
 export const artifactReviewsSchema = z.array(z.strictObject({
   caseId: id, artifactId: id, decision: artifactDecision, ...reviewFields,
-})).max(256);
+})).max(256).superRefine((reviews, context) => {
+  const key = (ref: z.infer<typeof sourceRef>) => `${ref.caseId}\u0000${ref.artifactId}\u0000${ref.versionId}\u0000${ref.passageId}`;
+  for (const [index, review] of reviews.entries()) {
+    const history = new Set(review.decision.historicalEvidence.map(key));
+    const conditions = [...review.decision.adaptations, ...review.decision.checks];
+    if (review.decision.historicalEvidence.some((ref) => ref.caseId !== review.caseId || ref.artifactId !== review.artifactId)
+      || conditions.some((condition) => condition.sourceRefs.some((ref) => !history.has(key(ref)) || ref.caseId !== review.caseId || ref.artifactId !== review.artifactId))) {
+      context.addIssue({ code: "custom", path: [index, "decision"], message: "Decision evidence and operation checks must belong to the exact artifact history." });
+    }
+  }
+});
 export const assessmentReviewSchema = z.strictObject({
   requestConstraints: requestConstraintsSchema,
   artifactReviews: z.array(z.strictObject({
-    caseId: id, artifactId: id, disposition: artifactDecision.shape.disposition, ...reviewFields,
+    caseId: id, artifactId: id, disposition: z.enum(["reuse", "adapt", "verify"]).nullable(), ...reviewFields,
   })).max(256),
   claimReviews: supportReviewSchema.shape.claimReviews,
 });
@@ -491,43 +568,69 @@ export function parseAssessmentDraft(value: unknown, corpus: CorpusSnapshot): As
       const historicalLabels = [...new Set(work.historicalEvidence)];
       const historicalEvidence = resolveRefs(historicalLabels);
       const evidenceIds = new Map(historicalLabels.map((label, index) => [label, `artifact-${caseIndex}-${workIndex}-history-${index}`]));
-      const decision: ArtifactDecision = {
+      const historicalFactIds = [...evidenceIds.values()];
+      const operationClaimId = work.operation === null ? null : `artifact-${caseIndex}-${workIndex}-operation`;
+      const decisionChecks = work.operation === null ? [] : work.checks.map((check) => ({
+        kind: check.kind,
+        text: renderOperationCheck(work.operation, check.kind, check.requestQuotes),
+        sourceRefs: resolveRefs(check.sourceRefs),
+        requestQuotes: check.requestQuotes,
+      }));
+      const decision = artifactDecision.parse({
         disposition: work.disposition,
+        operation: work.operation,
         historicalEvidence,
         requestQuotes: work.requestQuotes,
         adaptations: work.adaptations.map((condition) => ({ ...condition, sourceRefs: resolveRefs(condition.sourceRefs) })),
-        checks: work.checks.map((condition) => ({ ...condition, sourceRefs: resolveRefs(condition.sourceRefs) })),
-      };
+        checks: decisionChecks,
+      });
       for (const [index, ref] of historicalEvidence.entries()) {
         claims.push({ claimId: evidenceIds.get(historicalLabels[index])!, text: sourceText([ref]), kind: "source_fact", sourceRefs: [ref], requestQuotes: [], dependsOnClaimIds: [] });
       }
-      const addConditions = (role: string, items: typeof work.checks): string[] => items.map((condition, index) => {
-        const evidence = condition.sourceRefs.map((label) => {
-          const claimId = evidenceIds.get(label);
-          if (!claimId) throw new Error("ARTIFACT_FACTUAL_EVIDENCE_REQUIRED");
-          return claimId;
+      if (operationClaimId !== null && work.operation !== null) {
+        claims.push({
+          claimId: operationClaimId,
+          text: `The historical operation documented by this artifact is ${work.operation.replace("_", " ")}.`,
+          kind: "interpretation",
+          sourceRefs: historicalEvidence,
+          requestQuotes: [],
+          dependsOnClaimIds: historicalFactIds,
         });
-        const claimId = `artifact-${caseIndex}-${workIndex}-${role}-${index}`;
+      }
+      const conditionEvidence = (labels: string[]) => labels.map((label) => {
+        const claimId = evidenceIds.get(label);
+        if (!claimId) throw new Error("ARTIFACT_FACTUAL_EVIDENCE_REQUIRED");
+        return claimId;
+      });
+      const adaptationClaimIds = work.adaptations.map((condition, index) => {
+        const claimId = `artifact-${caseIndex}-${workIndex}-adapt-${index}`;
         claims.push({
           ...condition, claimId, kind: "recommendation", sourceRefs: resolveRefs(condition.sourceRefs),
-          text: `${role === "adapt" ? "Proposed adaptation" : "Required pre-use check"}: ${condition.text}${condition.requestQuotes.map((quote) => ` Current request: ${quote}`).join("")}`,
-          dependsOnClaimIds: [dispositionClaimId, ...evidence],
+          text: `Proposed adaptation: ${condition.text}${condition.requestQuotes.map((quote) => ` Current request: ${quote}`).join("")}`,
+          dependsOnClaimIds: [dispositionClaimId, ...conditionEvidence(condition.sourceRefs)],
         });
         return claimId;
       });
-      const adaptationClaimIds = addConditions("adapt", work.adaptations);
-      const verificationClaimIds = addConditions("check", work.checks);
+      const verificationClaimIds = work.operation === null ? [] : work.checks.map((check, index) => {
+        const claimId = `artifact-${caseIndex}-${workIndex}-check-${index}`;
+        const text = renderOperationCheck(work.operation, check.kind, check.requestQuotes);
+        claims.push({
+          claimId, text, kind: "recommendation", sourceRefs: resolveRefs(check.sourceRefs), requestQuotes: check.requestQuotes,
+          dependsOnClaimIds: [dispositionClaimId, ...conditionEvidence(check.sourceRefs)],
+        });
+        return claimId;
+      });
       claims.push({
         claimId: dispositionClaimId,
         text: work.disposition === null ? "This artifact is excluded; no implementation starting work is offered."
           : `${work.disposition === "adapt" ? "Conditional Adapt" : work.disposition === "reuse" ? "Reuse" : "Verify"} starting material; proposed changes and required checks do not establish current-client capabilities, combined acceptance or production readiness.`,
         kind: work.disposition === null ? "interpretation" : "recommendation",
         sourceRefs: historicalEvidence, requestQuotes: work.requestQuotes,
-        dependsOnClaimIds: [...evidenceIds.values()],
+        dependsOnClaimIds: [...historicalFactIds, ...(operationClaimId === null ? [] : [operationClaimId])],
       });
       return {
         artifactId: work.artifactId, disposition: work.disposition, decision, dispositionClaimId,
-        claimIds: [dispositionClaimId, ...evidenceIds.values(), ...adaptationClaimIds, ...verificationClaimIds],
+        claimIds: [dispositionClaimId, ...historicalFactIds, ...(operationClaimId === null ? [] : [operationClaimId]), ...adaptationClaimIds, ...verificationClaimIds],
         blockerClaimIds: [], verificationClaimIds,
       };
     }),

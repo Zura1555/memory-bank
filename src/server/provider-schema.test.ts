@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
+import { OPERATION_CHECKS } from "../shared/operations.ts";
 import type { Env } from "./env.ts";
 import { assessmentPassageIds, loadCorpus } from "./corpus.ts";
 import { callModel, type ModelStage } from "./model.ts";
 import { assessmentDraftPrompt, assessmentReviewPrompt, briefDraftPrompt, briefReviewPrompt, type StagePrompt } from "./prompts.ts";
-import { assessmentDraftSchema, briefDraftSchema, parseAssessmentDraft, type AssessmentReview, type BriefDraft } from "./schemas.ts";
+import { assessmentDraftSchema, briefDraftSchema, parseAssessmentDraft, reviewSchema, type AssessmentReview, type BriefDraft } from "./schemas.ts";
 import { buildCheckedAssessment, buildCheckedBrief, revalidateAssessment, revalidateBrief, validateAssessmentDraft, validateArtifactReview, validateBriefDraft, validateSupportReview } from "./gates.ts";
 import { requestSpans } from "./request-constraints.ts";
 
@@ -103,9 +104,14 @@ test("all four production stages emit strict provider-subset schemas without wea
         assessment: { sourceRefs: [ownLabel], requestQuotes: [spans[0].spanId], dependsOnClaimIds: [] },
         implication: { artifactId: firstArtifact.artifactId, effect: "checked_decision" },
       }] } : {}),
-      artifactWork: Object.fromEntries(item.artifacts.map((artifact) => {
+      artifactWork: Object.fromEntries(item.artifacts.map((artifact, artifactIndex) => {
         const label = labels.get(artifact.versions[0].passages[0].passageId)!;
-        return [artifact.artifactId, { disposition: "adapt", historicalEvidence: [label], requestQuotes: [spans[0].spanId], adaptations: [authored(label)], checks: [authored(label)] }];
+        const operation = artifactIndex === 0 ? "api_adapter" : "recovery_handover";
+        return [artifact.artifactId, {
+          disposition: "adapt", operation, historicalEvidence: [label], requestQuotes: [spans[0].spanId],
+          adaptations: [authored(label)],
+          checks: Object.entries(OPERATION_CHECKS[operation]).map(([kind]) => ({ kind, sourceRefs: [label], requestQuotes: [spans[0].spanId] })),
+        }];
       })),
     }])),
   };
@@ -133,6 +139,21 @@ test("all four production stages emit strict provider-subset schemas without wea
       (() => { const value = structuredClone(wire); value.cases[first.caseId].artifactWork[firstArtifact.artifactId].checks = []; return value; })(),
       ...[0, 17].map((count) => { const value = structuredClone(wire); value.cases[first.caseId].artifactWork[firstArtifact.artifactId].historicalEvidence = Array(count).fill(ownLabel); return value; }),
       (() => { const value = structuredClone(wire); value.cases[first.caseId].artifactWork[firstArtifact.artifactId].historicalEvidence = [foreignLabel]; return value; })(),
+      (() => { const value = structuredClone(wire); value.cases[first.caseId].artifactWork[firstArtifact.artifactId].operation = "recovery_handover"; return value; })(),
+      (() => { const value = structuredClone(wire); Object.assign(value.cases[first.caseId].artifactWork[firstArtifact.artifactId].checks[0], { kind: "operating_authority" }); return value; })(),
+      (() => { const value = structuredClone(wire); Object.assign(value.cases[first.caseId].artifactWork[firstArtifact.artifactId], { operation: undefined }); return value; })(),
+      (() => { const value = structuredClone(wire); Object.assign(value.cases[first.caseId].artifactWork[firstArtifact.artifactId], { operation: null }); return value; })(),
+      (() => {
+        const value = structuredClone(wire);
+        Object.assign(value.cases[first.caseId].artifactWork[firstArtifact.artifactId], { disposition: null, adaptations: [], checks: [] });
+        return value;
+      })(),
+      (() => { const value = structuredClone(wire); Object.assign(value.cases[first.caseId].artifactWork[firstArtifact.artifactId].checks[0], { text: "Provider-authored check text." }); return value; })(),
+      (() => { const value = structuredClone(wire); value.cases[first.caseId].artifactWork[firstArtifact.artifactId].checks[0].sourceRefs = [foreignLabel]; return value; })(),
+      (() => { const value = structuredClone(wire); value.cases[first.caseId].artifactWork[firstArtifact.artifactId].checks[0].sourceRefs = ["missing-passage"]; return value; })(),
+      (() => { const value = structuredClone(wire); value.cases[first.caseId].artifactWork[firstArtifact.artifactId].checks[0].requestQuotes = ["unknown-span"]; return value; })(),
+      (() => { const value = structuredClone(wire); value.cases[first.caseId].artifactWork[firstArtifact.artifactId].checks.find((check) => check.kind === "client_operation_limits")!.requestQuotes = []; return value; })(),
+      (() => { const value = structuredClone(wire); value.cases[first.caseId].artifactWork[firstArtifact.artifactId].checks.find((check) => check.kind === "client_operation_limits")!.requestQuotes = spans.map((span) => span.spanId); return value; })(),
       (() => { const value = structuredClone(wire); value.cases[first.caseId].reasons![0].sourceRefs = [ownLabel, ownLabel]; return value; })(),
       (() => { const value = structuredClone(wire); value.cases[first.caseId].comparisons![0].evidence.sourceRefs = [ownLabel, ownLabel]; return value; })(),
       (() => { const value = structuredClone(wire); value.claims[0].sourceRefs = [ownLabel, ownLabel]; return value; })(),
@@ -151,23 +172,46 @@ test("all four production stages emit strict provider-subset schemas without wea
     });
     // Continue inspecting the other stages even when the subset regression is red.
     const draft = parseAssessmentDraft(normalized ?? prompt.responseSchema!.parse(wire), corpus);
+    const apiWork = draft.cases[0].artifactWork[0];
+    const handoverWork = draft.cases[0].artifactWork[1];
+    const operationClaimId = "artifact-0-0-operation";
+    assert.ok(apiWork.claimIds.includes(operationClaimId));
+    const operationClaim = draft.claims.find((claim) => claim.claimId === operationClaimId)!;
+    assert.equal(operationClaim.kind, "interpretation");
+    assert.ok(operationClaim.dependsOnClaimIds.length > 0);
+    assert.ok(operationClaim.dependsOnClaimIds.every((claimId) => {
+      const factClaim = draft.claims.find((claim) => claim.claimId === claimId);
+      return factClaim?.kind === "source_fact" && factClaim.sourceRefs.every((ref) => ref.caseId === first.caseId && ref.artifactId === firstArtifact.artifactId);
+    }));
+    assert.deepEqual(operationClaim.sourceRefs, apiWork.decision.historicalEvidence);
+    assert.ok(apiWork.decision.checks.every((check) => check.sourceRefs.every((ref) => ref.caseId === first.caseId && ref.artifactId === firstArtifact.artifactId)));
+    assert.ok(handoverWork.decision.checks.every((check) => check.sourceRefs.every((ref) => ref.caseId === first.caseId && ref.artifactId === first.artifacts[1].artifactId)));
     const reviewPrompt = assessmentReviewPrompt(request, corpus, draft);
+    assert.ok(reviewPrompt.reviewTargets!.claimIds.includes(operationClaimId));
     const reviewWire = {
       requestConstraints: constraints,
       decisions: Object.fromEntries(reviewPrompt.reviewTargets!.artifacts!.map((item) => [`${item.caseId}/${item.artifactId}`, { disposition: item.disposition, role: "starting_point", verdict: "supported", reasons: [] }])),
       claimVerdicts: Object.fromEntries(reviewPrompt.reviewTargets!.claimIds.map((claimId) => [claimId, "supported"])),
     };
+    const operationRejectedWire = structuredClone(reviewWire);
+    operationRejectedWire.claimVerdicts[operationClaimId] = "unsupported";
     let review: AssessmentReview | undefined;
     await t.test("assessment_review", async () => {
       const missing = structuredClone(reviewWire); delete missing.claimVerdicts[draft.claims[0].claimId];
       const short = structuredClone(reviewWire); delete short.decisions[Object.keys(short.decisions)[0]];
       const long = structuredClone(reviewWire); long.decisions["foreign/artifact"] = Object.values(long.decisions)[0];
       const invalid = [missing, short, long, { ...reviewWire, claimVerdicts: { ...reviewWire.claimVerdicts, foreign: "supported" } }];
-      review = (await exchange("assessment_review", reviewPrompt, reviewWire, inspect(reviewWire, invalid))).output as AssessmentReview;
+      review = (await exchange("assessment_review", reviewPrompt, reviewWire, inspect(reviewWire, invalid, [operationRejectedWire]))).output as AssessmentReview;
       for (const value of invalid) await assert.rejects(exchange("assessment_review", reviewPrompt, value), { code: "MODEL_OUTPUT_SCHEMA_INVALID" });
     });
     review ??= (await exchange("assessment_review", reviewPrompt, reviewWire)).output as AssessmentReview;
     const checked = buildCheckedAssessment(draft, validateSupportReview(draft.claims.filter((claim) => reviewPrompt.reviewTargets!.claimIds.includes(claim.claimId)), review), validateAssessmentDraft(draft, request, corpus), corpus, validateArtifactReview(draft, review), { request, constraints: review.requestConstraints });
+    const reread = revalidateAssessment(checked, request, corpus);
+    const canonicalApiReview = reread.artifactReviews.find((item) => item.artifactId === firstArtifact.artifactId)!;
+    assert.ok(canonicalApiReview.decision.checks.every((check) => check.sourceRefs.every((ref) => ref.caseId === first.caseId && ref.artifactId === firstArtifact.artifactId)));
+    const independentOperationReview = reviewSchema(reviewPrompt.reviewTargets!, request).parse(operationRejectedWire) as AssessmentReview;
+    const rejectedOperation = buildCheckedAssessment(draft, validateSupportReview(draft.claims.filter((claim) => reviewPrompt.reviewTargets!.claimIds.includes(claim.claimId)), independentOperationReview), validateAssessmentDraft(draft, request, corpus), corpus, validateArtifactReview(draft, independentOperationReview), { request, constraints: independentOperationReview.requestConstraints });
+    assert.equal(rejectedOperation.cases[0].artifactWork.find((work) => work.artifactId === firstArtifact.artifactId)?.disposition, null);
     const selected = first.artifacts.slice(0, 2).map((artifact) => ({ caseId: first.caseId, artifactId: artifact.artifactId, versionId: artifact.versions[0].versionId, passageIds: [artifact.versions[0].passages[0].passageId] }));
     const keys = selected.map((item) => `${item.caseId}/${item.artifactId}/${item.versionId}`);
     const briefWire = { items: Object.fromEntries(selected.map((item) => {
@@ -176,7 +220,6 @@ test("all four production stages emit strict provider-subset schemas without wea
         disposition: "adapt",
         recommendation: { text: "Validate client compatibility before adapting this recorded procedure.", sourceRefs: [label], requestQuotes: [spans[0].spanId] },
         claims: [
-          { kind: "source_fact", sourceRefs: [label], requestQuotes: [] },
           { kind: "recommendation", text: "Confirm the request's time window before using the procedure.", sourceRefs: [label], requestQuotes: [spans[1].spanId] },
         ],
       }];
@@ -184,7 +227,6 @@ test("all four production stages emit strict provider-subset schemas without wea
     const briefPrompt = briefDraftPrompt(request, selected, corpus, checked);
     let brief: BriefDraft | undefined;
     await t.test("brief_draft", async () => {
-      const multiple = structuredClone(briefWire); multiple.items[keys[0]].claims[0].sourceRefs = [ownLabel, ownLabel];
       const empty = structuredClone(briefWire); empty.items[keys[0]].claims[0].sourceRefs = [];
       const foreign = structuredClone(briefWire); foreign.items[keys[0]].recommendation.sourceRefs = [foreignLabel];
       const missing = structuredClone(briefWire); delete missing.items[keys[0]];
@@ -193,22 +235,18 @@ test("all four production stages emit strict provider-subset schemas without wea
       const forbiddenDependencies = [
         (() => { const value = structuredClone(briefWire); Object.assign(value.items[keys[0]].recommendation, { dependsOnClaimIds: [] }); return value; })(),
         (() => { const value = structuredClone(briefWire); Object.assign(value.items[keys[0]].claims[0], { dependsOnClaimIds: [] }); return value; })(),
-        (() => { const value = structuredClone(briefWire); Object.assign(value.items[keys[0]].claims[1], { dependsOnClaimIds: [] }); return value; })(),
       ];
       const legacyGlobal = { ...briefWire, claims: [] };
       const legacyMembership = structuredClone(briefWire);
       Object.assign(legacyMembership.items[keys[0]], { dispositionClaimId: "model-id", claimIds: ["model-id"] });
-      const invalid = [multiple, empty, foreign, missing, ...bounds, ...forbiddenDependencies, legacyGlobal, legacyMembership, { items: { ...briefWire.items, "foreign/artifact/version": briefWire.items[keys[0]] } }];
+      const oldFacts = structuredClone(briefWire);
+      Object.assign(oldFacts.items[keys[0]].claims[0], { kind: "source_fact" });
+      const invalid = [empty, foreign, missing, ...bounds, ...forbiddenDependencies, oldFacts, legacyGlobal, legacyMembership, { items: { ...briefWire.items, "foreign/artifact/version": briefWire.items[keys[0]] } }];
       brief = briefDraftSchema.parse((await exchange("brief_draft", briefPrompt, briefWire, inspect(briefWire, invalid, [bounded]))).output);
       for (const value of invalid) await assert.rejects(exchange("brief_draft", briefPrompt, value), { code: "MODEL_OUTPUT_SCHEMA_INVALID" });
     });
     assert.ok(brief);
     assert.equal(brief.adapt.length, 2);
-    assert.equal(brief.claims.filter((claim) => claim.claimId.startsWith("brief-")).length, 6);
-    assert.deepEqual(brief.adapt.map((item) => item.claimIds.slice(0, 3)), [
-      ["brief-0-disposition", "brief-0-claim-0", "brief-0-claim-1"],
-      ["brief-1-disposition", "brief-1-claim-0", "brief-1-claim-1"],
-    ]);
     assert.equal(validateBriefDraft(brief, request, selected, corpus).size, 0);
     const briefReview = briefReviewPrompt(request, selected, corpus, checked, brief);
     const briefReviewWire = { constraintQuotes: Object.fromEntries(keys.map((key) => [key, spans.map((span) => span.spanId)])), claimVerdicts: Object.fromEntries(brief.claims.map((item) => [item.claimId, "supported"])) };

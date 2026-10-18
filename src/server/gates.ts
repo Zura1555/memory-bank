@@ -296,6 +296,11 @@ export function buildCheckedAssessment(
   artifactReviews: Map<string, ArtifactReview>,
   requirementReview: { request: string; constraints: RequestConstraints },
 ): AssessmentResult {
+  const reviewEntries = [...artifactReviews.entries()];
+  if (reviewEntries.some(([key, review]) => key !== `${review.caseId}/${review.artifactId}`)
+    || !artifactReviewsSchema.safeParse(reviewEntries.map(([, review]) => review)).success) {
+    throw new GateFailure("INVALID_ARTIFACT_DECISION_REVIEW", "Artifact decisions must satisfy their canonical operation and evidence contract.");
+  }
   const rejected = new Set(invalidRefs);
   const decisionVerdicts = new Map(verdicts);
   const constraints = requestConstraintsSchema.safeParse(requirementReview.constraints);
@@ -332,6 +337,8 @@ export function buildCheckedAssessment(
     }
   }
   const draftClaims = new Map(draft.claims.map((claim) => [claim.claimId, claim]));
+  const scaleQuotes = [...new Set([...constraints.data.scale, ...draftConstraints.data.scale])];
+  const missingLimitQuotes = new Map<string, string[]>();
   for (const item of draft.cases) {
     for (const work of item.artifactWork) {
       const review = artifactReviews.get(`${item.caseId}/${work.artifactId}`)!;
@@ -342,6 +349,25 @@ export function buildCheckedAssessment(
         throw new GateFailure("INVALID_ARTIFACT_DECISION_REVIEW", "Decision review has mismatched disposition, missing reasons or invalid evidence.");
       }
       if (work.disposition !== null && review.role !== "starting_point") rejected.add(work.dispositionClaimId);
+      if (review.decision.operation === "api_adapter" && (work.disposition === "adapt" || work.disposition === "verify")) {
+        const ownedQuotes = new Set(completeRequestQuotes(requirementReview.request, [
+          ...review.decision.requestQuotes,
+          ...review.decision.adaptations.flatMap((condition) => condition.requestQuotes),
+          ...review.decision.checks.flatMap((condition) => condition.requestQuotes),
+        ]));
+        const missing = scaleQuotes.filter((quote) => ownedQuotes.has(quote) && !review.decision.checks.some((check) =>
+          check.kind === "client_operation_limits" && check.requestQuotes.includes(quote)
+          && work.verificationClaimIds.some((id) => {
+            const claim = draftClaims.get(id);
+            return work.claimIds.includes(id) && claim?.kind === "recommendation"
+              && claim.text === check.text && claim.requestQuotes.includes(quote)
+              && JSON.stringify(claim.sourceRefs) === JSON.stringify(check.sourceRefs);
+          })));
+        if (missing.length) {
+          missingLimitQuotes.set(`${item.caseId}/${work.artifactId}`, missing);
+          rejected.add(work.dispositionClaimId);
+        }
+      }
     }
   }
   const offeringIds = new Set<string>();
@@ -411,7 +437,12 @@ export function buildCheckedAssessment(
       explanation: `Server gate: the proposed disposition is not eligible under role ${review.role} or its evidence dependencies.`,
       sourceRefs: review.decision.historicalEvidence, requestQuotes: review.decision.requestQuotes,
     }];
-    return { ...review, reasons: [...review.reasons, ...reasons].slice(0, 8) };
+    const missingLimits = (missingLimitQuotes.get(`${review.caseId}/${review.artifactId}`) ?? []).map((quote) => ({
+      target: "check" as const,
+      explanation: "Server gate: current-tenant acceptance of this exact requested operation limit lacks an owned, reviewed pre-use check; a proposed cap or historical test is not confirmation.",
+      sourceRefs: review.decision.historicalEvidence, requestQuotes: [quote],
+    }));
+    return { ...review, reasons: [...review.reasons, ...missingLimits, ...reasons].slice(0, 8) };
   });
   const cases: CaseAssessment[] = draft.cases.map((item, caseIndex) => {
     const classificationId = `outcome-${caseIndex}`;

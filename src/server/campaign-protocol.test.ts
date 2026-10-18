@@ -7,6 +7,7 @@ import test from "node:test";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { AssessmentResult, Claim, Selection } from "../shared/protocol.ts";
+import { OPERATION_CHECKS } from "../shared/operations.ts";
 import {
   EXPOSED_REQUEST_ORDER, buildExposedCampaign, deriveHGate, exposedCreditPlan, gradeCampaign,
   selectionsMatch, verifyRunCapture, writeImmutableCapture,
@@ -197,7 +198,11 @@ function selectionFixture(role: "starting_point" | "context_only" | "not_relevan
   const assessment: AssessmentResult = {
     conclusion: "precedent_found", clarifyingClaimIds: [], comparisons: [],
     requestConstraints: { product_version: [], environment: [], scale: [], identity_access: [], recovery_operations: [] },
-    artifactReviews: [{ caseId, artifactId, role, verdict: "supported", reasons: [], decision: { disposition: "adapt", historicalEvidence: dispositionClaim.sourceRefs, requestQuotes: [], adaptations: [], checks: [] } }], nextActions: [],
+    artifactReviews: [{ caseId, artifactId, role, verdict: "supported", reasons: [], decision: {
+      disposition: "adapt", operation: "data_mapping", historicalEvidence: dispositionClaim.sourceRefs, requestQuotes: [],
+      adaptations: [{ text: "Adapt the recorded mapping to the client.", sourceRefs: dispositionClaim.sourceRefs, requestQuotes: [] }],
+      checks: [{ kind: "field_identity", text: OPERATION_CHECKS.data_mapping.field_identity, sourceRefs: dispositionClaim.sourceRefs, requestQuotes: [] }],
+    } }], nextActions: [],
     cases: [{
       caseId, availability: "available", outcome: "unknown", outcomeClaimIds: [], claimIds: ["decision"],
       artifactWork: [{

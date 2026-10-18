@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import Ajv from "ajv";
 import test from "node:test";
 import type { ArtifactReview, ArtifactRole, AssessmentResult, Claim, RequestConstraints, Selection, SupportVerdict } from "../shared/protocol.ts";
+import { OPERATION_CHECKS, type OperationCheckKind, type OperationKind } from "../shared/operations.ts";
 import { assessmentDraftSchema, assessmentReviewSchema, briefDraftSchema, openRouterSchema, parseAssessmentDraft, reviewSchema, type AssessmentDraft, type AssessmentOutput, type BriefDraft } from "./schemas.ts";
 import { boundAssessmentQuotes, buildCheckedAssessment, buildCheckedBrief, GateFailure, revalidateAssessment, revalidateBrief, validateAssessmentDraft, validateBriefDraft, validateArtifactReview, validateSupportReview } from "./gates.ts";
 import { HttpFailure } from "./errors.ts";
@@ -34,10 +35,23 @@ function artifactRoles(draft: AssessmentDraft, role: ArtifactRole = "starting_po
   ])));
 }
 
-function proposal(artifactId: string, historicalEvidence: string[], disposition: "adapt" | "reuse" | "verify" | null = "adapt", requestQuotes: string[] = []): AssessmentOutput["cases"][number]["artifactWork"][number] {
-  const condition = { text: "Validate current-client compatibility before using the recorded procedure.", sourceRefs: historicalEvidence, requestQuotes: requestQuotes.slice(0, 1) };
-  if (disposition === null || disposition === "reuse") return { artifactId, disposition, historicalEvidence, requestQuotes, adaptations: [], checks: [] };
-  return { artifactId, disposition, historicalEvidence, requestQuotes, adaptations: disposition === "adapt" ? [{ ...condition, text: "Adapt the recorded procedure to the client's requested limits." }] : [], checks: [condition] };
+function proposal(
+  artifactId: string,
+  historicalEvidence: string[],
+  disposition: "adapt" | "reuse" | "verify" | null = "adapt",
+  requestQuotes: string[] = [],
+  operation: OperationKind = "api_adapter",
+): AssessmentOutput["cases"][number]["artifactWork"][number] {
+  if (disposition === null) return { artifactId, disposition, operation: null, historicalEvidence, requestQuotes, adaptations: [], checks: [] };
+  if (disposition === "reuse") return { artifactId, disposition, operation, historicalEvidence, requestQuotes, adaptations: [], checks: [] };
+  const checks = Object.keys(OPERATION_CHECKS[operation]).slice(0, 1).map((kind) => ({
+    kind: kind as OperationCheckKind, sourceRefs: historicalEvidence, requestQuotes: requestQuotes.slice(0, 1),
+  }));
+  return assessmentDraftSchema.shape.cases.element.shape.artifactWork.element.parse({
+    artifactId, disposition, operation, historicalEvidence, requestQuotes,
+    adaptations: disposition === "adapt" ? [{ text: "Adapt the recorded procedure to the client's requested limits.", sourceRefs: historicalEvidence, requestQuotes: requestQuotes.slice(0, 1) }] : [],
+    checks,
+  });
 }
 
 function rawReviews(draft: AssessmentDraft, role: ArtifactRole = "starting_point") {
@@ -102,31 +116,50 @@ function fixture(): CorpusSnapshot {
 }
 
 function assessmentDraft(corpus: CorpusSnapshot): AssessmentDraft {
-  const claims: Claim[] = corpus.manifest.cases.flatMap((pastCase, caseIndex) => pastCase.artifacts.flatMap((artifact, artifactIndex) => {
-    const version = artifact.versions[0];
-    const sourceRefs = [{ caseId: pastCase.caseId, artifactId: artifact.artifactId, versionId: version.versionId, passageId: version.passages[0].passageId }];
-    const suffix = `${caseIndex}-${artifactIndex}`;
-    return [
-      { claimId: `fact-${suffix}`, text: version.passages[0].excerpt, kind: "source_fact", sourceRefs, requestQuotes: [], dependsOnClaimIds: [] },
-      { claimId: `decision-${suffix}`, text: "Adapt the recorded work after checking the client's capabilities for the current request.", kind: "recommendation", sourceRefs, requestQuotes: [currentRequest], dependsOnClaimIds: [`fact-${suffix}`] },
-    ];
+  const claims: Claim[] = [];
+  const cases = corpus.manifest.cases.map((pastCase, caseIndex) => ({
+    caseId: pastCase.caseId,
+    outcome: "observed_success" as const,
+    outcomeClaimIds: [`fact-${caseIndex}-0`],
+    claimIds: pastCase.artifacts.map((_, artifactIndex) => `fact-${caseIndex}-${artifactIndex}`),
+    artifactWork: pastCase.artifacts.map((artifact, workIndex) => {
+      const version = artifact.versions[0];
+      const sourceRefs = [{ caseId: pastCase.caseId, artifactId: artifact.artifactId, versionId: version.versionId, passageId: version.passages[0].passageId }];
+      const suffix = `${caseIndex}-${workIndex}`;
+      const factId = `fact-${suffix}`;
+      const operation = "api_adapter" as const;
+      const operationClaimId = `artifact-${suffix}-operation`;
+      const dispositionClaimId = `decision-${suffix}`;
+      const adaptationId = `artifact-${suffix}-adapt-0`;
+      const adaptation = { text: "Adapt the recorded procedure to the current request's limits.", sourceRefs, requestQuotes: [currentRequest] };
+      const checks = Object.entries(OPERATION_CHECKS[operation]).filter(([kind]) => kind !== "client_operation_limits").map(([kind, text]) => ({
+        kind: kind as OperationCheckKind,
+        text,
+        sourceRefs,
+        requestQuotes: [],
+      }));
+      const checkClaimIds = checks.map((_, checkIndex) => `artifact-${suffix}-check-${checkIndex}`);
+      claims.push(
+        { claimId: factId, text: version.passages[0].excerpt, kind: "source_fact", sourceRefs, requestQuotes: [], dependsOnClaimIds: [] },
+        { claimId: operationClaimId, text: `The historical operation documented by this artifact is ${operation.replace("_", " ")}.`, kind: "interpretation", sourceRefs, requestQuotes: [], dependsOnClaimIds: [factId] },
+        { claimId: dispositionClaimId, text: "Adapt the recorded work after checking the client's capabilities for the current request.", kind: "recommendation", sourceRefs, requestQuotes: [currentRequest], dependsOnClaimIds: [factId, operationClaimId] },
+        { claimId: adaptationId, text: adaptation.text, kind: "recommendation", sourceRefs, requestQuotes: adaptation.requestQuotes, dependsOnClaimIds: [dispositionClaimId, factId] },
+        ...checks.map((check, checkIndex) => ({
+          claimId: checkClaimIds[checkIndex], text: check.text, kind: "recommendation" as const, sourceRefs: check.sourceRefs,
+          requestQuotes: check.requestQuotes, dependsOnClaimIds: [dispositionClaimId, factId],
+        })),
+      );
+      return {
+        artifactId: artifact.artifactId, disposition: "adapt" as const, dispositionClaimId,
+        decision: { disposition: "adapt" as const, operation, historicalEvidence: sourceRefs, requestQuotes: [currentRequest], adaptations: [adaptation], checks },
+        claimIds: [factId, operationClaimId, dispositionClaimId, adaptationId, ...checkClaimIds],
+        blockerClaimIds: [],
+        verificationClaimIds: checkClaimIds,
+      };
+    }),
   }));
   return {
-    cases: corpus.manifest.cases.map((pastCase, caseIndex) => ({
-      caseId: pastCase.caseId,
-      outcome: "observed_success",
-      outcomeClaimIds: [`fact-${caseIndex}-0`],
-      claimIds: pastCase.artifacts.map((_, artifactIndex) => `fact-${caseIndex}-${artifactIndex}`),
-      artifactWork: pastCase.artifacts.map((artifact, artifactIndex) => ({
-        artifactId: artifact.artifactId,
-        disposition: "adapt",
-        dispositionClaimId: `decision-${caseIndex}-${artifactIndex}`,
-        decision: { disposition: "adapt", historicalEvidence: claims.find((claim) => claim.claimId === `fact-${caseIndex}-${artifactIndex}`)!.sourceRefs, requestQuotes: [], adaptations: [], checks: [] },
-        claimIds: [`fact-${caseIndex}-${artifactIndex}`, `decision-${caseIndex}-${artifactIndex}`],
-        blockerClaimIds: [],
-        verificationClaimIds: [],
-      })),
-    })),
+    cases,
     leads: [],
     contrasts: [],
     clarifyingClaimIds: [],
@@ -174,25 +207,73 @@ test("assessment rejects omitted artifacts even when all eight cases are present
 test("selection cannot substitute a different version of an assessed artifact", () => {
   const corpus = fixture();
   const caseId = "case-1";
+  const sourceRefs = [{ caseId, artifactId: "request", versionId: "request-v1", passageId: "p-request-v1" }];
+  const historical: Claim = {
+    claimId: "historical-fact",
+    text: corpus.passages.get("p-request-v1")!.excerpt,
+    kind: "source_fact",
+    sourceRefs,
+    requestQuotes: [],
+    dependsOnClaimIds: [],
+  };
+  const operation: Claim = {
+    claimId: "artifact-0-0-operation",
+    text: "The historical operation documented by this artifact is api adapter.",
+    kind: "interpretation",
+    sourceRefs,
+    requestQuotes: [],
+    dependsOnClaimIds: [historical.claimId],
+  };
   const claim: Claim = {
     claimId: "checked-claim",
     text: "Adapt the checked work for this request.",
     kind: "recommendation",
-    sourceRefs: [{ caseId, artifactId: "request", versionId: "request-v1", passageId: "p-request-v1" }],
+    sourceRefs,
     requestQuotes: [currentRequest],
-    dependsOnClaimIds: [],
+    dependsOnClaimIds: [historical.claimId, operation.claimId],
+  };
+  const adaptation: Claim = {
+    claimId: "artifact-0-0-adapt-0",
+    text: "Adapt the checked work after the current requirements are confirmed.",
+    kind: "recommendation",
+    sourceRefs,
+    requestQuotes: [currentRequest],
+    dependsOnClaimIds: [claim.claimId, historical.claimId],
+  };
+  const check: Claim = {
+    claimId: "artifact-0-0-check-0",
+    text: OPERATION_CHECKS.api_adapter.client_api_access,
+    kind: "recommendation",
+    sourceRefs,
+    requestQuotes: [],
+    dependsOnClaimIds: [claim.claimId, historical.claimId],
   };
   const assessment: AssessmentResult = {
     conclusion: "precedent_found",
     clarifyingClaimIds: [],
     comparisons: [],
     requestConstraints: emptyRequirementReview.constraints,
-    artifactReviews: [{ caseId, artifactId: "request", role: "starting_point", verdict: "supported", reasons: [], decision: { disposition: "adapt", historicalEvidence: claim.sourceRefs, requestQuotes: [], adaptations: [], checks: [] } }],
+    artifactReviews: [{
+      caseId, artifactId: "request", role: "starting_point", verdict: "supported", reasons: [],
+      decision: {
+        disposition: "adapt", operation: "api_adapter", historicalEvidence: sourceRefs, requestQuotes: [currentRequest],
+        adaptations: [{ text: adaptation.text, sourceRefs, requestQuotes: adaptation.requestQuotes }],
+        checks: [{ kind: "client_api_access", text: OPERATION_CHECKS.api_adapter.client_api_access, sourceRefs, requestQuotes: [] }],
+      },
+    }],
     nextActions: [],
-    cases: [{ caseId, availability: "available", outcome: "unknown", outcomeClaimIds: [], claimIds: [claim.claimId], artifactWork: [{ artifactId: "request", availability: "available", exclusionReasons: [], disposition: "adapt", dispositionClaimId: claim.claimId, claimIds: [claim.claimId], blockerClaimIds: [], verificationClaimIds: [] }] }],
+    cases: [{
+      caseId, availability: "available", outcome: "unknown", outcomeClaimIds: [],
+      claimIds: [historical.claimId, operation.claimId, claim.claimId, adaptation.claimId, check.claimId],
+      artifactWork: [{
+        artifactId: "request", availability: "available", exclusionReasons: [], disposition: "adapt", dispositionClaimId: claim.claimId,
+        claimIds: [historical.claimId, operation.claimId, claim.claimId, adaptation.claimId, check.claimId],
+        blockerClaimIds: [], verificationClaimIds: [check.claimId],
+      }],
+    }],
     leads: [],
     contrasts: [],
-    claims: [claim],
+    claims: [historical, operation, claim, adaptation, check],
     withheldClaimCount: 0,
   };
   const selection: Selection = { caseId, artifactId: "request", versionId: "request-v2", passageIds: ["p-request-v2"] };
@@ -384,74 +465,190 @@ test("case outcome labels need their own review even when the underlying facts p
   assert.equal(revalidateAssessment(checked, currentRequest, corpus).cases[1].outcome, "unknown");
 });
 
-test("structured decisions separate historical facts, requested capabilities and conditional adaptations", () => {
+test("operation-scoped typed prerequisites preserve conditional adapter and handover work", () => {
   const corpus = fixture();
+  const request = "Target API authorization remains unconfirmed. The handover's decision authority remains unconfirmed.";
+  const apiQuote = "Target API authorization remains unconfirmed.";
+  const handoverQuote = "The handover's decision authority remains unconfirmed.";
   const ids = assessmentPassageIds(corpus);
   const output: AssessmentOutput = {
     requestConstraints: emptyRequirementReview.constraints, claims: [], clarifyingClaimIds: [], contrasts: [],
     leads: [{ caseId: "case-1", state: "conditional", reasonClaimIds: ["lead-reason"], comparisons: [] }],
-    cases: corpus.manifest.cases.map((item) => ({
-      caseId: item.caseId, outcome: "unknown", artifactWork: item.artifacts.map((artifact) =>
-        proposal(artifact.artifactId, [ids.get(artifact.versions[0].passages[0].passageId)!], item.caseId === "case-1" ? "adapt" : null, [currentRequest])),
+    cases: corpus.manifest.cases.map((item, caseIndex) => ({
+      caseId: item.caseId, outcome: "unknown",
+      artifactWork: item.artifacts.map((artifact, workIndex) => {
+        const operation = workIndex === 0 ? "api_adapter" : "recovery_handover";
+        const quote = operation === "api_adapter" ? apiQuote : handoverQuote;
+        const disposition = caseIndex === 0 ? "adapt" : null;
+        return proposal(artifact.artifactId, [ids.get(artifact.versions[0].passages[0].passageId)!], disposition, disposition ? [quote] : [], operation);
+      }),
     })),
   };
   output.claims.push({ claimId: "lead-reason", caseId: "case-1", kind: "source_fact", outcomeEvidence: false, sourceRefs: [ids.get("p-request-v1")!], requestQuotes: [], dependsOnClaimIds: [] });
   const draft = parseAssessmentDraft(output, corpus);
-  const invalid = validateAssessmentDraft(draft, currentRequest, corpus);
-  const reviews = artifactRoles(draft);
-  const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
-  const build = () => buildCheckedAssessment(draft, verdicts, invalid, corpus, reviews, emptyRequirementReview);
+  const invalid = validateAssessmentDraft(draft, request, corpus);
+  const review = assessmentReviewSchema.parse({
+    requestConstraints: emptyRequirementReview.constraints,
+    artifactReviews: rawReviews(draft),
+    claimReviews: draft.claims.map((claim) => ({ claimId: claim.claimId, verdict: "supported" as const })),
+  });
+  const reviews = validateArtifactReview(draft, review);
+  const verdicts = validateSupportReview(draft.claims, review);
+  const constraints = emptyRequirementReview.constraints;
+  const requirementReview = { request, constraints };
+  const build = () => buildCheckedAssessment(draft, verdicts, invalid, corpus, reviews, requirementReview);
   const selected = [{ caseId: "case-1", artifactId: "request", versionId: "request-v1", passageIds: ["p-request-v1"] }];
+  const handoverSelection = [{ caseId: "case-1", artifactId: "handover", versionId: "handover-v1-case-1", passageIds: ["p-handover-v1-case-1"] }];
   const checked = build();
   assert.equal(checked.cases[0].artifactWork[0].disposition, "adapt");
-  assert.deepEqual(validateSelections(selected, checked, corpus), selected);
-  assert.deepEqual(revalidateAssessment(checked, currentRequest, corpus), checked);
-  assert.deepEqual(boundAssessmentQuotes(checked, selected[0]), [currentRequest]);
+  assert.equal(checked.cases[0].artifactWork[1].disposition, "adapt");
+  const apiDecision = checked.artifactReviews.find((item) => item.artifactId === "request")!.decision;
+  const handoverDecision = checked.artifactReviews.find((item) => item.artifactId === "handover")!.decision;
+  assert.ok(apiDecision.checks.every((check) => check.requestQuotes.includes(apiQuote)));
+  assert.ok(handoverDecision.checks.every((check) => check.requestQuotes.includes(handoverQuote)));
+  assert.deepEqual(validateSelections([...selected, ...handoverSelection], checked, corpus), [...selected, ...handoverSelection]);
+  assert.deepEqual(revalidateAssessment(checked, request, corpus), checked);
+  assert.deepEqual(boundAssessmentQuotes(checked, selected[0]), [apiQuote]);
+  const wrongCanonicalOperation = structuredClone(checked);
+  wrongCanonicalOperation.artifactReviews.find((item) => item.artifactId === "request")!.decision.operation = "recovery_handover";
+  assert.throws(() => revalidateAssessment(wrongCanonicalOperation, request, corpus));
+  const wrongCanonicalKind = structuredClone(checked);
+  Object.assign(wrongCanonicalKind.artifactReviews.find((item) => item.artifactId === "request")!.decision.checks[0], { kind: "operating_authority" });
+  assert.throws(() => revalidateAssessment(wrongCanonicalKind, request, corpus));
+  const authoredCanonicalText = structuredClone(checked);
+  authoredCanonicalText.artifactReviews.find((item) => item.artifactId === "request")!.decision.checks[0].text = "Provider-authored check text.";
+  assert.throws(() => revalidateAssessment(authoredCanonicalText, request, corpus));
+  const foreignCanonicalEvidence = structuredClone(checked);
+  foreignCanonicalEvidence.artifactReviews.find((item) => item.artifactId === "request")!.decision.checks[0].sourceRefs = handoverDecision.checks[0].sourceRefs;
+  assert.throws(() => revalidateAssessment(foreignCanonicalEvidence, request, corpus));
+  const misplacedCheck = structuredClone(output);
+  Object.assign(misplacedCheck.cases[0].artifactWork[0].checks[0], { kind: "operating_authority" });
+  assert.equal(assessmentDraftSchema.safeParse(misplacedCheck).success, false);
+  assert.throws(() => parseAssessmentDraft(misplacedCheck, corpus));
   const work = draft.cases[0].artifactWork[0];
-  for (const id of [work.claimIds.find((id) => id.includes("-history-"))!, work.verificationClaimIds[0]]) {
-    verdicts.set(id, "unsupported");
-    assert.equal(build().cases[0].artifactWork[0].disposition, null);
-    assert.throws(() => validateSelections(selected, build(), corpus));
-    verdicts.set(id, "supported");
+  const rejectedClaimIds = [
+    work.claimIds.find((id) => id.includes("-history-"))!,
+    work.claimIds.find((id) => id.endsWith("-operation"))!,
+    work.claimIds.find((id) => id.includes("-adapt-"))!,
+    work.verificationClaimIds[0],
+  ];
+  // Synthetic verdicts exercise fail-closed propagation, not semantic qualification.
+  for (const id of rejectedClaimIds) {
+    const rejectedReview = assessmentReviewSchema.parse({
+      ...review,
+      claimReviews: review.claimReviews.map((claim) => claim.claimId === id ? { ...claim, verdict: "unsupported" as const } : claim),
+    });
+    const rejectedVerdicts = validateSupportReview(draft.claims, rejectedReview);
+    const rejected = buildCheckedAssessment(draft, rejectedVerdicts, invalid, corpus, reviews, requirementReview);
+    assert.equal(rejected.cases[0].artifactWork[0].disposition, null);
+    assert.ok(!rejected.leads[0]?.usefulArtifactIds.includes("request"));
+    assert.ok(!rejected.nextActions.some((action) => action.artifactId === "request"));
+    assert.ok(!rejected.claims.some((claim) => claim.claimId === work.dispositionClaimId));
+    assert.equal(rejected.artifactReviews.find((item) => item.artifactId === "request")?.role, "starting_point");
+    assert.equal(rejected.artifactReviews.find((item) => item.artifactId === "request")?.verdict, "supported");
+    assert.throws(() => validateSelections(selected, rejected, corpus));
+    if (id === work.verificationClaimIds[0]) {
+      assert.ok(!rejected.claims.some((claim) => claim.claimId === id));
+      assert.throws(() => briefDraftPrompt(request, selected, corpus, rejected), /BRIEF_CHECKED_DECISION_REQUIRED/);
+    }
   }
+  const assertedCapability = structuredClone(output);
+  assertedCapability.cases[0].artifactWork[0].adaptations[0].text = "The target API authorization is confirmed and available; proceed with the adapter.";
+  const capabilityDraft = parseAssessmentDraft(assertedCapability, corpus);
+  const capabilityWork = capabilityDraft.cases[0].artifactWork[0];
+  const capabilityClaimId = capabilityWork.claimIds.find((id) => id.includes("-adapt-"))!;
+  const capabilityReview = assessmentReviewSchema.parse({
+    ...review, artifactReviews: rawReviews(capabilityDraft),
+    claimReviews: capabilityDraft.claims.map((claim) => ({ claimId: claim.claimId, verdict: claim.claimId === capabilityClaimId ? "unsupported" : "supported" })),
+  });
+  const capabilityRejected = buildCheckedAssessment(capabilityDraft, validateSupportReview(capabilityDraft.claims, capabilityReview), validateAssessmentDraft(capabilityDraft, request, corpus), corpus, validateArtifactReview(capabilityDraft, capabilityReview), requirementReview);
+  assert.equal(capabilityRejected.cases[0].artifactWork[0].disposition, null);
+  assert.throws(() => validateSelections(selected, capabilityRejected, corpus));
   const decision = reviews.get("case-1/request")!;
   decision.verdict = "unsupported";
   decision.reasons = [{
     target: "request_constraint", explanation: "The proposed capability is not established for this client.",
-    sourceRefs: decision.decision.historicalEvidence, requestQuotes: [currentRequest],
+    sourceRefs: decision.decision.historicalEvidence, requestQuotes: [apiQuote],
   }];
   const rejected = build();
   assert.equal(rejected.cases[0].artifactWork[0].disposition, null);
   assert.ok(!rejected.leads[0]?.usefulArtifactIds.includes("request"));
   assert.ok(!rejected.nextActions.some((action) => action.artifactId === "request"));
   assert.ok(!rejected.claims.some((claim) => work.verificationClaimIds.includes(claim.claimId)));
-  assert.deepEqual(revalidateAssessment(rejected, currentRequest, corpus).artifactReviews, rejected.artifactReviews);
+  assert.deepEqual(revalidateAssessment(rejected, request, corpus).artifactReviews, rejected.artifactReviews);
   assert.deepEqual(rejected.artifactReviews.find((item) => item.artifactId === "request")?.reasons, decision.reasons);
   const reasonRef = decision.reasons[0].sourceRefs[0];
   const reasonPassage = corpus.passages.get(reasonRef.passageId)!;
   corpus.passages.delete(reasonRef.passageId);
-  assert.throws(() => revalidateAssessment(rejected, currentRequest, corpus), EvidenceUnavailable, "Rejected work cannot bypass evidence revalidation for its explanation.");
+  assert.throws(() => revalidateAssessment(rejected, request, corpus), EvidenceUnavailable, "Rejected work cannot bypass evidence revalidation for its explanation.");
   corpus.passages.set(reasonRef.passageId, reasonPassage);
   const invalidReason = structuredClone(decision.reasons);
   decision.reasons[0].sourceRefs[0] = { ...decision.reasons[0].sourceRefs[0], passageId: "missing" };
-  assert.throws(build, /invalid evidence/);
+  assert.throws(build, GateFailure);
   decision.reasons = invalidReason;
   const oldWire = structuredClone(output);
   Object.assign(oldWire.cases[0].artifactWork[0], { recommendation: { text: "Adapt", sourceRefs: ["e1"], requestQuotes: [], dependsOnClaimIds: [] } });
   assert.equal(assessmentDraftSchema.safeParse(oldWire).success, false);
 });
 
-test("context-only work cannot survive as a case reason or orphan verification after reread", () => {
+test("conditional adapters require independently supported current-tenant checks for exact requested limits", () => {
+  for (const limit of [450, 725]) {
+    const corpus = fixture();
+    const quote = `Submit jobs of at most ${limit} items; the new tenant's acceptance remains unconfirmed.`;
+    const otherQuote = "Reconcile 2,000 handover records.";
+    const request = `${quote} ${otherQuote}`;
+    const labels = assessmentPassageIds(corpus);
+    const constraints = { ...emptyRequirementReview.constraints, scale: [quote, otherQuote] };
+    const output: AssessmentOutput = {
+      requestConstraints: constraints, claims: [], clarifyingClaimIds: [], leads: [], contrasts: [],
+      cases: corpus.manifest.cases.map((item, index) => ({
+        caseId: item.caseId, outcome: "unknown",
+        artifactWork: item.artifacts.map((artifact, artifactIndex) =>
+          proposal(artifact.artifactId, [labels.get(artifact.versions[0].passages[0].passageId)!],
+            index === 0 && artifactIndex === 0 ? "adapt" : null, index === 0 ? [quote] : [])),
+      })),
+    };
+    const build = (value: AssessmentOutput, rejected: SupportVerdict = "supported") => {
+      const draft = parseAssessmentDraft(value, corpus);
+      const work = draft.cases[0].artifactWork[0];
+      const limitClaims = new Set(work.verificationClaimIds.filter((id) =>
+        work.decision.checks.some((check) => check.kind === "client_operation_limits"
+          && check.text === draft.claims.find((claim) => claim.claimId === id)?.text)));
+      const verdicts = new Map(draft.claims.map((claim) => [claim.claimId, limitClaims.has(claim.claimId) ? rejected : "supported" as SupportVerdict]));
+      return buildCheckedAssessment(draft, verdicts, validateAssessmentDraft(draft, request, corpus), corpus, artifactRoles(draft), { request, constraints });
+    };
+    const missing = build(output);
+    assert.equal(missing.cases[0].artifactWork[0].disposition, null, "Adapting a cap is not confirmation of tenant acceptance.");
+    assert.ok(missing.artifactReviews[0].reasons.some((reason) => reason.target === "check" && reason.requestQuotes.includes(quote)));
+    const work = output.cases[0].artifactWork[0];
+    work.checks.push({ kind: "client_operation_limits" as OperationCheckKind, sourceRefs: work.historicalEvidence, requestQuotes: [quote] });
+    const checked = build(output);
+    assert.equal(checked.cases[0].artifactWork[0].disposition, "adapt");
+    const check = checked.artifactReviews[0].decision.checks.find((check) => check.kind === "client_operation_limits")!;
+    assert.ok(check.text.includes(quote), "The visible prerequisite must retain the exact requested value and unresolved acceptance.");
+    assert.deepEqual(revalidateAssessment(checked, request, corpus), checked);
+    const selection = [{ caseId: "case-1", artifactId: "request", versionId: "request-v1", passageIds: ["p-request-v1"] }];
+    assert.deepEqual(validateSelections(selection, checked, corpus), selection);
+    for (const verdict of ["unsupported", "uncertain"] as const) {
+      const withheld = build(output, verdict);
+      assert.equal(withheld.cases[0].artifactWork[0].disposition, null);
+      assert.throws(() => validateSelections(selection, withheld, corpus));
+    }
+    const wrongQuote = structuredClone(output);
+    wrongQuote.cases[0].artifactWork[0].checks.at(-1)!.requestQuotes = [otherQuote];
+    assert.equal(build(wrongQuote).cases[0].artifactWork[0].disposition, null);
+    const missingQuote = structuredClone(output);
+    missingQuote.cases[0].artifactWork[0].checks.at(-1)!.requestQuotes = [];
+    assert.throws(() => parseAssessmentDraft(missingQuote, corpus));
+  }
+});
+
+test("context-only work cannot survive as a case reason or pre-use check after reread", () => {
   const corpus = fixture();
   const draft = assessmentDraft(corpus);
   const work = draft.cases[0].artifactWork[0];
   const sourceRefs = draft.claims.find((claim) => claim.claimId === "fact-0-0")!.sourceRefs;
-  draft.claims.push(
-    { claimId: "legacy-reason", kind: "interpretation", text: `The current request states: "${currentRequest}"`, sourceRefs, requestQuotes: [currentRequest], dependsOnClaimIds: [] },
-    { claimId: "orphan-verification", kind: "recommendation", text: `Verify the target before reuse for "${currentRequest}"`, sourceRefs, requestQuotes: [currentRequest], dependsOnClaimIds: [work.dispositionClaimId] },
-  );
-  work.claimIds.push("orphan-verification");
-  work.verificationClaimIds.push("orphan-verification");
+  draft.claims.push({ claimId: "legacy-reason", kind: "interpretation", text: `The current request states: "${currentRequest}"`, sourceRefs, requestQuotes: [currentRequest], dependsOnClaimIds: [] });
   draft.leads = [{ caseId: "case-1", state: "conditional", usefulArtifactIds: ["handover"], reasonClaimIds: ["legacy-reason"] }];
   const roles = artifactRoles(draft);
   roles.get("case-1/request")!.role = "context_only";
@@ -460,19 +657,23 @@ test("context-only work cannot survive as a case reason or orphan verification a
   const checked = buildCheckedAssessment(draft, verdicts, invalid, corpus, roles, emptyRequirementReview);
   assert.equal(checked.cases[0].artifactWork[0].disposition, null);
   assert.deepEqual(checked.leads, [], "A non-source case reason cannot offer context-only work as a lead.");
-  assert.ok(!checked.claims.some((claim) => ["legacy-reason", "orphan-verification"].includes(claim.claimId)));
+  assert.ok(!checked.claims.some((claim) => claim.claimId === "legacy-reason" || work.verificationClaimIds.includes(claim.claimId)));
   assert.ok(checked.claims.some((claim) => claim.claimId === "fact-0-0"), "Factual source context survives a context-only disposition.");
   assert.deepEqual(checked.nextActions, []);
   const reread = revalidateAssessment(checked, currentRequest, corpus);
   assert.deepEqual(reread.leads, []);
-  assert.ok(!reread.claims.some((claim) => ["legacy-reason", "orphan-verification"].includes(claim.claimId)));
+  assert.ok(!reread.claims.some((claim) => claim.claimId === "legacy-reason" || work.verificationClaimIds.includes(claim.claimId)));
   assert.ok(reread.claims.some((claim) => claim.claimId === "fact-0-0"));
   assert.deepEqual(reread.nextActions, []);
+  const adaptationIds = work.claimIds.filter((claimId) => claimId.includes("-adapt-"));
+  draft.claims = draft.claims.filter((claim) => !adaptationIds.includes(claim.claimId));
+  work.claimIds = work.claimIds.filter((claimId) => !adaptationIds.includes(claimId));
+  work.decision.adaptations = [];
   work.disposition = "verify";
   work.decision.disposition = "verify";
   const disguisedOffering = buildCheckedAssessment(draft, verdicts, validateAssessmentDraft(draft, currentRequest, corpus), corpus, roles, emptyRequirementReview);
   assert.equal(disguisedOffering.cases[0].artifactWork[0].disposition, null, "Context-only work cannot regain an offering by relabeling it Verify.");
-  assert.ok(!disguisedOffering.claims.some((claim) => claim.claimId === "orphan-verification"));
+  assert.ok(!disguisedOffering.claims.some((claim) => work.verificationClaimIds.includes(claim.claimId)));
   assert.deepEqual(disguisedOffering.nextActions, []);
 });
 
@@ -519,7 +720,7 @@ test("persisted assessments and briefs lose claims transitively when original ev
   draft.leads = [{ caseId: "case-1", state: "conditional", usefulArtifactIds: ["handover"], reasonClaimIds: ["fact-0-1"] }];
   const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
   const persisted = buildCheckedAssessment(draft, verdicts, new Set(), corpus, artifactRoles(draft), emptyRequirementReview);
-  const baseRefs = [...draft.claims[0].sourceRefs, ...draft.claims[2].sourceRefs];
+  const baseRefs = ["fact-0-0", "fact-0-1"].flatMap((id) => draft.claims.find((claim) => claim.claimId === id)!.sourceRefs);
   const base = { ...draft.claims[0], text: baseRefs.map((ref) => corpus.passages.get(ref.passageId)!.excerpt).join("\n"), sourceRefs: baseRefs };
   const dependent = { ...draft.claims.find((claim) => claim.claimId === "decision-0-1")!, text: `${currentRequest} Adapt the checked handover after validation.`, dependsOnClaimIds: [base.claimId] };
   const brief = {
@@ -645,16 +846,19 @@ test("comparisons preserve unknown and mismatch and withhold rejected dependenci
 test("next actions are bounded checked request-specific checks, not slot filling", () => {
   const corpus = fixture();
   const draft = assessmentDraft(corpus);
-  for (const [index, item] of draft.cases.entries()) {
+  for (const item of draft.cases) {
     const work = item.artifactWork[0];
-    const claim: Claim = { ...draft.claims.find((claim) => claim.claimId === work.dispositionClaimId)!, claimId: `check-${index}`, text: "Verify target compatibility because the recorded work is bounded." };
-    draft.claims.push(claim);
-    work.claimIds.push(claim.claimId);
-    work.verificationClaimIds.push(claim.claimId);
+    const checkId = work.verificationClaimIds[0];
+    const check = draft.claims.find((claim) => claim.claimId === checkId)!;
+    check.requestQuotes = [currentRequest];
+    work.decision.checks[0].requestQuotes = [currentRequest];
   }
-  const build = (verdict: SupportVerdict) => buildCheckedAssessment(draft, new Map(draft.claims.map((claim) => [claim.claimId, claim.claimId.startsWith("check-") ? verdict : "supported"])), new Set(), corpus, artifactRoles(draft), emptyRequirementReview);
+  const checkIds = new Set(draft.cases.flatMap((item) => item.artifactWork.flatMap((work) => work.verificationClaimIds)));
+  const build = (verdict: SupportVerdict) => buildCheckedAssessment(draft, new Map(draft.claims.map((claim) => [claim.claimId, checkIds.has(claim.claimId) ? verdict : "supported"])), new Set(), corpus, artifactRoles(draft), emptyRequirementReview);
   validateAssessmentDraft(draft, currentRequest, corpus);
-  assert.deepEqual(build("supported").nextActions.map((action) => action.claimId), ["check-0", "check-1", "check-2"]);
+  assert.deepEqual(build("supported").nextActions.map((action) => action.claimId), [
+    "artifact-0-0-check-0", "artifact-1-0-check-0", "artifact-2-0-check-0",
+  ]);
   assert.deepEqual(build("uncertain").nextActions, []);
 });
 
@@ -664,9 +868,16 @@ test("clarification changes compare two checked dispositions, never withheld rec
   draft.leads = [{ caseId: "case-1", state: "useful", usefulArtifactIds: ["request"], reasonClaimIds: ["fact-0-0"] }];
   const build = () => buildCheckedAssessment(draft, new Map(draft.claims.map((claim) => [claim.claimId, "supported"])), new Set(), corpus, artifactRoles(draft), emptyRequirementReview);
   const before = structuredClone(build());
-  draft.cases[0].artifactWork[0].disposition = "reuse";
+  const work = draft.cases[0].artifactWork[0];
+  const removed = work.claimIds.filter((claimId) => claimId.includes("-adapt-") || claimId.includes("-check-"));
+  draft.claims = draft.claims.filter((claim) => !removed.includes(claim.claimId));
+  work.claimIds = work.claimIds.filter((claimId) => !removed.includes(claimId));
+  work.verificationClaimIds = [];
+  work.decision.adaptations = [];
+  work.decision.checks = [];
+  work.disposition = "reuse";
   draft.claims.find((claim) => claim.claimId === "decision-0-0")!.text = "Reuse after the clarified target is established compatible.";
-  draft.cases[0].artifactWork[0].decision.disposition = "reuse";
+  work.decision.disposition = "reuse";
   const after = build();
   const changes = dispositionChanges(before, after);
   assert.equal(changes.length, 1);
@@ -801,10 +1012,10 @@ test("implementation roles preserve conditional starting work but block context-
   const roles = artifactRoles(draft);
   roles.get("case-1/request")!.role = "context_only";
   const work = draft.cases[0].artifactWork[1];
-  const check: Claim = { ...draft.claims.find((claim) => claim.claimId === work.dispositionClaimId)!, claimId: "check-new-version", text: "Verify the new API version and account limits before adapting the recorded submit-and-poll procedure." };
-  draft.claims.push(check);
-  work.claimIds.push(check.claimId);
-  work.verificationClaimIds.push(check.claimId);
+  const checkId = work.verificationClaimIds[0];
+  const check = draft.claims.find((claim) => claim.claimId === checkId)!;
+  check.requestQuotes = [currentRequest];
+  work.decision.checks[0].requestQuotes = [currentRequest];
   const verdicts = new Map<string, SupportVerdict>(draft.claims.map((claim) => [claim.claimId, "supported"]));
   const checked = buildCheckedAssessment(draft, verdicts, validateAssessmentDraft(draft, currentRequest, corpus), corpus, roles, emptyRequirementReview);
   assert.equal(checked.cases[0].artifactWork[0].disposition, null);
@@ -819,24 +1030,33 @@ test("implementation roles preserve conditional starting work but block context-
   roles.get("case-1/handover")!.role = "starting_point";
   work.disposition = "reuse";
   work.decision.disposition = "reuse";
-  assert.equal(buildCheckedAssessment(draft, verdicts, new Set(), corpus, roles, emptyRequirementReview).cases[0].artifactWork[1].disposition, null);
+  assert.throws(() => buildCheckedAssessment(draft, verdicts, new Set(), corpus, roles, emptyRequirementReview), GateFailure);
 });
 
 test("full negative artifact coverage establishes no precedent without inventing uncertain case outcomes", () => {
   const corpus = fixture();
   const draft = assessmentDraft(corpus);
+  const removedClaimIds = new Set<string>();
   for (const item of draft.cases) for (const work of item.artifactWork) {
-    work.disposition = null;
+    const factId = work.claimIds.find((claimId) => draft.claims.find((claim) => claim.claimId === claimId)?.kind === "source_fact")!;
     const explanation = draft.claims.find((claim) => claim.claimId === work.dispositionClaimId)!;
     explanation.kind = "interpretation";
     explanation.text = "This historical record does not establish implementation material for the current request.";
+    explanation.dependsOnClaimIds = [factId];
     item.claimIds.push(work.dispositionClaimId);
+    for (const claimId of work.claimIds) if (claimId !== factId && claimId !== work.dispositionClaimId) removedClaimIds.add(claimId);
+    work.claimIds = work.claimIds.filter((claimId) => claimId === factId || claimId === work.dispositionClaimId);
+    work.disposition = null;
     work.decision.disposition = null;
+    work.decision.operation = null;
+    work.decision.adaptations = [];
+    work.decision.checks = [];
+    work.verificationClaimIds = [];
   }
+  draft.claims = draft.claims.filter((claim) => !removedClaimIds.has(claim.claimId));
   draft.claims.push({ ...draft.claims[0], claimId: "unrelated-outcome", kind: "source_fact", requestQuotes: [], dependsOnClaimIds: [] });
   draft.cases[0].claimIds.push("unrelated-outcome");
   draft.cases[0].outcomeClaimIds = ["unrelated-outcome"];
-  const roles = artifactRoles(draft, "context_only");
   const review = assessmentReviewSchema.parse({
     requestConstraints: emptyRequirementReview.constraints,
     artifactReviews: rawReviews(draft, "context_only"),
@@ -1124,8 +1344,7 @@ test("brief generation cannot add an unselected background artifact", async () =
   const suppliedPassage = data.historicalContext.completeSelectedCaseContext.find((item) => item.caseId === selected[0].caseId)!.artifacts.find((item) => item.artifactId === selected[0].artifactId)!.versions.find((item) => item.versionId === selected[0].versionId)!.passages[0];
   const selectedKey = "case-1/handover/handover-v1-case-1";
   type BriefWireRecommendation = { text: string; sourceRefs: string[]; requestQuotes: string[] };
-  type BriefWireClaim = { kind: "recommendation"; text: string; sourceRefs: string[]; requestQuotes: string[] }
-    | { kind: "source_fact"; sourceRefs: string[]; requestQuotes: string[] };
+  type BriefWireClaim = BriefWireRecommendation & { kind: "recommendation" };
   type BriefWireItem = { disposition: "adapt"; recommendation: BriefWireRecommendation; claims: BriefWireClaim[] };
   const wireOutput: { items: Record<string, BriefWireItem> } = {
     items: {
@@ -1143,7 +1362,6 @@ test("brief generation cannot add an unselected background artifact", async () =
             sourceRefs: [suppliedPassage.passageId],
             requestQuotes: [requestSpanId(request, request)],
           },
-          { kind: "source_fact", sourceRefs: [suppliedPassage.passageId], requestQuotes: [] },
         ],
       },
     },
@@ -1162,18 +1380,13 @@ test("brief generation cannot add an unselected background artifact", async () =
   }
   assert.ok(normalized);
   assert.equal(validateBriefDraft(normalized, request, selected, corpus).size, 0, "Derived selected identities preserve actual claim ownership.");
-  assert.equal(normalized.adapt[0].dispositionClaimId, "brief-0-disposition");
-  assert.deepEqual(normalized.adapt[0].claimIds, ["brief-0-disposition", "brief-0-claim-0", "brief-0-claim-1"]);
   assert.equal(normalized.claims[0].sourceRefs[0].passageId, selected[0].passageIds[0]);
-  assert.equal(normalized.claims[1].dependsOnClaimIds[0], "brief-0-disposition");
   assert.deepEqual(normalized.claims[1].requestQuotes, [request]);
-  assert.equal(normalized.claims[2].text, corpus.passages.get(selected[0].passageIds[0])!.excerpt);
-  assert.deepEqual(normalized.claims[2].dependsOnClaimIds, []);
+  const fact = normalized.claims.find((claim) => claim.kind === "source_fact")!;
+  assert.equal(fact.text, corpus.passages.get(selected[0].passageIds[0])!.excerpt);
+  assert.deepEqual(fact.dependsOnClaimIds, []);
   const validate = new Ajv({ strict: false }).compile(providerSchema!);
   assert.equal(validate(wireOutput), true);
-  const authoredInlineFact: { items: Record<string, { claims: (BriefWireClaim & { text?: string })[] }> } = structuredClone(wireOutput);
-  authoredInlineFact.items[selectedKey].claims[1] = { ...authoredInlineFact.items[selectedKey].claims[1], text: "Provider-authored fact prose is not accepted." };
-  assert.equal(validate(authoredInlineFact), false, "Inline source facts are composed from exact selected excerpts.");
 
   const legacyWire = {
     items: { [selectedKey]: { disposition: "adapt", dispositionClaimId: "choose", claimIds: ["choose"] } },
@@ -1205,7 +1418,7 @@ test("brief generation cannot add an unselected background artifact", async () =
   const literalRequest = "Use [sandbox].";
   const literalPrompt = briefDraftPrompt(literalRequest, selected, corpus, checked);
   const literalWire = structuredClone(wireOutput);
-  literalWire.items[selectedKey].claims = [wireOutput.items[selectedKey].claims[1]];
+  literalWire.items[selectedKey].claims = [];
   literalWire.items[selectedKey].recommendation.requestQuotes = [requestSpanId(literalRequest, literalRequest)];
   literalWire.items[selectedKey].recommendation.text = "Verify the requested constraint in the sandbox.";
   const validateLiteral = new Ajv({ strict: false }).compile(openRouterSchema("brief", literalPrompt.responseSchema!).json_schema.schema);
@@ -1217,7 +1430,7 @@ test("brief generation cannot add an unselected background artifact", async () =
   const multiRequest = "First decisive sentence. Second decisive sentence.";
   const multiPrompt = briefDraftPrompt(multiRequest, selected, corpus, checked);
   const strayWire = structuredClone(wireOutput);
-  strayWire.items[selectedKey].claims = [wireOutput.items[selectedKey].claims[1]];
+  strayWire.items[selectedKey].claims = [];
   strayWire.items[selectedKey].recommendation.requestQuotes = [requestSpanId(multiRequest, "First decisive sentence.")];
   strayWire.items[selectedKey].recommendation.text = "Check the request: First decisive sentence. Second decisive sentence.";
   assert.equal(multiPrompt.responseSchema!.safeParse(strayWire).success, false,
