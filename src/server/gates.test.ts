@@ -12,7 +12,7 @@ import { validateSelections } from "./selections.ts";
 import { assessmentPassageIds, EvidenceUnavailable, type Artifact, type CorpusSnapshot, type ModelCaseContext, type PastCase, type SourceVersion } from "./corpus.ts";
 import { requestSpans } from "./request-constraints.ts";
 import { dispositionChanges } from "../ui/lineage.ts";
-import { assessmentDraftPrompt, briefDraftPrompt, briefReviewPrompt, selectedAssessment } from "./prompts.ts";
+import { assessmentDraftPrompt, assessmentReviewPrompt, briefDraftPrompt, briefReviewPrompt, selectedAssessment } from "./prompts.ts";
 import { callModel } from "./model.ts";
 import type { Env } from "./env.ts";
 
@@ -668,6 +668,97 @@ test("conditional adapters require independently supported current-tenant checks
     const missingQuote = structuredClone(output);
     missingQuote.cases[0].artifactWork[0].checks.at(-1)!.requestQuotes = [];
     assert.throws(() => parseAssessmentDraft(missingQuote, corpus));
+  }
+});
+
+test("historical limits and windows remain history while adaptation and omission verdicts control selection", () => {
+  for (const [limit, days] of [[320, 3], [680, 7]]) {
+    const corpus = fixture();
+    const apiQuote = `Submit at most ${limit} items per job.`;
+    const handoverQuote = `Provide escalation for only ${days} business days after signed acceptance.`;
+    const request = `${apiQuote} ${handoverQuote}`;
+    const constraints = { ...emptyRequirementReview.constraints, scale: [apiQuote], recovery_operations: [handoverQuote] };
+    const history = ["Submit at most 900 items per job.", "Provide escalation for nine business days after deployment; check checkpoint state before replay."];
+    for (const [index, artifact] of corpus.manifest.cases[0].artifacts.entries()) {
+      const passage = artifact.versions[0].passages[0];
+      passage.excerpt = history[index];
+      corpus.passages.get(passage.passageId)!.excerpt = passage.excerpt;
+    }
+    const labels = assessmentPassageIds(corpus);
+    const output: AssessmentOutput = {
+      requestConstraints: constraints, claims: [], clarifyingClaimIds: [], contrasts: [],
+      leads: [{ caseId: "case-1", state: "conditional", reasonClaimIds: ["lead-reason"], comparisons: [] }],
+      cases: corpus.manifest.cases.map((item, caseIndex) => ({
+        caseId: item.caseId, outcome: "unknown",
+        artifactWork: item.artifacts.map((artifact, index) => {
+          const operation = index === 0 ? "api_adapter" : "recovery_handover";
+          const quote = index === 0 ? apiQuote : handoverQuote;
+          const work = proposal(artifact.artifactId, [labels.get(artifact.versions[0].passages[0].passageId)!],
+            caseIndex === 0 ? "adapt" : null, caseIndex === 0 ? [quote] : [], operation);
+          if (work.disposition === "adapt") {
+            work.adaptations[0].text = index === 0
+              ? `Narrow submission batches to at most ${limit} items per job.`
+              : `Replace the deployment-triggered window with escalation for only ${days} business days after signed acceptance.`;
+            work.checks = Object.keys(OPERATION_CHECKS[operation]).map((kind) => ({
+              kind: kind as OperationCheckKind, sourceRefs: work.historicalEvidence, requestQuotes: [quote],
+            }));
+          }
+          return work;
+        }),
+      })),
+    };
+    output.claims.push({ claimId: "lead-reason", caseId: "case-1", kind: "source_fact", outcomeEvidence: false,
+      sourceRefs: [labels.get("p-request-v1")!], requestQuotes: [], dependsOnClaimIds: [] });
+    const selections = corpus.manifest.cases[0].artifacts.map((artifact) => ({
+      caseId: "case-1", artifactId: artifact.artifactId, versionId: artifact.versions[0].versionId,
+      passageIds: [artifact.versions[0].passages[0].passageId],
+    }));
+    // Synthetic verdicts prove independent review propagation, not model judgment.
+    const build = (value: AssessmentOutput, rejected?: { index: number; target: "adaptation" | "disposition"; verdict: "unsupported" | "uncertain" }) => {
+      const draft = parseAssessmentDraft(value, corpus);
+      const prompt = assessmentReviewPrompt(request, corpus, draft);
+      const targets = prompt.reviewTargets!;
+      const rejectedWork = rejected ? draft.cases[0].artifactWork[rejected.index] : undefined;
+      const rejectedClaim = rejectedWork?.claimIds.find((id) => id.includes("-adapt-"));
+      const wire = {
+        requestConstraints: { product_version: [], environment: [], scale: [requestSpanId(request, apiQuote)], identity_access: [], recovery_operations: [requestSpanId(request, handoverQuote)] },
+        decisions: Object.fromEntries(targets.artifacts!.map((item) => {
+          const reject = rejected?.target === "disposition" && item.caseId === "case-1" && item.artifactId === rejectedWork?.artifactId;
+          return [`${item.caseId}/${item.artifactId}`, {
+            disposition: item.disposition, role: item.disposition === null ? "context_only" : "starting_point",
+            verdict: reject ? rejected!.verdict : "supported",
+            reasons: reject ? [{ target: "adaptation",
+              explanation: "The proposed replay step omits the requested escalation duration and signed-acceptance trigger; authority, checkpoint and acceptance checks are present.",
+              sourceRefs: value.cases[0].artifactWork[1].historicalEvidence, requestQuotes: [requestSpanId(request, handoverQuote)] }] : [],
+          }];
+        })),
+        claimVerdicts: Object.fromEntries(targets.claimIds.map((id) => [id,
+          rejected?.target === "adaptation" && id === rejectedClaim ? rejected.verdict : "supported"])),
+      };
+      const review = assessmentReviewSchema.parse(reviewSchema(targets, request).parse(wire));
+      return buildCheckedAssessment(draft,
+        validateSupportReview(draft.claims.filter((claim) => targets.claimIds.includes(claim.claimId)), review),
+        validateAssessmentDraft(draft, request, corpus), corpus, validateArtifactReview(draft, review), { request, constraints: review.requestConstraints });
+    };
+    const checked = build(output);
+    assert.deepEqual(validateSelections(selections, revalidateAssessment(checked, request, corpus), corpus), selections);
+    assert.ok(history.every((text) => checked.claims.some((claim) => claim.kind === "source_fact" && claim.text === text)));
+    for (const verdict of ["unsupported", "uncertain"] as const) {
+      const conflicting = structuredClone(output);
+      conflicting.cases[0].artifactWork[0].adaptations[0].text = history[0];
+      const rejected = build(conflicting, { index: 0, target: "adaptation", verdict });
+      assert.equal(rejected.cases[0].artifactWork[0].disposition, null, "A supported limit check cannot rescue a rejected adaptation.");
+      assert.throws(() => validateSelections([selections[0]], rejected, corpus));
+      assert.deepEqual(validateSelections([selections[1]], rejected, corpus), [selections[1]]);
+      const missing = structuredClone(output);
+      missing.cases[0].artifactWork[1].adaptations[0].text = "Check checkpoint state before replay.";
+      const omitted = revalidateAssessment(build(missing, { index: 1, target: "disposition", verdict }), request, corpus);
+      assert.equal(omitted.cases[0].artifactWork[1].disposition, null, "Supported checks and claims cannot rescue an independently rejected omission.");
+      assert.throws(() => validateSelections([selections[1]], omitted, corpus));
+      assert.deepEqual(validateSelections([selections[0]], omitted, corpus), [selections[0]]);
+      assert.ok(omitted.claims.some((claim) => claim.kind === "source_fact" && claim.text === history[1]), "Withholding work must not rewrite historical evidence.");
+      assert.equal(omitted.artifactReviews.find((item) => item.artifactId === "handover")!.reasons[0].target, "adaptation");
+    }
   }
 });
 
