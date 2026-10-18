@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { zipSync, strToU8 } from "fflate";
@@ -102,6 +103,27 @@ test("format, byte and extraction limits reject unsafe input without truncation"
   assert.equal((await uploadDetail(env, owner, oversized.id)).state, "needs_review");
   assert.equal((await uploadDetail(env, owner, oversized.id)).hasText, false);
   assert.equal(await (await uploadOriginal(env, owner, oversized.id)).text(), "x".repeat(65537));
+});
+
+test("upload limits accept 25 MiB originals and cap retained files at 100", async () => {
+  const { env, objects } = storage();
+  const owner = await uploadOwner(authorization);
+  const oversized = new Uint8Array(UPLOAD_LIMIT + 1).fill(0x61);
+  await assert.rejects(createUpload(env, owner, uploadRequest("over-limit.txt", oversized)), { code: "UPLOAD_TOO_LARGE" });
+  assert.equal(objects.size, 0);
+
+  const bytes = new Uint8Array(UPLOAD_LIMIT).fill(0x61);
+  const source = await createUpload(env, owner, uploadRequest("exact-limit.txt", bytes));
+  assert.equal(source.size, UPLOAD_LIMIT);
+  const original = await uploadOriginal(env, owner, source.id);
+  assert.equal(original.headers.get("content-length"), String(UPLOAD_LIMIT));
+  assert.equal(createHash("sha256").update(new Uint8Array(await original.arrayBuffer())).digest("hex"), source.sha256);
+
+  for (let index = 1; index < 100; index++) {
+    await createUpload(env, owner, uploadRequest(`retained-${index}.txt`, "x"));
+  }
+  assert.equal((await listUploads(env, owner)).length, 100);
+  await assert.rejects(createUpload(env, owner, uploadRequest("one-too-many.txt", "x")), { code: "UPLOAD_LIBRARY_FULL" });
 });
 
 test("PPTX extraction includes slide text and notes while disallowing XML entity declarations", async () => {

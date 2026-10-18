@@ -114,7 +114,7 @@ export async function createUpload(env: Env, owner: string, request: Request): P
   const mimeType = uploadTypes[extension];
   if (!mimeType) throw new HttpFailure(415, "UPLOAD_TYPE_NOT_SUPPORTED");
   const inventory = await listUploads(env, owner);
-  if (inventory.length >= 20) throw new HttpFailure(409, "UPLOAD_LIBRARY_FULL");
+  if (inventory.length >= 100) throw new HttpFailure(409, "UPLOAD_LIBRARY_FULL");
   const bytes = await bytesFrom(request);
   checkFormat(bytes, extension);
   const now = new Date().toISOString();

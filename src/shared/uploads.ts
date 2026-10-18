@@ -1,4 +1,4 @@
-export const UPLOAD_LIMIT = 10 * 1024 * 1024;
+export const UPLOAD_LIMIT = 25 * 1024 * 1024;
 export const UPLOAD_TEXT_LIMIT = 64 * 1024;
 export const uploadTypes: Record<string, string> = {
   txt: "text/plain", md: "text/markdown", markdown: "text/markdown", csv: "text/csv",

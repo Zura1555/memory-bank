@@ -47,7 +47,7 @@ export default defineConfig(({ mode }) => ({
       // ponytail: per-location abuse guard, not a global spend cap; durable global budgeting would be required for spend enforcement.
       SEARCH_RATE_LIMITER: bindings.rateLimit({
         namespace: "1401",
-        simple: { limit: 20, period: 60 },
+        simple: { limit: 60, period: 60 },
       }),
       JOB_QUEUE: bindings.queue({ name: "memory-bank-jobs" }),
       WORKFLOW: bindings.workflow({
