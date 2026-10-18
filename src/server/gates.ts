@@ -361,7 +361,12 @@ export function buildCheckedAssessment(
             const claim = draftClaims.get(id);
             return work.claimIds.includes(id) && claim?.kind === "recommendation"
               && claim.text === check.text && claim.requestQuotes.includes(quote)
-              && JSON.stringify(claim.sourceRefs) === JSON.stringify(check.sourceRefs);
+              && claim.sourceRefs.length === check.sourceRefs.length
+              && claim.sourceRefs.every((ref, index) => {
+                const checkedRef = check.sourceRefs[index];
+                return ref.caseId === checkedRef.caseId && ref.artifactId === checkedRef.artifactId
+                  && ref.versionId === checkedRef.versionId && ref.passageId === checkedRef.passageId;
+              });
           })));
         if (missing.length) {
           missingLimitQuotes.set(`${item.caseId}/${work.artifactId}`, missing);

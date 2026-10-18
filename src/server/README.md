@@ -74,6 +74,18 @@ Selection identity compares explicitly ordered case/artifact/version fields and 
 
 Selection requires a supported starting-point decision whose proposed disposition matches the accepted work projection and has an exact-version evidence witness. The UI loads that version's complete verified original passage inventory, not only model-cited passages, and shows evidence-linked withholding reasons. Qualification uses the frozen artifact/version/passage set exactly; an unavailable required choice fails instead of being substituted, expanded or reduced.
 
+Current-tenant limit checks compare ordered source-reference identities field-by-field (`caseId`, `artifactId`, `versionId`, `passageId`), including equal array lengths. Object property order is not identity: PostgreSQL JSONB reorders keys, while read schemas reconstruct them. Different references, missing evidence and rejected checks still withhold selection.
+
+The isolated persistence regression uses the built Worker, real Queue/Workflow/R2 bindings and a disposable PostgreSQL container. Supply the checksummed synthetic four-stage fixture directory explicitly; it never reads provider credentials or sends upstream inference:
+
+```sh
+node --experimental-strip-types scripts/issue32-persistence-smoke.mjs \
+  --fixtures /private/path/synthetic-four-stage-fixtures \
+  --out /private/path/fresh-persistence-proof
+```
+
+It requires local `postgres:17-alpine` (no image pull), Docker and installed dependencies. It exercises owned reads, JSONB key reordering, exact selection admission, rejection of foreign/wrong-version/missing-passage selections, persisted brief reads and both exports. Synthetic success is a persistence regression result, not semantic qualification.
+
 Missing or chronologically inconsistent phase timestamps produce null observed timings, never a fabricated zero-duration result. The UI distinguishes unavailable timing from the 90 s / 30 s targets. Wall-clock timestamps are not a monotonic performance measurement. When the local clock is discontinuous, qualification uses external `process.hrtime` and direct durable-state reads to bound processing transitions independently of HTTP proxy/poll delays; database wall durations and wider HTTP-observation bounds remain separately recorded, not silently replaced.
 
 ## Offline issue #32 exposed campaign

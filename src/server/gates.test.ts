@@ -608,8 +608,7 @@ test("conditional adapters require independently supported current-tenant checks
             index === 0 && artifactIndex === 0 ? "adapt" : null, index === 0 ? [quote] : [])),
       })),
     };
-    const build = (value: AssessmentOutput, rejected: SupportVerdict = "supported") => {
-      const draft = parseAssessmentDraft(value, corpus);
+    const buildDraft = (draft: AssessmentDraft, rejected: SupportVerdict = "supported") => {
       const work = draft.cases[0].artifactWork[0];
       const limitClaims = new Set(work.verificationClaimIds.filter((id) =>
         work.decision.checks.some((check) => check.kind === "client_operation_limits"
@@ -617,6 +616,8 @@ test("conditional adapters require independently supported current-tenant checks
       const verdicts = new Map(draft.claims.map((claim) => [claim.claimId, limitClaims.has(claim.claimId) ? rejected : "supported" as SupportVerdict]));
       return buildCheckedAssessment(draft, verdicts, validateAssessmentDraft(draft, request, corpus), corpus, artifactRoles(draft), { request, constraints });
     };
+    const build = (value: AssessmentOutput, rejected: SupportVerdict = "supported") =>
+      buildDraft(parseAssessmentDraft(value, corpus), rejected);
     const missing = build(output);
     assert.equal(missing.cases[0].artifactWork[0].disposition, null, "Adapting a cap is not confirmation of tenant acceptance.");
     assert.ok(missing.artifactReviews[0].reasons.some((reason) => reason.target === "check" && reason.requestQuotes.includes(quote)));
@@ -629,6 +630,18 @@ test("conditional adapters require independently supported current-tenant checks
     assert.deepEqual(revalidateAssessment(checked, request, corpus), checked);
     const selection = [{ caseId: "case-1", artifactId: "request", versionId: "request-v1", passageIds: ["p-request-v1"] }];
     assert.deepEqual(validateSelections(selection, checked, corpus), selection);
+    const limitClaim = (draft: AssessmentDraft) => {
+      const work = draft.cases[0].artifactWork[0];
+      return draft.claims.find((claim) => work.verificationClaimIds.includes(claim.claimId)
+        && work.decision.checks.some((check) => check.kind === "client_operation_limits" && check.text === claim.text))!;
+    };
+    const reorderedDraft = parseAssessmentDraft(output, corpus);
+    const reorderedClaim = limitClaim(reorderedDraft);
+    const ref = reorderedClaim.sourceRefs[0];
+    reorderedClaim.sourceRefs[0] = { passageId: ref.passageId, versionId: ref.versionId, artifactId: ref.artifactId, caseId: ref.caseId };
+    const reordered = buildDraft(reorderedDraft);
+    assert.equal(reordered.cases[0].artifactWork[0].disposition, "adapt");
+    assert.deepEqual(validateSelections(selection, reordered, corpus), selection);
     for (const verdict of ["unsupported", "uncertain"] as const) {
       const withheld = build(output, verdict);
       assert.equal(withheld.cases[0].artifactWork[0].disposition, null);
@@ -637,6 +650,21 @@ test("conditional adapters require independently supported current-tenant checks
     const wrongQuote = structuredClone(output);
     wrongQuote.cases[0].artifactWork[0].checks.at(-1)!.requestQuotes = [otherQuote];
     assert.equal(build(wrongQuote).cases[0].artifactWork[0].disposition, null);
+    const missingRefDraft = parseAssessmentDraft(output, corpus);
+    limitClaim(missingRefDraft).sourceRefs = [];
+    assert.throws(() => buildDraft(missingRefDraft));
+    const foreignRefDraft = parseAssessmentDraft(output, corpus);
+    limitClaim(foreignRefDraft).sourceRefs = [{
+      caseId: "case-1", artifactId: "handover", versionId: "handover-v1-case-1", passageId: "p-handover-v1-case-1",
+    }];
+    assert.throws(() => buildDraft(foreignRefDraft));
+    const wrongVersionDraft = parseAssessmentDraft(output, corpus);
+    limitClaim(wrongVersionDraft).sourceRefs = [{
+      caseId: "case-1", artifactId: "request", versionId: "request-v2", passageId: "p-request-v2",
+    }];
+    const wrongVersion = buildDraft(wrongVersionDraft);
+    assert.equal(wrongVersion.cases[0].artifactWork[0].disposition, null);
+    assert.throws(() => validateSelections(selection, wrongVersion, corpus));
     const missingQuote = structuredClone(output);
     missingQuote.cases[0].artifactWork[0].checks.at(-1)!.requestQuotes = [];
     assert.throws(() => parseAssessmentDraft(missingQuote, corpus));
