@@ -62,6 +62,7 @@ const briefItem = z.strictObject({
 
 export const requestSchema = z.strictObject({
   request: z.string().trim().min(1).max(16 * 1024),
+  attachmentIds: z.array(z.uuid()).max(5).optional(),
 });
 export const passageSearchSchema = z.strictObject({
   query: z.string().trim().min(1).max(1024),

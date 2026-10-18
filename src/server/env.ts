@@ -8,6 +8,7 @@ export interface QueueMessage {
 }
 
 export type WorkflowParams = QueueMessage;
+export interface UploadWorkflowParams { uploadId: string; owner: string }
 
 export interface Env {
   APP_ENV?: string;
@@ -27,7 +28,7 @@ export interface Env {
   SEARCH_RATE_LIMITER?: RateLimit;
   ORIGINALS: R2Bucket;
   JOB_QUEUE: Queue<QueueMessage>;
-  WORKFLOW: Workflow<WorkflowParams>;
+  WORKFLOW: Workflow<WorkflowParams | UploadWorkflowParams>;
   ASSETS: Fetcher;
 }
 

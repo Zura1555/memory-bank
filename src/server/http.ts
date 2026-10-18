@@ -10,6 +10,8 @@ import { requestSchema, startBriefSchema, passageSearchSchema } from "./schemas.
 import { exportStarterPack, starterPackMarkdown } from "./packs.ts";
 import { searchPassages } from "./search.ts";
 import { modelConfig } from "./model.ts";
+import { attachmentRequest, createUpload, limitUploads, listUploads, searchUploads, uploadDetail, uploadOriginal, uploadOwner } from "./uploads.ts";
+import type { SourceIndexStatus } from "../shared/uploads.ts";
 import {
   operatorBudgetSchema,
   operatorReconciliationSchema,
@@ -147,6 +149,54 @@ app.get("/api/sources", async (c) => {
   return c.json({ sources });
 });
 
+app.get("/api/sources/index-status", async (c) => {
+  await limitUploads(c.env, c.req.header("CF-Connecting-IP"));
+  const corpus = await loadCorpus(c.env);
+  const status: Record<string, SourceIndexStatus> = {};
+  const visible = new Set<string>();
+  let reachable = Boolean(c.env.VECTORIZE);
+  if (c.env.VECTORIZE) {
+    try {
+      const ids = [...corpus.passages.keys()];
+      for (let offset = 0; offset < ids.length; offset += 20) {
+        for (const vector of await c.env.VECTORIZE.getByIds(ids.slice(offset, offset + 20))) {
+          if (vector.namespace === corpus.manifestSha256) visible.add(vector.id);
+        }
+      }
+    } catch { reachable = false; }
+  }
+  for (const [id, { version }] of corpus.versions) {
+    const indexed = version.passages.filter((passage) => visible.has(passage.passageId)).length;
+    status[id] = !reachable || !corpus.availableVersions.has(id) ? "unavailable"
+      : indexed === version.passages.length && indexed > 0 ? "indexed" : indexed > 0 ? "partial" : "pending";
+  }
+  return c.json({ status });
+});
+
+app.get("/api/uploads", async (c) => c.json({ sources: await listUploads(c.env, await uploadOwner(c.req.header("Authorization") ?? null)) }));
+app.post("/api/uploads", async (c) => {
+  const owner = await uploadOwner(c.req.header("Authorization") ?? null);
+  await limitUploads(c.env, c.req.header("CF-Connecting-IP"));
+  return c.json(await createUpload(c.env, owner, c.req.raw), 201);
+});
+app.post("/api/uploads/search", async (c) => {
+  const owner = await uploadOwner(c.req.header("Authorization") ?? null);
+  await limitUploads(c.env, c.req.header("CF-Connecting-IP"));
+  const body = passageSearchSchema.safeParse(await readJsonBody(c.req.raw));
+  if (!body.success) throw new HttpFailure(400, "INVALID_REQUEST");
+  return c.json({ results: await searchUploads(c.env, owner, body.data.query) });
+});
+app.get("/api/uploads/:id", async (c) => c.json(await uploadDetail(c.env, await uploadOwner(c.req.header("Authorization") ?? null), c.req.param("id"))));
+app.get("/api/uploads/:id/original", async (c) => uploadOriginal(c.env, await uploadOwner(c.req.header("Authorization") ?? null), c.req.param("id")));
+app.post("/api/uploads/:id/process", async (c) => {
+  const owner = await uploadOwner(c.req.header("Authorization") ?? null);
+  await limitUploads(c.env, c.req.header("CF-Connecting-IP"));
+  const source = await uploadDetail(c.env, owner, c.req.param("id"));
+  if (["extracting", "indexing"].includes(source.state)) throw new HttpFailure(409, "UPLOAD_PROCESSING");
+  await c.env.WORKFLOW.create({ id: `upload-${source.id}-${crypto.randomUUID()}`, params: { owner, uploadId: source.id } });
+  return c.json({ accepted: true }, 202);
+});
+
 app.get("/api/knowledge", async (c) => {
   const caseId = c.req.query("caseId");
   if (caseId !== undefined) checkedRouteId(caseId, "CASE_NOT_FOUND");
@@ -168,7 +218,10 @@ app.get("/api/knowledge/:recordId", async (c) => {
 app.post("/api/jobs", async (c) => {
   const body = requestSchema.safeParse(await readJsonBody(c.req.raw));
   if (!body.success) throw new HttpFailure(400, "INVALID_REQUEST");
-  return c.json(await createAssessmentJob(c.env, body.data.request), 202);
+  const request = body.data.attachmentIds?.length
+    ? await attachmentRequest(c.env, await uploadOwner(c.req.header("Authorization") ?? null), body.data.request, body.data.attachmentIds)
+    : body.data.request;
+  return c.json(await createAssessmentJob(c.env, request), 202);
 });
 
 app.get("/api/jobs/:jobId", async (c) => {

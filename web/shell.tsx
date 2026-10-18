@@ -7,7 +7,7 @@ import { Separator } from "@base-ui/react/separator";
 type Page = "ask" | "sources" | "knowledge";
 const destinations: { page: Page; href: string; label: string; detail: string; icon: string }[] = [
   { page: "ask", href: "/", label: "Ask", detail: "Work brief builder", icon: "M4 5h16v11H9l-5 4V5Z" },
-  { page: "sources", href: "/?sources", label: "Sources", detail: "Original corpus", icon: "M7 3h7l4 4v14H7V3Zm7 0v5h4M10 12h5m-5 4h5" },
+  { page: "sources", href: "/?sources", label: "Sources", detail: "Corpus & private files", icon: "M7 3h7l4 4v14H7V3Zm7 0v5h4M10 12h5m-5 4h5" },
   { page: "knowledge", href: "/?knowledge", label: "Reviewed knowledge", detail: "Decisions & lessons", icon: "m4 6 8-3 8 3v14l-8-3-8 3V6Zm8-3v14" },
 ];
 
