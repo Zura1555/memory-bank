@@ -432,4 +432,19 @@ PR #23 integration verification (2026-10-17) combined PR head `7ab64ca` with mai
 
 Infrastructure deployment is authorized and performed as described above. The owner additionally authorized paid admission on 2026-10-17 under [Paid admission authorization](#paid-admission-authorization); this documentation does not change the live setting or repository visibility. Keep the repository private until the source/secrets review is complete; make it public only under the approved submission plan.
 
+### React Doctor triage
+
+Run `npx --yes react-doctor . --no-supply-chain --no-score --verbose -y` from the project root. The targeted cleanup removes stale hook dependencies, callback-driven inspection re-subscriptions, effect-chained selection/notes resets, index-based list keys, unsafe navigation lookups, and implicit note submission. Private original metadata and object retrieval overlap; UUID validation, owner-scoped storage, expiry checks, and SHA-256 verification still precede delivery. The concurrency regression is in `src/server/uploads.test.ts`.
+
+On the initial task base, the full-source scan fell from 80 to 59 diagnostics. Integration with the newer conversational Ask change also replaces its new message-index key with an event-created message ID. The final post-build full-root scan reports 62 diagnostics: 59 source findings plus three generated `.cloudflare` findings (duplicated SQL and dependency crypto findings). Thirteen remaining source diagnostics from the reported rule families are reviewed false positives, not suppressed:
+
+- Five loading resets are already in `finally`; cancellation and generation guards prevent an old request from resetting a newer request's state.
+- Four response-consumption warnings are in `db.smoke.ts` and `evidence.smoke.ts`, where `assert.equal(response.status, expected)` runs before reading each body.
+- Two async-effect warnings are cancellation-guarded: reviewed knowledge checks its abort signal before committing records; job polling checks both its abort signal and session generation after each await.
+- Two SQL warnings in `operator.ts` and `workflow.ts` interpolate column names selected exclusively from hard-coded assessment/brief literals. External values remain PostgreSQL bind parameters; the generated Worker bundle is not a source file to patch.
+
+Chromium exercised the built client and real HTTP handlers with all 24 public originals and isolated in-memory private storage: exact passage reading, inspection Escape/focus return, private upload, note saving, clean-note refresh, dirty-draft conflict protection, latest-case move initialization, deletion/selection cleanup, and knowledge navigation. The 390px layout had no document overflow or page errors. AI/Vectorize and paid/database operations were unavailable in this harness; native extraction retained usable text and indexing reported failure honestly. These checks do not establish a measured speedup or new live Worker/database qualification.
+
+After integrating the latest `main`, `npm run typecheck`, `npm test` (67 TypeScript tests and one Python test), and `npm run build` passed. `npm run ingest -- --root /tmp/memory-bank-doctor-ingest` also passed against an isolated copy of the corpus, leaving the checked-in manifest unchanged. Chromium verified the final conversational build with synthetic model metadata and locally denied job admission: repeated identical follow-ups remain separate and ordered, existing message DOM identity survives appends, and leaving Ask closes History without losing the conversation. No model request was sent.
+
 </details>

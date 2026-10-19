@@ -9,10 +9,11 @@ import Menu01Icon from "@hugeicons/core-free-icons/Menu01Icon";
 import Message01Icon from "@hugeicons/core-free-icons/Message01Icon";
 
 type Page = "ask" | "sources" | "knowledge";
+const pageLabels: Record<Page, string> = { ask: "Ask", sources: "Sources", knowledge: "Reviewed knowledge" };
 const destinations: { page: Page; href: string; label: string; detail: string; icon: IconSvgElement }[] = [
-  { page: "ask", href: "/", label: "Ask", detail: "Work brief builder", icon: Message01Icon },
-  { page: "sources", href: "/?sources", label: "Sources", detail: "Corpus & private files", icon: FolderLibraryIcon },
-  { page: "knowledge", href: "/?knowledge", label: "Reviewed knowledge", detail: "Decisions & lessons", icon: BookOpen01Icon },
+  { page: "ask", href: "/", label: pageLabels.ask, detail: "Work brief builder", icon: Message01Icon },
+  { page: "sources", href: "/?sources", label: pageLabels.sources, detail: "Corpus & private files", icon: FolderLibraryIcon },
+  { page: "knowledge", href: "/?knowledge", label: pageLabels.knowledge, detail: "Decisions & lessons", icon: BookOpen01Icon },
 ];
 
 function locationView() {
@@ -57,7 +58,7 @@ export function AppShell({ ask, sources, knowledge }: {
   }, []);
 
   useEffect(() => {
-    document.title = `${destinations.find((item) => item.page === view.page)!.label} — Memory Bank`;
+    document.title = `${pageLabels[view.page]} — Memory Bank`;
     if (previousLocation.current !== window.location.href) {
       previousLocation.current = window.location.href;
       main.current?.focus({ preventScroll: true });
@@ -116,7 +117,7 @@ export function AppShell({ ask, sources, knowledge }: {
             </Drawer.Portal>
           </Drawer.Root>
           <span className="header-workspace">Workspace <span aria-hidden="true">/</span></span>
-          <span className="header-page">{destinations.find((item) => item.page === view.page)!.label}</span>
+          <span className="header-page">{pageLabels[view.page]}</span>
         </div>
         <span className="fictional-banner">Fictional examples</span>
       </header>

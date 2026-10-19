@@ -249,8 +249,11 @@ export async function uploadDetail(env: Env, owner: string, id: string): Promise
 }
 
 export async function uploadOriginal(env: Env, owner: string, id: string): Promise<Response> {
-  const { source } = await stored(env, owner, id);
-  const object = await env.ORIGINALS.get(originalKey(owner, id));
+  checkedId(id);
+  const [{ source }, object] = await Promise.all([
+    stored(env, owner, id),
+    env.ORIGINALS.get(originalKey(owner, id)),
+  ]);
   if (!object) throw new HttpFailure(503, "UPLOAD_ORIGINAL_UNAVAILABLE");
   const bytes = await object.arrayBuffer();
   if (createHash("sha256").update(new Uint8Array(bytes)).digest("hex") !== source.sha256) throw new HttpFailure(503, "UPLOAD_ORIGINAL_UNAVAILABLE");
