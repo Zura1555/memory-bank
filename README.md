@@ -1,4 +1,4 @@
-# Memory Bank
+# <img src="public/logo.png" width="48" height="48" alt="" /> Memory Bank
 
 **Turn past project evidence into better reuse decisions.**
 
@@ -11,7 +11,7 @@ Memory Bank helps delivery leads compare a new client request with reviewed exam
 - **Data:** PostgreSQL (Neon in production), R2 for source files, and Cloudflare Queues/Workflows for durable jobs.
 - **AI and corpus:** Configurable LLM endpoints (OpenRouter by default); separate semantic search with Workers AI + Vectorize; Python tools for offline corpus ingestion.
 
-![Memory Bank: request workflow, source library, selected work, and checked brief](docs/images/shell-light-1440.webp)
+![Memory Bank — Turn your past work into what’s next](docs/images/memory-bank-banner.webp)
 
 ## How it works
 
