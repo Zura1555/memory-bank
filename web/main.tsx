@@ -599,7 +599,7 @@ function CuratedKnowledge({ caseId, recordId, inspect }: { caseId?: string; reco
     return () => controller.abort();
   }, [caseId, recordId]);
   if (error) return <p className="notice notice-error" role="alert">Reviewed knowledge or its exact source evidence is unavailable.</p>;
-  if (records === null) return <p role="status">Loading reviewed knowledge…</p>;
+  if (records === null) return <div className="knowledge-loading" role="status"><span className="knowledge-loading-indicator" aria-hidden="true" /><span>Loading reviewed knowledge…</span></div>;
   if (records.length === 0) return caseId ? null : <p>No reviewed knowledge records are available.</p>;
   return <section className="content-section" aria-label="Reviewed decisions and lessons">
     <h2>Reviewed decisions and lessons</h2>
