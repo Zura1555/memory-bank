@@ -16,6 +16,7 @@ const binding = {
 const runner = {
   createdAt: new Date(Date.now() - 1000).toISOString(),
   pipelineVersion: 'bounded-repair-v1', maxCalls: 16, maxSpendUsd: 1, noAutomaticRetry: true,
+  reservationHeadroomMicroUsd: 1_200_000,
   bundleSha256: hash('bundle'), instrumentationSha256: hash('instrumentation'),
   observerSha256: hash('observer'), runnerSha256: hash('runner'), protocolSha256: hash('protocol'),
 };
@@ -33,6 +34,7 @@ function authorization(plan) {
     protocolSha256: runner.protocolSha256,
     requestOrder: plan.requestOrder, approvedMaxCalls: plan.approvedMaxCalls,
     approvedMaxUsd: plan.approvedMaxUsd, creditBasis: 'owner-accepted-hold-overlap', noAutomaticRetry: true,
+    approvedReservationHeadroomMicroUsd: 1_200_000,
   };
 }
 
@@ -46,6 +48,7 @@ test('bounded-repair plans require exact versioned call and spend ceilings', () 
     assert.equal(plan.pipelineVersion, 'bounded-repair-v1');
     assert.equal(plan.approvedMaxCalls, calls);
     assert.equal(plan.approvedMaxUsd, spend);
+    assert.equal(plan.approvedReservationHeadroomMicroUsd, 1_200_000);
   }
 });
 
@@ -71,6 +74,10 @@ test('single-case approval cannot authorize another case, a full campaign, or la
       const unversioned = authorization(plan);
       delete unversioned.pipelineVersion;
       await assert.rejects(check(unversioned, plan));
+      const withoutReservation = authorization(plan);
+      delete withoutReservation.approvedReservationHeadroomMicroUsd;
+      await assert.rejects(check(withoutReservation, plan));
+      await assert.rejects(check({ ...authorization(plan), approvedReservationHeadroomMicroUsd: 1_000_000 }, plan));
     }
     for (const [plan, legacyCalls] of [[g2, 4], [g3, 4], [g4, 2], [campaign, 12]]) {
       await assert.rejects(check({ ...authorization(plan), approvedMaxCalls: legacyCalls }, plan));

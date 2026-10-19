@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import * as z from 'zod';
 import { MODEL_REQUEST_TIMEOUT_MS, EXPOSED_PHASE_TIMEOUT_MS } from '../src/server/model-deadlines.ts';
 import {
-  EXPOSED_REQUEST_ORDER, buildExposedCampaign, exposedCreditBasisSchema, exposedCreditPlan, parseFixedCampaign, parseRuntimeProfile,
+  EXPOSED_REQUEST_ORDER, EXPOSED_REPAIR_RESERVATION_MICRO_USD, buildExposedCampaign, exposedCreditBasisSchema, exposedCreditPlan, parseFixedCampaign, parseRuntimeProfile,
   selectionsMatch, verifyRunCapture, writeImmutableCapture,
 } from '../src/server/campaign-protocol.ts';
 
@@ -63,6 +63,7 @@ const runnerFreezeSchema = z.strictObject({
   protocolSha256: hashSchema,
   maxCalls: z.literal(16),
   maxSpendUsd: z.literal(1),
+  reservationHeadroomMicroUsd: z.literal(EXPOSED_REPAIR_RESERVATION_MICRO_USD),
   noAutomaticRetry: z.literal(true),
 });
 const authorizationSchema = z.strictObject({
@@ -87,16 +88,17 @@ const authorizationSchema = z.strictObject({
   requestOrder: z.array(z.enum(EXPOSED_REQUEST_ORDER)),
   approvedMaxCalls: z.union([z.literal(16), z.literal(6), z.literal(4)]),
   approvedMaxUsd: z.union([z.literal(1), z.literal(0.25)]),
+  approvedReservationHeadroomMicroUsd: z.literal(EXPOSED_REPAIR_RESERVATION_MICRO_USD),
   creditBasis: exposedCreditBasisSchema,
   noAutomaticRetry: z.literal(true),
 });
 
 export function executionPlan(mode, requestId) {
   if (mode === 'paid' && requestId === undefined) {
-    return { pipelineVersion, scope: 'issue32-exposed-g2-g4-single-run', requestOrder: [...EXPOSED_REQUEST_ORDER], approvedMaxCalls: 16, approvedMaxUsd: 1, qualificationEligible: true };
+    return { pipelineVersion, scope: 'issue32-exposed-g2-g4-single-run', requestOrder: [...EXPOSED_REQUEST_ORDER], approvedMaxCalls: 16, approvedMaxUsd: 1, approvedReservationHeadroomMicroUsd: EXPOSED_REPAIR_RESERVATION_MICRO_USD, qualificationEligible: true };
   }
   if (mode !== 'diagnose' || !EXPOSED_REQUEST_ORDER.includes(requestId)) throw new Error('INVALID_DIAGNOSTIC_REQUEST');
-  return { pipelineVersion, scope: 'issue32-exposed-single-case-diagnostic', requestOrder: [requestId], approvedMaxCalls: requestId === 'g4' ? 4 : 6, approvedMaxUsd: 0.25, qualificationEligible: false };
+  return { pipelineVersion, scope: 'issue32-exposed-single-case-diagnostic', requestOrder: [requestId], approvedMaxCalls: requestId === 'g4' ? 4 : 6, approvedMaxUsd: 0.25, approvedReservationHeadroomMicroUsd: EXPOSED_REPAIR_RESERVATION_MICRO_USD, qualificationEligible: false };
 }
 
 function digest(bytes) {
@@ -254,6 +256,7 @@ async function buildRunnerFreeze(candidate, bundleBytes, instrumentationBytes, o
     protocolSha256: candidate.protocolSha256,
     maxCalls: 16,
     maxSpendUsd: 1,
+    reservationHeadroomMicroUsd: EXPOSED_REPAIR_RESERVATION_MICRO_USD,
     noAutomaticRetry: true,
   };
 }
@@ -325,7 +328,8 @@ export async function readAuthorization(path, candidate, runnerFreezeCapture, ru
     && authorization.runnerSha256 === runnerFreeze.runnerSha256
     && authorization.protocolSha256 === runnerFreeze.protocolSha256
     && runnerFreeze.pipelineVersion === plan.pipelineVersion
-    && runnerFreeze.maxCalls === 16;
+    && runnerFreeze.maxCalls === 16
+    && runnerFreeze.reservationHeadroomMicroUsd === plan.approvedReservationHeadroomMicroUsd;
   const authorizedAt = Date.parse(authorization.authorizedAt);
   const fresh = authorizedAt >= Date.parse(runnerFreeze.createdAt) && authorizedAt <= Date.now()
     && Date.now() - authorizedAt <= 24 * 60 * 60 * 1000;
@@ -334,6 +338,7 @@ export async function readAuthorization(path, candidate, runnerFreezeCapture, ru
     || authorization.scope !== plan.scope
     || authorization.approvedMaxCalls !== plan.approvedMaxCalls
     || authorization.approvedMaxUsd !== plan.approvedMaxUsd
+    || authorization.approvedReservationHeadroomMicroUsd !== plan.approvedReservationHeadroomMicroUsd
     || JSON.stringify(authorization.requestOrder) !== JSON.stringify(plan.requestOrder)) {
     throw new Error('FRESH_EXPOSED_AUTHORIZATION_MISMATCH');
   }
@@ -385,6 +390,7 @@ async function runPaid(options) {
       && runnerFreeze.observerSha256 === expectedRunnerFreeze.observerSha256
       && runnerFreeze.runnerSha256 === expectedRunnerFreeze.runnerSha256
       && runnerFreeze.protocolSha256 === candidate.protocolSha256
+      && runnerFreeze.reservationHeadroomMicroUsd === EXPOSED_REPAIR_RESERVATION_MICRO_USD
       && runnerFreeze.maxCalls === 16 && runnerFreeze.maxSpendUsd === 1 && runnerFreeze.noAutomaticRetry;
     if (!runnerFreezeMatches) throw new Error('RUNNER_FREEZE_MISMATCH');
     const authorization = await readAuthorization(required(options, '--authorization'), candidate, runnerFreezeCapture, runnerFreeze, plan);
@@ -580,7 +586,7 @@ async function runPaid(options) {
     assert.equal(creditResponse.status, 200);
     const credit = (await creditResponse.json()).data;
     const remainingMicroUsd = Math.floor((credit.total_credits - credit.total_usage) * 1_000_000);
-    const creditPlan = exposedCreditPlan(remainingMicroUsd, before.campaign, authorization.authorization.creditBasis);
+    const creditPlan = exposedCreditPlan(remainingMicroUsd, before.campaign, authorization.authorization.creditBasis, Math.round(plan.approvedMaxUsd * 1_000_000));
     cappedCredit = creditPlan.cappedCreditMicroUsd;
     await writeImmutableCapture(out, 'credit-preflight.json', {
       remainingMicroUsd, oldHeldMicroUsd: before.campaign.heldMicroUsd,

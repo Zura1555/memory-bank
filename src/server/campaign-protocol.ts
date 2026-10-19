@@ -9,23 +9,28 @@ type ExposedRequestId = typeof EXPOSED_REQUEST_ORDER[number];
 type JsonPrimitive = string | number | boolean | null;
 
 export const exposedCreditBasisSchema = z.enum(["unreserved", "owner-accepted-hold-overlap"]);
+export const EXPOSED_REPAIR_RESERVATION_MICRO_USD = 1_200_000;
 
 export function exposedCreditPlan(remainingMicroUsd: number, budget: {
   heldMicroUsd: number; reconciledSpendMicroUsd: number; availableCreditMicroUsd: number; limitMicroUsd: number;
-}, creditBasis: z.infer<typeof exposedCreditBasisSchema>) {
+}, creditBasis: z.infer<typeof exposedCreditBasisSchema>, spendLimitMicroUsd: number) {
   const overlapApproved = exposedCreditBasisSchema.parse(creditBasis) === "owner-accepted-hold-overlap";
+  if (spendLimitMicroUsd !== 250_000 && spendLimitMicroUsd !== 1_000_000) throw new Error("Invalid approved spend ceiling");
   const unreservedMicroUsd = remainingMicroUsd - budget.heldMicroUsd;
   const spendableMicroUsd = overlapApproved ? remainingMicroUsd : unreservedMicroUsd;
-  if (!Number.isSafeInteger(remainingMicroUsd) || spendableMicroUsd < 1_000_000) {
-    throw new Error("Insufficient provider credit for approved campaign credit basis");
-  }
-  const runCeiling = budget.reconciledSpendMicroUsd + budget.heldMicroUsd + 1_000_000;
+  const runCeiling = budget.reconciledSpendMicroUsd + budget.heldMicroUsd
+    + EXPOSED_REPAIR_RESERVATION_MICRO_USD + spendLimitMicroUsd;
   const cappedCreditMicroUsd = Math.min(budget.limitMicroUsd,
     overlapApproved ? runCeiling : Math.min(budget.availableCreditMicroUsd, runCeiling));
-  if (cappedCreditMicroUsd - budget.reconciledSpendMicroUsd - budget.heldMicroUsd < 600_000) {
-    throw new Error("Insufficient campaign headroom for a phase reservation");
+  const headroomMicroUsd = cappedCreditMicroUsd - budget.reconciledSpendMicroUsd - budget.heldMicroUsd;
+  if (headroomMicroUsd < EXPOSED_REPAIR_RESERVATION_MICRO_USD) {
+    throw new Error("Insufficient campaign headroom for a repaired phase reservation");
   }
-  return { creditBasis, unreservedMicroUsd, spendableMicroUsd, cappedCreditMicroUsd };
+  if (!Number.isSafeInteger(remainingMicroUsd) || spendableMicroUsd < headroomMicroUsd) {
+    throw new Error("Insufficient provider credit for approved campaign credit basis");
+  }
+  return { creditBasis, unreservedMicroUsd, spendableMicroUsd, cappedCreditMicroUsd,
+    reservationHeadroomMicroUsd: EXPOSED_REPAIR_RESERVATION_MICRO_USD, spendLimitMicroUsd };
 }
 
 export interface Criterion {

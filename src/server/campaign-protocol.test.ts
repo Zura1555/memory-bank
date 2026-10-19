@@ -17,22 +17,39 @@ import { validateSelections } from "./selections.ts";
 import type { Artifact, CorpusSnapshot, IndexedPassage, PastCase, SourceVersion } from "./corpus.ts";
 
 test("credit overlap requires explicit owner approval, preserves holds and never exceeds the run or campaign ceiling", () => {
-  const budget = { heldMicroUsd: 1_800_000, reconciledSpendMicroUsd: 1_875_662, availableCreditMicroUsd: 4_319_578, limitMicroUsd: 5_000_000 };
+  const budget = { heldMicroUsd: 1_800_000, reconciledSpendMicroUsd: 1_875_662, availableCreditMicroUsd: 5_000_000, limitMicroUsd: 5_000_000 };
   const original = structuredClone(budget);
-  assert.throws(() => exposedCreditPlan(2_420_916, budget, "unreserved"), /Insufficient provider credit/);
-  assert.throws(() => exposedCreditPlan(2_420_916, budget, undefined as never));
-  const approved = exposedCreditPlan(2_420_916, budget, "owner-accepted-hold-overlap");
+  assert.throws(() => exposedCreditPlan(2_420_916, budget, "unreserved", 250_000), /Insufficient provider credit/);
+  assert.throws(() => exposedCreditPlan(2_420_916, budget, undefined as never, 250_000));
+  const approved = exposedCreditPlan(2_420_916, budget, "owner-accepted-hold-overlap", 250_000);
   assert.equal(approved.unreservedMicroUsd, 620_916);
   assert.equal(approved.spendableMicroUsd, 2_420_916);
-  assert.equal(approved.cappedCreditMicroUsd - budget.reconciledSpendMicroUsd - budget.heldMicroUsd, 1_000_000);
-  assert.ok(approved.cappedCreditMicroUsd <= budget.limitMicroUsd);
+  assert.equal(approved.cappedCreditMicroUsd, budget.limitMicroUsd);
+  assert.ok(approved.cappedCreditMicroUsd - budget.reconciledSpendMicroUsd - budget.heldMicroUsd >= 1_200_000);
   assert.deepEqual(budget, original, "Accepting overlap is not a release or reconciliation of old reservations.");
-  const unreserved = exposedCreditPlan(3_000_000, budget, "unreserved");
+  const unreserved = exposedCreditPlan(3_500_000, budget, "unreserved", 250_000);
   assert.equal(unreserved.cappedCreditMicroUsd, budget.availableCreditMicroUsd);
-  for (const remaining of [999_999, NaN, Infinity]) {
-    assert.throws(() => exposedCreditPlan(remaining, budget, "owner-accepted-hold-overlap"), /Insufficient provider credit/);
+  for (const remaining of [1_199_999, NaN, Infinity]) {
+    assert.throws(() => exposedCreditPlan(remaining, budget, "owner-accepted-hold-overlap", 250_000), /Insufficient provider credit/);
   }
-  assert.throws(() => exposedCreditPlan(2_420_916, { ...budget, limitMicroUsd: 4_000_000 }, "owner-accepted-hold-overlap"), /Insufficient campaign headroom/);
+  assert.throws(() => exposedCreditPlan(2_420_916, { ...budget, limitMicroUsd: 4_000_000 }, "owner-accepted-hold-overlap", 250_000), /Insufficient campaign headroom/);
+});
+
+test("repair reservation capacity stays separate from dispatch spend and approved credit", () => {
+  const budget = { heldMicroUsd: 0, reconciledSpendMicroUsd: 0, availableCreditMicroUsd: 1_649_640, limitMicroUsd: 5_000_000 };
+  const diagnostic = exposedCreditPlan(2_000_000, budget, "unreserved", 250_000);
+  assert.equal(diagnostic.cappedCreditMicroUsd, 1_450_000);
+  assert.equal(diagnostic.reservationHeadroomMicroUsd, 1_200_000);
+  assert.equal(diagnostic.spendLimitMicroUsd, 250_000);
+  assert.equal(diagnostic.cappedCreditMicroUsd - 250_000, 1_200_000,
+    "A settled assessment cannot consume the reserved capacity for a later brief repair.");
+  const full = exposedCreditPlan(2_000_000, budget, "unreserved", 1_000_000);
+  assert.equal(full.cappedCreditMicroUsd, budget.availableCreditMicroUsd,
+    "Reservation headroom cannot expand the owner's aggregate available credit.");
+  assert.equal(full.spendLimitMicroUsd, 1_000_000);
+  assert.throws(() => exposedCreditPlan(2_000_000, { ...budget, availableCreditMicroUsd: 1_199_999 }, "unreserved", 250_000), /Insufficient campaign headroom/);
+  assert.throws(() => exposedCreditPlan(1_449_999, budget, "unreserved", 250_000), /Insufficient provider credit/);
+  for (const spend of [0, 1_200_000, NaN]) assert.throws(() => exposedCreditPlan(2_000_000, budget, "unreserved", spend), /Invalid approved spend ceiling/);
 });
 
 const selection = (caseId: string, artifactId: string, versionId: string, passageIds: string[]): Selection => ({
