@@ -151,10 +151,10 @@ export async function reconcileReservation(env: Env, input: OperatorReconciliati
       "SELECT active_attempt_id FROM workflow_control WHERE singleton FOR UPDATE",
     );
     const active = control.rows[0]?.active_attempt_id === input.reservationId;
-    const stateColumn = reservation.phase === "assessment" ? "assessment_state" : "brief_state";
-    const finishedColumn = reservation.phase === "assessment" ? "assessment_finished_at" : "brief_finished_at";
     const job = await client.query<{ state: string }>(
-      `SELECT ${stateColumn} AS state FROM jobs WHERE id = $1 FOR UPDATE`,
+      reservation.phase === "assessment"
+        ? "SELECT assessment_state AS state FROM jobs WHERE id = $1 FOR UPDATE"
+        : "SELECT brief_state AS state FROM jobs WHERE id = $1 FOR UPDATE",
       [reservation.job_id],
     );
     const currentPhase = ["queued", "running", "reconciliation_required"].includes(job.rows[0]?.state ?? "");
@@ -188,8 +188,11 @@ export async function reconcileReservation(env: Env, input: OperatorReconciliati
     );
     if (ownsPhase) {
       await client.query(
-        `UPDATE jobs SET ${stateColumn} = 'failed', ${finishedColumn} = now(), error_code = 'OWNER_RECONCILED', stage = 'failed'
-         WHERE id = $1 AND ${stateColumn} IN ('queued', 'running', 'reconciliation_required')`,
+        reservation.phase === "assessment"
+          ? `UPDATE jobs SET assessment_state = 'failed', assessment_finished_at = now(), error_code = 'OWNER_RECONCILED', stage = 'failed'
+             WHERE id = $1 AND assessment_state IN ('queued', 'running', 'reconciliation_required')`
+          : `UPDATE jobs SET brief_state = 'failed', brief_finished_at = now(), error_code = 'OWNER_RECONCILED', stage = 'failed'
+             WHERE id = $1 AND brief_state IN ('queued', 'running', 'reconciliation_required')`,
         [reservation.job_id],
       );
     }

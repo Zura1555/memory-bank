@@ -6,9 +6,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
+import { transaction } from "./db.ts";
 import { ReconciliationRequired, runPaidStage } from "./calls.ts";
 import type { Env } from "./env.ts";
-import { operatorStatus } from "./operator.ts";
+import { operatorStatus, reconcileReservation } from "./operator.ts";
 import { startBrief } from "./admission.ts";
 import type { Selection } from "../shared/protocol.ts";
 
@@ -49,13 +50,25 @@ globalThis.fetch = async (_input, init) => {
   }), { headers: { "x-generation-id": "gen-synthetic-interrupted" } });
 };
 
+async function ledgerSnapshot(pool: Pool): Promise<Record<string, unknown>> {
+  const queries = {
+    campaign_budget: "SELECT to_jsonb(t) AS row FROM campaign_budget t ORDER BY to_jsonb(t)::text",
+    workflow_control: "SELECT to_jsonb(t) AS row FROM workflow_control t ORDER BY to_jsonb(t)::text",
+    jobs: "SELECT to_jsonb(t) AS row FROM jobs t ORDER BY to_jsonb(t)::text",
+    phase_reservations: "SELECT to_jsonb(t) AS row FROM phase_reservations t ORDER BY to_jsonb(t)::text",
+    model_attempts: "SELECT to_jsonb(t) AS row FROM model_attempts t ORDER BY to_jsonb(t)::text",
+    job_outbox: "SELECT to_jsonb(t) AS row FROM job_outbox t ORDER BY to_jsonb(t)::text",
+    operator_reconciliations: "SELECT to_jsonb(t) AS row FROM operator_reconciliations t ORDER BY to_jsonb(t)::text",
+  };
+  const snapshot: Record<string, unknown> = {};
+  for (const [table, query] of Object.entries(queries)) snapshot[table] = (await pool.query(query)).rows;
+  return snapshot;
+}
+
 async function verify(connectionString: string, expected: unknown): Promise<void> {
   const pool = new Pool({ connectionString });
   try {
-    const snapshot: Record<string, unknown> = {};
-    for (const table of ["campaign_budget", "workflow_control", "jobs", "phase_reservations", "model_attempts", "job_outbox", "operator_reconciliations"]) {
-      snapshot[table] = (await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows;
-    }
+    const snapshot = await ledgerSnapshot(pool);
     assert.deepEqual(snapshot, expected, "Every ledger row must survive unchanged");
     const env = { APP_ENV: "development", LOCAL_DATABASE_URL: connectionString } as Env;
     for (const [job, reservation, attempt] of [
@@ -71,10 +84,7 @@ async function verify(connectionString: string, expected: unknown): Promise<void
       jobId: readyJobId, briefState: "ready",
     }, "A persisted JSONB selection must resume the ready brief regardless of object or passage order");
     assert.equal(providerRequests, 2, "Replay must not add to the two synthetic provider requests");
-    for (const [table, rows] of Object.entries(snapshot)) {
-      assert.deepEqual((await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows, rows,
-        "Rejected replay must not mutate accounting");
-    }
+    assert.deepEqual(await ledgerSnapshot(pool), snapshot, "Rejected replay must not mutate accounting");
   } finally {
     await pool.end();
   }
@@ -89,26 +99,75 @@ try {
   try {
     const initial = (await pool.query("SELECT available_credit_micro_usd, admission_enabled FROM campaign_budget")).rows[0];
     assert.deepEqual(initial, { available_credit_micro_usd: null, admission_enabled: false });
+    for (const phase of ["assessment", "brief"] as const) {
+      const job = randomUUID();
+      const reservation = randomUUID();
+      const note = "Owner's check: '; UPDATE campaign_budget SET admission_enabled = true; --";
+      await pool.query(
+        `INSERT INTO jobs (id, request_text, corpus_version, corpus_sha256, assessment_state, brief_state,
+          assessment_finished_at, brief_finished_at, expires_at)
+         VALUES ($1, 'Synthetic reconciliation', 'ledger-smoke', repeat('a', 64), $2, $3,
+          '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', now() + interval '1 day')`,
+        [job, phase === "assessment" ? "reconciliation_required" : "ready", phase === "brief" ? "reconciliation_required" : "ready"],
+      );
+      await pool.query(
+        "INSERT INTO phase_reservations (id, job_id, phase, attempt_no, amount_micro_usd) VALUES ($1, $2, $3, 1, 600000)",
+        [reservation, job, phase],
+      );
+      await pool.query("UPDATE campaign_budget SET held_micro_usd = held_micro_usd + 600000 WHERE singleton");
+      const reconciliationEnv = { APP_ENV: "development", LOCAL_DATABASE_URL: connectionString } as Env;
+      const input = { reservationId: reservation, actualMicroUsd: 0, note };
+      assert.deepEqual(await reconcileReservation(reconciliationEnv, input), { reservationId: reservation, alreadyReconciled: false });
+      assert.deepEqual(await reconcileReservation(reconciliationEnv, input), { reservationId: reservation, alreadyReconciled: true });
+      const reconciledJob = (await pool.query(
+        `SELECT assessment_state, brief_state, assessment_finished_at, brief_finished_at, error_code FROM jobs WHERE id = $1`, [job],
+      )).rows[0];
+      assert.equal(reconciledJob.assessment_state, phase === "assessment" ? "failed" : "ready");
+      assert.equal(reconciledJob.brief_state, phase === "brief" ? "failed" : "ready");
+      assert.equal(reconciledJob.error_code, "OWNER_RECONCILED");
+      const untouchedFinish = phase === "assessment" ? reconciledJob.brief_finished_at : reconciledJob.assessment_finished_at;
+      const changedFinish = phase === "assessment" ? reconciledJob.assessment_finished_at : reconciledJob.brief_finished_at;
+      assert.equal(untouchedFinish.toISOString(), "2026-01-01T00:00:00.000Z");
+      assert.ok(changedFinish > untouchedFinish);
+      assert.equal((await pool.query("SELECT note FROM operator_reconciliations WHERE reservation_id = $1", [reservation])).rows[0].note, note);
+      assert.deepEqual((await pool.query("SELECT held_micro_usd, reconciled_spend_micro_usd, admission_enabled FROM campaign_budget")).rows[0],
+        { held_micro_usd: "0", reconciled_spend_micro_usd: "0", admission_enabled: false });
+    }
+    console.log("Both reconciliation phases preserved the sibling phase and bound SQL-like notes as data; replay was idempotent.");
     // Synthetic state only: no historical IDs, provider charges, credentials, or paid jobs.
-    await pool.query(`BEGIN;
-      UPDATE campaign_budget SET available_credit_micro_usd = 4000000, held_micro_usd = 1200000,
-        reconciled_spend_micro_usd = 12345 WHERE singleton;
-      INSERT INTO jobs (id, request_text, corpus_version, corpus_sha256, stage, assessment_state, expires_at) VALUES
-        ('${jobId}', 'Synthetic restart smoke', 'ledger-smoke', repeat('a', 64), 'reconciliation_required', 'reconciliation_required', now() + interval '1 day'),
-        ('${settledJobId}', 'Synthetic settled smoke', 'ledger-smoke', repeat('a', 64), 'failed', 'failed', now() + interval '1 day'),
-        ('${outputJobId}', 'Synthetic incomplete output smoke', 'ledger-smoke', repeat('a', 64), 'reconciliation_required', 'reconciliation_required', now() + interval '1 day');
-      INSERT INTO phase_reservations (id, job_id, phase, attempt_no, amount_micro_usd, state, actual_micro_usd, reconciliation_note, reconciled_at) VALUES
-        ('${reservationId}', '${jobId}', 'assessment', 1, 600000, 'held', NULL, NULL, NULL),
-        ('${settledReservationId}', '${settledJobId}', 'assessment', 1, 600000, 'reconciled', 12345, 'Synthetic smoke only', now()),
-        ('${outputReservationId}', '${outputJobId}', 'assessment', 1, 600000, 'held', NULL, NULL, NULL);
-      UPDATE workflow_control SET active_attempt_id = '${reservationId}' WHERE singleton;
-      INSERT INTO model_attempts (id, reservation_id, job_id, phase, call_index, state, requested_model, generation_id, error_code) VALUES
-        ('${settledAttemptId}', '${settledReservationId}', '${settledJobId}', 'assessment', 1, 'reconciled', 'smoke-no-provider', 'synthetic-settled', NULL);
-      INSERT INTO job_outbox (id, job_id, phase, attempt_no, workflow_id)
-        VALUES ('${randomUUID()}', '${jobId}', 'assessment', 1, '${jobId}-assessment-1');
-      INSERT INTO operator_reconciliations (id, reservation_id, actual_micro_usd, note, operator_subject)
-        VALUES ('${randomUUID()}', '${settledReservationId}', 12345, 'Synthetic smoke only; not provider billing', 'ledger-smoke');
-      COMMIT;`);
+    await transaction(pool, async (client) => {
+      await client.query(`UPDATE campaign_budget SET available_credit_micro_usd = 4000000, held_micro_usd = 1200000,
+        reconciled_spend_micro_usd = 12345 WHERE singleton`);
+      await client.query(
+        `INSERT INTO jobs (id, request_text, corpus_version, corpus_sha256, stage, assessment_state, expires_at) VALUES
+          ($1, 'Synthetic restart smoke', 'ledger-smoke', repeat('a', 64), 'reconciliation_required', 'reconciliation_required', now() + interval '1 day'),
+          ($2, 'Synthetic settled smoke', 'ledger-smoke', repeat('a', 64), 'failed', 'failed', now() + interval '1 day'),
+          ($3, 'Synthetic incomplete output smoke', 'ledger-smoke', repeat('a', 64), 'reconciliation_required', 'reconciliation_required', now() + interval '1 day')`,
+        [jobId, settledJobId, outputJobId],
+      );
+      await client.query(
+        `INSERT INTO phase_reservations (id, job_id, phase, attempt_no, amount_micro_usd, state, actual_micro_usd, reconciliation_note, reconciled_at) VALUES
+          ($1, $2, 'assessment', 1, 600000, 'held', NULL, NULL, NULL),
+          ($3, $4, 'assessment', 1, 600000, 'reconciled', 12345, 'Synthetic smoke only', now()),
+          ($5, $6, 'assessment', 1, 600000, 'held', NULL, NULL, NULL)`,
+        [reservationId, jobId, settledReservationId, settledJobId, outputReservationId, outputJobId],
+      );
+      await client.query("UPDATE workflow_control SET active_attempt_id = $1 WHERE singleton", [reservationId]);
+      await client.query(
+        `INSERT INTO model_attempts (id, reservation_id, job_id, phase, call_index, state, requested_model, generation_id, error_code)
+          VALUES ($1, $2, $3, 'assessment', 1, 'reconciled', 'smoke-no-provider', 'synthetic-settled', NULL)`,
+        [settledAttemptId, settledReservationId, settledJobId],
+      );
+      await client.query(
+        `INSERT INTO job_outbox (id, job_id, phase, attempt_no, workflow_id) VALUES ($1, $2, 'assessment', 1, $3)`,
+        [randomUUID(), jobId, `${jobId}-assessment-1`],
+      );
+      await client.query(
+        `INSERT INTO operator_reconciliations (id, reservation_id, actual_micro_usd, note, operator_subject)
+          VALUES ($1, $2, 12345, 'Synthetic smoke only; not provider billing', 'ledger-smoke')`,
+        [randomUUID(), settledReservationId],
+      );
+    });
     await pool.query(
       `INSERT INTO jobs (id, capability_hash, request_text, corpus_version, corpus_sha256, stage,
          assessment_state, assessment_result, brief_state, brief_selections, expires_at)
@@ -176,10 +235,7 @@ try {
     assert.deepEqual((await pool.query("SELECT held_micro_usd, reconciled_spend_micro_usd, admission_enabled FROM campaign_budget")).rows[0],
       { held_micro_usd: "1200000", reconciled_spend_micro_usd: "12345", admission_enabled: false });
     console.log("Real paid-stage failures retained safe causes and reported usage without exposing output or releasing holds; two synthetic responses, no provider network access.");
-    expected = {};
-    for (const table of ["campaign_budget", "workflow_control", "jobs", "phase_reservations", "model_attempts", "job_outbox", "operator_reconciliations"]) {
-      expected[table] = (await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows;
-    }
+    expected = await ledgerSnapshot(pool);
   } finally {
     await pool.end();
   }

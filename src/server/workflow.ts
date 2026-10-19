@@ -69,22 +69,26 @@ async function hasUnresolvedDispatch(env: Env, params: WorkflowParams): Promise<
 
 async function startPhase(env: Env, params: WorkflowParams): Promise<void> {
   const pool = database(env);
-  const stateColumn = params.phase === "assessment" ? "assessment_state" : "brief_state";
-  const startedColumn = params.phase === "assessment" ? "assessment_processing_started_at" : "brief_processing_started_at";
   const result = await pool.query(
-    `UPDATE jobs SET ${stateColumn} = 'running', ${startedColumn} = COALESCE(${startedColumn}, now()), stage = 'assembling'
-     WHERE id = $1 AND ${stateColumn} IN ('queued', 'running') AND expires_at > now()
-       AND EXISTS (SELECT 1 FROM workflow_control WHERE singleton AND active_attempt_id = $2)`,
+    params.phase === "assessment"
+      ? `UPDATE jobs SET assessment_state = 'running', assessment_processing_started_at = COALESCE(assessment_processing_started_at, now()), stage = 'assembling'
+         WHERE id = $1 AND assessment_state IN ('queued', 'running') AND expires_at > now()
+           AND EXISTS (SELECT 1 FROM workflow_control WHERE singleton AND active_attempt_id = $2)`
+      : `UPDATE jobs SET brief_state = 'running', brief_processing_started_at = COALESCE(brief_processing_started_at, now()), stage = 'assembling'
+         WHERE id = $1 AND brief_state IN ('queued', 'running') AND expires_at > now()
+           AND EXISTS (SELECT 1 FROM workflow_control WHERE singleton AND active_attempt_id = $2)`,
     [params.jobId, params.attemptId],
   );
   if (!result.rowCount) throw new Error("PHASE_NOT_RUNNABLE");
 }
 
 async function setStage(env: Env, params: WorkflowParams, stage: "drafting" | "reference_check" | "support_review"): Promise<void> {
-  const column = params.phase === "assessment" ? "assessment_state" : "brief_state";
   const result = await database(env).query(
-    `UPDATE jobs SET stage = $3 WHERE id = $1 AND ${column} = 'running'
-       AND EXISTS (SELECT 1 FROM workflow_control WHERE singleton AND active_attempt_id = $2)`,
+    params.phase === "assessment"
+      ? `UPDATE jobs SET stage = $3 WHERE id = $1 AND assessment_state = 'running'
+           AND EXISTS (SELECT 1 FROM workflow_control WHERE singleton AND active_attempt_id = $2)`
+      : `UPDATE jobs SET stage = $3 WHERE id = $1 AND brief_state = 'running'
+           AND EXISTS (SELECT 1 FROM workflow_control WHERE singleton AND active_attempt_id = $2)`,
     [params.jobId, params.attemptId, stage],
   );
   if (!result.rowCount) throw new Error("PHASE_NOT_ACTIVE");
@@ -96,13 +100,14 @@ async function finishPhase(env: Env, params: WorkflowParams, result: AssessmentR
       "SELECT active_attempt_id FROM workflow_control WHERE singleton FOR UPDATE",
     );
     if (control.rows[0]?.active_attempt_id !== params.attemptId) throw new Error("WORKFLOW_OWNERSHIP_CHANGED");
-    const stateColumn = params.phase === "assessment" ? "assessment_state" : "brief_state";
-    const finishedColumn = params.phase === "assessment" ? "assessment_finished_at" : "brief_finished_at";
-    const resultColumn = params.phase === "assessment" ? "assessment_result" : "brief_result";
     const updated = await client.query(
-      `UPDATE jobs SET ${stateColumn} = 'ready', ${finishedColumn} = now(), ${resultColumn} = $2::jsonb,
-         error_code = NULL, stage = 'ready'
-       WHERE id = $1 AND ${stateColumn} = 'running' RETURNING id`,
+      params.phase === "assessment"
+        ? `UPDATE jobs SET assessment_state = 'ready', assessment_finished_at = now(), assessment_result = $2::jsonb,
+             error_code = NULL, stage = 'ready'
+           WHERE id = $1 AND assessment_state = 'running' RETURNING id`
+        : `UPDATE jobs SET brief_state = 'ready', brief_finished_at = now(), brief_result = $2::jsonb,
+             error_code = NULL, stage = 'ready'
+           WHERE id = $1 AND brief_state = 'running' RETURNING id`,
       [params.jobId, JSON.stringify(result)],
     );
     if (!updated.rowCount) throw new Error("PHASE_FINISH_STATE_INVALID");
@@ -112,14 +117,16 @@ async function finishPhase(env: Env, params: WorkflowParams, result: AssessmentR
 
 async function finishFailure(env: Env, params: WorkflowParams, code: string, uncertain: boolean): Promise<void> {
   const pool = database(env);
-  const stateColumn = params.phase === "assessment" ? "assessment_state" : "brief_state";
-  const finishedColumn = params.phase === "assessment" ? "assessment_finished_at" : "brief_finished_at";
   const state = uncertain ? "reconciliation_required" : "failed";
   await transaction(pool, async (client) => {
     await client.query(
-      `UPDATE jobs SET ${stateColumn} = $3, ${finishedColumn} = now(), error_code = $4, stage = $3
-       WHERE id = $1 AND ${stateColumn} IN ('queued', 'running')
-         AND EXISTS (SELECT 1 FROM workflow_control WHERE singleton AND active_attempt_id = $2)`,
+      params.phase === "assessment"
+        ? `UPDATE jobs SET assessment_state = $3, assessment_finished_at = now(), error_code = $4, stage = $3
+           WHERE id = $1 AND assessment_state IN ('queued', 'running')
+             AND EXISTS (SELECT 1 FROM workflow_control WHERE singleton AND active_attempt_id = $2)`
+        : `UPDATE jobs SET brief_state = $3, brief_finished_at = now(), error_code = $4, stage = $3
+           WHERE id = $1 AND brief_state IN ('queued', 'running')
+             AND EXISTS (SELECT 1 FROM workflow_control WHERE singleton AND active_attempt_id = $2)`,
       [params.jobId, params.attemptId, state, code],
     );
     if (!uncertain) {
