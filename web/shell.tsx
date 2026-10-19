@@ -87,7 +87,7 @@ export function AppShell({ ask, sources, knowledge }: {
     setDrawerOpen(false);
   }
 
-  const brand = <a href="/" className="brand" aria-label="Memory Bank home"><span className="brand-mark" aria-hidden="true">M</span></a>;
+  const brand = <a href="/" className="brand" aria-label="Memory Bank home"><img className="brand-mark" src="/logo.png" width="32" height="32" alt="" /></a>;
   return <div className="app-shell" onClick={navigate}>
     <a className="skip-link" href="#main-content">Skip to content</a>
     <aside className="app-sidebar" aria-label="Workspace sidebar">
@@ -107,7 +107,7 @@ export function AppShell({ ask, sources, knowledge }: {
               <Drawer.Viewport className="navigation-viewport">
                 <Drawer.Popup className="navigation-drawer" finalFocus={() => navigating.current ? false : true}>
                   <Drawer.Content>
-                    <div className="drawer-heading"><Drawer.Title className="drawer-title">Memory Bank</Drawer.Title><Drawer.Close render={<Button className="icon-button" aria-label="Close navigation" />}>Close</Drawer.Close></div>
+                    <div className="drawer-heading">{brand}<Drawer.Title className="drawer-title">Memory Bank</Drawer.Title><Drawer.Close render={<Button className="icon-button" aria-label="Close navigation" />}>Close</Drawer.Close></div>
                     <Drawer.Description className="muted">Evidence Workbench</Drawer.Description>
                     <Navigation page={view.page} />
                     <p className="drawer-disclaimer">Fictional evidence · checked before use</p>
