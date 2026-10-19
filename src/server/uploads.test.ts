@@ -185,6 +185,71 @@ test("a competing processing request cannot dispatch a second embedding attempt"
   assert.equal((await uploadDetail(env, owner, source.id)).hasText, true);
 });
 
+test("private URL sources retain public HTML and its extracted content", async (t) => {
+  const { env, reveal } = storage();
+  const headers = { Authorization: authorization, "Content-Type": "application/json", "CF-Connecting-IP": "127.0.0.1" };
+  const fetches: { url: URL; init?: RequestInit }[] = [];
+  const page = "<html><body><main>Sandbox import must reconcile 120 records.</main></body></html>";
+  t.mock.method(globalThis, "fetch", async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    fetches.push({ url: new URL(input instanceof Request ? input.url : String(input)), init });
+    return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+  });
+  const invalidUrls = ["http://docs.example.com/page", "https://127.0.0.1/page", "https://127.0.0.1./page", "https://2130706433/page", "https://localhost./page", "https://admin.local/page", "https://user:pass@docs.example.com/page", "https://docs.example.com:8443/page"];
+  for (const url of invalidUrls) {
+    const response = await app.request("http://localhost/api/uploads/url", { method: "POST", headers, body: JSON.stringify({ url }) }, env);
+    assert.equal(response.status, 400);
+    assert.equal((await response.json() as { error: { code: string } }).error.code, "INVALID_SOURCE_URL");
+  }
+  assert.equal(fetches.length, 0, "invalid targets never trigger an outbound request");
+
+  const response = await app.request("http://localhost/api/uploads/url", {
+    method: "POST", headers, body: JSON.stringify({ url: "https://docs.example.com/guide?access=secret#part" }),
+  }, env);
+  assert.equal(response.status, 201);
+  const source = await response.json() as PrivateSourceDetail;
+  assert.equal(source.name, "guide.html");
+  assert.equal(source.sourceUrl, "https://docs.example.com/guide");
+  assert.equal(source.mimeType, "text/html");
+  assert.equal(source.state, "pending");
+  assert.equal(fetches.length, 1);
+  assert.equal(fetches[0].url.href, "https://docs.example.com/guide?access=secret");
+  assert.equal(fetches[0].init?.redirect, "manual");
+  assert.equal(fetches[0].init?.credentials, "omit");
+  assert.equal(await (await uploadOriginal(env, await uploadOwner(authorization), source.id)).text(), page);
+
+  let conversionOptions: unknown;
+  env.AI = {
+    ...env.AI,
+    async toMarkdown(_input: unknown, options?: unknown) {
+      conversionOptions = options;
+      return { format: "markdown", data: "Sandbox import must reconcile 120 records." };
+    },
+  } as unknown as Ai;
+  await processUpload(env, await uploadOwner(authorization), source.id);
+  const detail = await uploadDetail(env, await uploadOwner(authorization), source.id);
+  assert.equal(detail.text, "Sandbox import must reconcile 120 records.");
+  assert.equal(detail.textKind, "converted_text");
+  assert.deepEqual(conversionOptions, { conversionOptions: { html: { hostname: "https://docs.example.com/guide" } } });
+  reveal();
+  assert.equal((await uploadDetail(env, await uploadOwner(authorization), source.id)).state, "indexed");
+});
+
+test("private URL sources reject redirects to private targets", async (t) => {
+  const { env } = storage();
+  const headers = { Authorization: authorization, "Content-Type": "application/json", "CF-Connecting-IP": "127.0.0.1" };
+  let fetchCount = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    fetchCount++;
+    return new Response(null, { status: 302, headers: { Location: "https://127.0.0.1/private" } });
+  });
+  const response = await app.request("http://localhost/api/uploads/url", {
+    method: "POST", headers, body: JSON.stringify({ url: "https://docs.example.com/redirect" }),
+  }, env);
+  assert.equal(response.status, 502);
+  assert.equal((await response.json() as { error: { code: string } }).error.code, "SOURCE_REDIRECT_REJECTED");
+  assert.equal(fetchCount, 1, "private redirect targets never trigger a second request");
+});
+
 test("private source organization is owned, bounded, durable, and never changes original bytes or expiry", async () => {
   const { env, objects } = storage();
   const owner = await uploadOwner(authorization);
