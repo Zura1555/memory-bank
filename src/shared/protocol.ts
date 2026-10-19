@@ -69,6 +69,15 @@ export interface OperationCheck {
   sourceRefs: SourceRef[];
   requestQuotes: string[];
 }
+export interface OperationObligation {
+  claimId: string;
+  requestQuote: string;
+  requirement: string;
+  requiresAdaptation: boolean;
+  checkKind: OperationCheckKind | null;
+  adaptationClaimIds: string[];
+  checkClaimIds: string[];
+}
 export interface ArtifactDecision {
   disposition: BriefDisposition | null;
   operation: OperationKind | null;
@@ -76,13 +85,34 @@ export interface ArtifactDecision {
   requestQuotes: string[];
   adaptations: DecisionCondition[];
   checks: OperationCheck[];
+  obligations: OperationObligation[];
 }
 export interface DecisionReason {
   target: "history" | "request_constraint" | "adaptation" | "check" | "disposition";
   explanation: string;
   sourceRefs: SourceRef[];
   requestQuotes: string[];
+  claimId?: string;
+  requirement?: string;
 }
+export type EvidenceJudgment = {
+  verdict: "supported";
+  reason: null;
+} | {
+  verdict: "unsupported" | "uncertain";
+  reason: {
+    explanation: string;
+    sourceRefs: SourceRef[];
+    requestQuotes: string[];
+  };
+};
+export type ClaimFinding = { claimId: string } & EvidenceJudgment;
+export interface MissingEvidenceRequest {
+  caseId: string;
+  artifactId: string;
+  claimId: string;
+}
+export type MissingEvidenceReview = EvidenceJudgment & { claimIds: string[] };
 export interface ArtifactReview {
   caseId: string;
   artifactId: string;
@@ -90,6 +120,7 @@ export interface ArtifactReview {
   verdict: SupportVerdict;
   reasons: DecisionReason[];
   role: ArtifactRole;
+  claimFindings: ClaimFinding[];
 }
 
 export interface ArtifactAssessment {
@@ -142,6 +173,8 @@ export interface NextAction {
 export interface AssessmentResult {
   conclusion: AssessmentConclusion;
   clarifyingClaimIds: string[];
+  missingEvidenceRequests: MissingEvidenceRequest[];
+  missingEvidenceReview: MissingEvidenceReview;
   comparisons: ComparisonRow[];
   requestConstraints: RequestConstraints;
   artifactReviews: ArtifactReview[];

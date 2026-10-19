@@ -1,3 +1,5 @@
+import type { AssessmentResult, Claim } from "../shared/protocol.ts";
+
 export interface RequestSpan {
   spanId: string;
   sentenceId: string;
@@ -59,4 +61,45 @@ export function completeRequestQuotes(request: string, quotes: string[]): string
     interval.start < span.end && interval.end > span.start,
   )).map((span) => span.sentenceId));
   return [...new Set(spans.filter((span) => sentences.has(span.sentenceId)).map((span) => span.text))];
+}
+
+function sameSelectedVersion(claim: Claim, selection: { caseId: string; artifactId: string; versionId: string }): boolean {
+  return claim.sourceRefs.some((ref) => ref.caseId === selection.caseId && ref.artifactId === selection.artifactId && ref.versionId === selection.versionId);
+}
+
+// Quotations the checked assessment already accepted for this exact artifact/version.
+// The brief must keep them even when a later reviewer inventories nothing.
+export function boundAssessmentQuotes(
+  assessment: AssessmentResult,
+  selection: { caseId: string; artifactId: string; versionId: string },
+): string[] {
+  const work = assessment.cases.find((item) => item.caseId === selection.caseId)?.artifactWork.find((item) => item.artifactId === selection.artifactId);
+  const assigned = new Set([
+    ...(work?.claimIds ?? []),
+    ...(work?.blockerClaimIds ?? []),
+    ...(work?.verificationClaimIds ?? []),
+    ...(work?.dispositionClaimId ? [work.dispositionClaimId] : []),
+  ]);
+  // Only claims assigned to this artifact's own work floor its brief coverage.
+  // Comparison requirement claims state whole-request dimensions for the case;
+  // they are not relevance judgments for this artifact, and flooring from them
+  // forced one combined-brief item to carry another item's decisive quotation
+  // (a support-access sign-off sentence on a connector item) even though both
+  // the draft and the independent brief review judged it irrelevant there.
+  // A quotation binds to this item only when its own work claim both declares
+  // it in requestQuotes and states it verbatim in prose. Declared-but-unstated
+  // provenance (a combined request's disposition claim listing every request
+  // sentence) and prose mentions harvested from the global inventory are not
+  // per-item coverage obligations; binding them forced a connector item to
+  // carry a handover sentence its own checked work never asserted.
+  const quotes = new Set<string>();
+  const decision = assessment.artifactReviews.find((item) => item.caseId === selection.caseId && item.artifactId === selection.artifactId)?.decision;
+  if (decision?.historicalEvidence.some((ref) => ref.versionId === selection.versionId)) {
+    for (const quote of [...decision.requestQuotes, ...decision.adaptations.flatMap((item) => item.requestQuotes), ...decision.checks.flatMap((item) => item.requestQuotes)]) quotes.add(quote);
+  }
+  for (const claim of assessment.claims) {
+    if (!sameSelectedVersion(claim, selection) || !assigned.has(claim.claimId)) continue;
+    for (const quote of claim.requestQuotes) if (claim.text.includes(quote)) quotes.add(quote);
+  }
+  return [...quotes];
 }

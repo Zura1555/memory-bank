@@ -28,6 +28,15 @@ export function validateSelections(selections: Selection[], assessment: Assessme
       || disposition?.kind !== "recommendation"
       || reviews.length !== 1 || reviews[0].role !== "starting_point" || reviews[0].verdict !== "supported"
       || reviews[0].decision.disposition !== work.disposition
+      || !Array.isArray(reviews[0].claimFindings)
+      || reviews[0].claimFindings.length !== work.claimIds.filter((id) => id !== dispositionId).length
+      || new Set(reviews[0].claimFindings.map((finding) => finding.claimId)).size !== reviews[0].claimFindings.length
+      || reviews[0].claimFindings.some((finding) => finding.verdict !== "supported" || finding.reason !== null
+        || !work.claimIds.includes(finding.claimId) || !claims.has(finding.claimId))
+      || !Array.isArray(reviews[0].decision.obligations)
+      || reviews[0].decision.obligations.some((obligation) => !work.claimIds.includes(obligation.claimId)
+        || !claims.has(obligation.claimId)
+        || [...obligation.adaptationClaimIds, ...obligation.checkClaimIds].some((id) => !work.claimIds.includes(id) || !claims.has(id)))
       || !exactVersionWitnessed
       || !source || source.version.versionId !== selection.versionId
       || source.pastCase.caseId !== selection.caseId || source.artifact.artifactId !== selection.artifactId

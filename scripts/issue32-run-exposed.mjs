@@ -5,6 +5,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import * as z from 'zod';
+import { MODEL_REQUEST_TIMEOUT_MS, EXPOSED_PHASE_TIMEOUT_MS } from '../src/server/model-deadlines.ts';
 import {
   EXPOSED_REQUEST_ORDER, buildExposedCampaign, exposedCreditBasisSchema, exposedCreditPlan, parseFixedCampaign, parseRuntimeProfile,
   selectionsMatch, verifyRunCapture, writeImmutableCapture,
@@ -14,6 +15,8 @@ const profilePath = 'evaluation/issue32-exposed-runtime-profile.json';
 const protocolPath = 'evaluation/issue32-exposed-g-protocol.json';
 const candidateId = 'memory-bank-issue32-round2';
 const excludedDirectories = new Set(['.git', '.cloudflare', '.wrangler', '.agents', 'node_modules', '__pycache__', 'dist', 'coverage', 'artifacts', '.local']);
+const pipelineVersion = 'bounded-repair-v1';
+
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const freezeSchema = z.strictObject({
   schemaVersion: z.literal(1),
@@ -41,6 +44,7 @@ const freezeSchema = z.strictObject({
 });
 const runnerFreezeSchema = z.strictObject({
   schemaVersion: z.literal(1),
+  pipelineVersion: z.literal(pipelineVersion),
   createdAt: z.string().datetime(),
   mode: z.literal('no-paid-prepare'),
   campaignFreezeSha256: hashSchema,
@@ -57,16 +61,17 @@ const runnerFreezeSchema = z.strictObject({
   observerSha256: hashSchema,
   runnerSha256: hashSchema,
   protocolSha256: hashSchema,
-  maxCalls: z.literal(12),
+  maxCalls: z.literal(16),
   maxSpendUsd: z.literal(1),
   noAutomaticRetry: z.literal(true),
 });
 const authorizationSchema = z.strictObject({
   schemaVersion: z.literal(1),
+  pipelineVersion: z.literal(pipelineVersion),
   authorizationId: z.string().trim().min(1),
   authorizedBy: z.string().trim().min(1),
   authorizedAt: z.string().datetime(),
-  scope: z.literal('issue32-exposed-g2-g4-single-run'),
+  scope: z.enum(['issue32-exposed-g2-g4-single-run', 'issue32-exposed-single-case-diagnostic']),
   runnerFreezeSha256: hashSchema,
   campaignFreezeSha256: hashSchema,
   candidateId: z.string().min(1),
@@ -80,11 +85,19 @@ const authorizationSchema = z.strictObject({
   runnerSha256: hashSchema,
   protocolSha256: hashSchema,
   requestOrder: z.array(z.enum(EXPOSED_REQUEST_ORDER)),
-  approvedMaxCalls: z.literal(12),
-  approvedMaxUsd: z.literal(1),
+  approvedMaxCalls: z.union([z.literal(16), z.literal(6), z.literal(4)]),
+  approvedMaxUsd: z.union([z.literal(1), z.literal(0.25)]),
   creditBasis: exposedCreditBasisSchema,
   noAutomaticRetry: z.literal(true),
 });
+
+export function executionPlan(mode, requestId) {
+  if (mode === 'paid' && requestId === undefined) {
+    return { pipelineVersion, scope: 'issue32-exposed-g2-g4-single-run', requestOrder: [...EXPOSED_REQUEST_ORDER], approvedMaxCalls: 16, approvedMaxUsd: 1, qualificationEligible: true };
+  }
+  if (mode !== 'diagnose' || !EXPOSED_REQUEST_ORDER.includes(requestId)) throw new Error('INVALID_DIAGNOSTIC_REQUEST');
+  return { pipelineVersion, scope: 'issue32-exposed-single-case-diagnostic', requestOrder: [requestId], approvedMaxCalls: requestId === 'g4' ? 4 : 6, approvedMaxUsd: 0.25, qualificationEligible: false };
+}
 
 function digest(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -222,6 +235,7 @@ async function loadCandidate(repoRoot, freezePath) {
 async function buildRunnerFreeze(candidate, bundleBytes, instrumentationBytes, observerBytes) {
   return {
     schemaVersion: 1,
+    pipelineVersion,
     createdAt: new Date().toISOString(),
     mode: 'no-paid-prepare',
     campaignFreezeSha256: candidate.campaignFreezeSha256,
@@ -238,7 +252,7 @@ async function buildRunnerFreeze(candidate, bundleBytes, instrumentationBytes, o
     observerSha256: digest(observerBytes),
     runnerSha256: digest(await readFile(new URL(import.meta.url))),
     protocolSha256: candidate.protocolSha256,
-    maxCalls: 12,
+    maxCalls: 16,
     maxSpendUsd: 1,
     noAutomaticRetry: true,
   };
@@ -283,17 +297,19 @@ async function settle(api, pool, operator, jobId, phase) {
   const rows = (await pool.query("SELECT * FROM phase_reservations WHERE job_id=$1 AND phase=$2 AND state='held'", [jobId, phase])).rows;
   for (const row of rows) {
     const attempts = (await pool.query('SELECT state,usage FROM model_attempts WHERE reservation_id=$1', [row.id])).rows;
-    if (attempts.length < 1 || attempts.length > 2 || attempts.some((attempt) => attempt.state !== 'complete' || !Number.isFinite(attempt.usage?.reportedCostUsd))) return false;
+    if (attempts.length < 1 || attempts.length > 4
+      || attempts.some((attempt) => !['complete', 'invalid'].includes(attempt.state)
+        || !Number.isFinite(attempt.usage?.reportedCostUsd) || attempt.usage.reportedCostUsd < 0)) return false;
     const actualMicroUsd = Math.ceil(attempts.reduce((total, attempt) => total + attempt.usage.reportedCostUsd, 0) * 1_000_000);
     await api('/api/operator/reconciliations', {
       method: 'POST', headers: operator,
-      body: JSON.stringify({ reservationId: row.id, actualMicroUsd, note: 'Issue #32 exposed g2-g4 run: reconcile only exact completed response usage; preserve unrelated holds.' }),
+      body: JSON.stringify({ reservationId: row.id, actualMicroUsd, note: 'Issue #32 exposed g2-g4 run: reconcile exact known completed or invalid response usage; preserve unrelated holds.' }),
     });
   }
   return true;
 }
 
-async function readAuthorization(path, candidate, runnerFreezeCapture, runnerFreeze) {
+export async function readAuthorization(path, candidate, runnerFreezeCapture, runnerFreeze, plan) {
   const capture = await readVerifiedCapture(path);
   const authorization = authorizationSchema.parse(capture.value);
   const candidateAuth = authorization.candidateId === candidate.binding.candidateId
@@ -307,18 +323,25 @@ async function readAuthorization(path, candidate, runnerFreezeCapture, runnerFre
     && authorization.instrumentationSha256 === runnerFreeze.instrumentationSha256
     && authorization.observerSha256 === runnerFreeze.observerSha256
     && authorization.runnerSha256 === runnerFreeze.runnerSha256
-    && authorization.protocolSha256 === runnerFreeze.protocolSha256;
+    && authorization.protocolSha256 === runnerFreeze.protocolSha256
+    && runnerFreeze.pipelineVersion === plan.pipelineVersion
+    && runnerFreeze.maxCalls === 16;
   const authorizedAt = Date.parse(authorization.authorizedAt);
   const fresh = authorizedAt >= Date.parse(runnerFreeze.createdAt) && authorizedAt <= Date.now()
     && Date.now() - authorizedAt <= 24 * 60 * 60 * 1000;
   if (!candidateAuth || !freezeAuth || !fresh
-    || JSON.stringify(authorization.requestOrder) !== JSON.stringify(EXPOSED_REQUEST_ORDER)) {
+    || authorization.pipelineVersion !== plan.pipelineVersion
+    || authorization.scope !== plan.scope
+    || authorization.approvedMaxCalls !== plan.approvedMaxCalls
+    || authorization.approvedMaxUsd !== plan.approvedMaxUsd
+    || JSON.stringify(authorization.requestOrder) !== JSON.stringify(plan.requestOrder)) {
     throw new Error('FRESH_EXPOSED_AUTHORIZATION_MISMATCH');
   }
   return { authorization, sha256: capture.sha256 };
 }
 async function runPaid(options) {
   const repoRoot = resolve(required(options, '--repo'));
+  const plan = executionPlan(required(options, '--mode'), options.get('--request-id'));
   const out = ensureOutside(repoRoot, required(options, '--out'));
   await mkdir(out, { mode: 0o700 });
   let mf;
@@ -335,7 +358,7 @@ async function runPaid(options) {
   const events = [];
   const providerRecords = [];
   const summaries = [];
-  const runCaptureDirectory = join(out, 'run-captures');
+  const runCaptureDirectory = join(out, plan.qualificationEligible ? 'run-captures' : 'diagnostic-captures');
   await mkdir(runCaptureDirectory, { mode: 0o700 });
   try {
     const freezePath = ensureOutside(repoRoot, required(options, '--campaign-freeze'));
@@ -353,6 +376,7 @@ async function runPaid(options) {
     const observerBytes = await readFile(observerPath);
     const expectedRunnerFreeze = await buildRunnerFreeze(candidate, bundleBytes, instrumentationBytes, observerBytes);
     const runnerFreezeMatches = runnerFreeze.mode === 'no-paid-prepare'
+      && runnerFreeze.pipelineVersion === pipelineVersion
       && runnerFreeze.campaignFreezeSha256 === candidate.campaignFreezeSha256
       && JSON.stringify(runnerFreeze.candidate) === JSON.stringify(expectedRunnerFreeze.candidate)
       && JSON.stringify(runnerFreeze.requestOrder) === JSON.stringify(EXPOSED_REQUEST_ORDER)
@@ -361,16 +385,17 @@ async function runPaid(options) {
       && runnerFreeze.observerSha256 === expectedRunnerFreeze.observerSha256
       && runnerFreeze.runnerSha256 === expectedRunnerFreeze.runnerSha256
       && runnerFreeze.protocolSha256 === candidate.protocolSha256
-      && runnerFreeze.maxCalls === 12 && runnerFreeze.maxSpendUsd === 1 && runnerFreeze.noAutomaticRetry;
+      && runnerFreeze.maxCalls === 16 && runnerFreeze.maxSpendUsd === 1 && runnerFreeze.noAutomaticRetry;
     if (!runnerFreezeMatches) throw new Error('RUNNER_FREEZE_MISMATCH');
-    const authorization = await readAuthorization(required(options, '--authorization'), candidate, runnerFreezeCapture, runnerFreeze);
+    const authorization = await readAuthorization(required(options, '--authorization'), candidate, runnerFreezeCapture, runnerFreeze, plan);
 
     const paidAttemptSha256 = await writeImmutableCapture(dirname(freezePath), 'paid-attempt.json', {
       campaignFreezeSha256: candidate.campaignFreezeSha256,
       runnerFreezeSha256: runnerFreezeCapture.sha256,
       authorizationSha256: authorization.sha256,
       authorizationId: authorization.authorization.authorizationId,
-      requestOrder: [...EXPOSED_REQUEST_ORDER],
+      requestOrder: plan.requestOrder,
+      qualificationEligible: plan.qualificationEligible,
       singleAttempt: true,
     });
     await writeImmutableCapture(out, 'paid-started.json', {
@@ -378,10 +403,11 @@ async function runPaid(options) {
       runnerFreezeSha256: runnerFreezeCapture.sha256,
       paidAttemptSha256,
       authorizationId: authorization.authorization.authorizationId,
-      approvedMaxCalls: 12,
-      approvedMaxUsd: 1,
+      approvedMaxCalls: plan.approvedMaxCalls,
+      approvedMaxUsd: plan.approvedMaxUsd,
       creditBasis: authorization.authorization.creditBasis,
-      requestOrder: [...EXPOSED_REQUEST_ORDER],
+      requestOrder: plan.requestOrder,
+      qualificationEligible: plan.qualificationEligible,
       startedAt: new Date().toISOString(),
       providerCalls: 0,
     });
@@ -410,7 +436,7 @@ async function runPaid(options) {
     };
     const outbound = async (request) => {
       const relayEntered = mono();
-      if (!paidAdmission || stopUpstream || campaignAborted || paidCalls >= 12 || paidCalls >= authorization.authorization.approvedMaxCalls) {
+      if (!paidAdmission || stopUpstream || campaignAborted || paidCalls >= plan.approvedMaxCalls) {
         throw new Error('UNAPPROVED_PROVIDER_DISPATCH');
       }
       const profile = candidate.profile;
@@ -442,7 +468,7 @@ async function runPaid(options) {
           headers: { Authorization: request.headers.get('Authorization'), 'Content-Type': 'application/json' },
           body: requestBody,
           redirect: 'error',
-          signal: AbortSignal.timeout(120_000),
+          signal: AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
         });
         record.headersReceived = mono();
         record.httpStatus = response.status;
@@ -456,8 +482,9 @@ async function runPaid(options) {
         record.usage = envelope?.usage ?? null;
         record.generationId = envelope?.id ?? response.headers.get('x-generation-id');
         const cost = envelope?.usage?.cost;
-        if (!response.ok || record.finishReason !== 'stop' || !Number.isFinite(cost)) stopUpstream = true;
-        if (Number.isFinite(cost)) {
+        const costKnown = Number.isFinite(cost) && cost >= 0;
+        if (!response.ok || record.finishReason !== 'stop' || !costKnown) stopUpstream = true;
+        if (costKnown) {
           reportedSpend += cost;
           assert.ok(reportedSpend <= authorization.authorization.approvedMaxUsd, 'Authorized spend ceiling exceeded');
         }
@@ -563,7 +590,7 @@ async function runPaid(options) {
     const getJob = async (receipt) => api(`/api/jobs/${receipt.jobId}`, { headers: { Authorization: `Bearer ${receipt.capability}` } });
     const wait = async (receipt, phase, stageResponses) => {
       const start = mono();
-      while (mono() - start < 360_000) {
+      while (mono() - start < EXPOSED_PHASE_TIMEOUT_MS) {
         const result = await getJob(receipt);
         stageResponses[phase] = result;
         if (['ready', 'failed', 'reconciliation_required'].includes(result[`${phase}State`])) return result;
@@ -618,12 +645,14 @@ async function runPaid(options) {
         selections,
       };
       if (caseInput.requestId === 'g4' && stored.brief_selections) throw new Error('G4_UNEXPECTED_PERSISTED_SELECTIONS');
-      const runCaptureSha256 = await writeImmutableCapture(runCaptureDirectory, `${caseInput.requestId}-run-capture.json`, capture);
+      const capturedValue = plan.qualificationEligible ? capture : { diagnosticOnly: true, capture };
+      const captureName = `${caseInput.requestId}-${plan.qualificationEligible ? 'run' : 'diagnostic'}-capture.json`;
+      const runCaptureSha256 = await writeImmutableCapture(runCaptureDirectory, captureName, capturedValue);
       const verified = verifyRunCapture(capture, runCaptureSha256, candidate.campaign, candidate.binding);
       return { capture, verified, selectionCheck: selectionsMatch(caseInput.selections, selections) };
     };
 
-    for (const caseInput of candidate.campaign.cases) {
+    for (const caseInput of candidate.campaign.cases.filter((item) => plan.requestOrder.includes(item.requestId))) {
       const summary = { requestId: caseInput.requestId, error: null, providerCallsBefore: paidCalls };
       const stageResponses = {};
       let receipt = null;
@@ -698,7 +727,10 @@ async function runPaid(options) {
           const attempts = (await pool.query('SELECT * FROM model_attempts WHERE job_id=$1 ORDER BY phase,call_index', [receipt.jobId])).rows;
           await writeImmutableCapture(out, `${caseInput.requestId}-attempts.json`, attempts);
           summary.providerCalls = attempts.length;
-          summary.reportedUsageUsd = attempts.reduce((total, attempt) => total + (attempt.usage?.reportedCostUsd ?? 0), 0);
+          summary.reportedUsageUsd = attempts.length > 0
+            && attempts.every((attempt) => Number.isFinite(attempt.usage?.reportedCostUsd) && attempt.usage.reportedCostUsd >= 0)
+            ? attempts.reduce((total, attempt) => total + attempt.usage.reportedCostUsd, 0)
+            : null;
           const stored = (await pool.query('SELECT * FROM jobs WHERE id=$1', [receipt.jobId])).rows[0];
           await writeImmutableCapture(out, `${caseInput.requestId}-stored-job.json`, stored);
         }
@@ -738,7 +770,7 @@ async function runPaid(options) {
       exactOriginals: originalCount, campaignCalls: paidCalls, reportedUsageUsd: reportedSpend,
       campaignFreezeSha256: candidate.campaignFreezeSha256,
       sourceInventorySha256: candidate.binding.sourceInventorySha256,
-      requestOrder: [...EXPOSED_REQUEST_ORDER], summaries,
+      requestOrder: plan.requestOrder, qualificationEligible: plan.qualificationEligible, summaries,
     });
     if (campaignAborted) process.exitCode = 1;
   } catch (error) {
@@ -781,14 +813,16 @@ async function main() {
   const mode = required(options, '--mode');
   const supported = new Set(mode === 'prepare'
     ? ['--mode', '--repo', '--campaign-freeze', '--bundle', '--instrumentation', '--observer']
-    : ['--mode', '--repo', '--out', '--campaign-freeze', '--runner-freeze', '--authorization', '--bundle', '--instrumentation', '--observer', '--env-file', '--database-url', '--postgres-container']);
+    : ['--mode', '--repo', '--out', '--campaign-freeze', '--runner-freeze', '--authorization', '--bundle', '--instrumentation', '--observer', '--env-file', '--database-url', '--postgres-container', ...(mode === 'diagnose' ? ['--request-id'] : [])]);
   if ([...options.keys()].some((name) => !supported.has(name))) throw new Error('UNSUPPORTED_RUNNER_OPTION');
   if (mode === 'prepare') return prepare(options);
-  if (mode === 'paid') return runPaid(options);
-  throw new Error('MODE_MUST_BE_PREPARE_OR_PAID');
+  if (mode === 'paid' || mode === 'diagnose') return runPaid(options);
+  throw new Error('MODE_MUST_BE_PREPARE_PAID_OR_DIAGNOSE');
 }
 
-main().catch((error) => {
-  console.error(JSON.stringify({ error: error instanceof Error ? error.message : String(error), providerCalls: 0 }));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error(JSON.stringify({ error: error instanceof Error ? error.message : String(error), providerCalls: 0 }));
+    process.exitCode = 1;
+  });
+}

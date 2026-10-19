@@ -8,22 +8,31 @@ import type { Env } from "./env.ts";
 import type { ArtifactReview, SupportVerdict } from "../shared/protocol.ts";
 import { OPERATION_CHECKS } from "../shared/operations.ts";
 import { callModel, ModelCallError, modelConfig } from "./model.ts";
+import { MODEL_REQUEST_TIMEOUT_MS } from "./model-deadlines.ts";
 import { requestSpans } from "./request-constraints.ts";
 import { buildCheckedBrief, validateBriefDraft } from "./gates.ts";
 import { briefDraftSchemaFor } from "./schemas.ts";
 
 const checkedReview = (artifactId: string): ArtifactReview => {
   const sourceRefs = [{ caseId: "case-1", artifactId, versionId: `${artifactId}-v1`, passageId: "p1" }];
+  const claimIds = [
+    `artifact-${artifactId}-history`,
+    `artifact-${artifactId}-operation`,
+    `artifact-${artifactId}-adaptation`,
+    `artifact-${artifactId}-check`,
+  ];
   return {
     caseId: "case-1", artifactId, role: "starting_point", verdict: "supported", reasons: [],
+    claimFindings: claimIds.map((claimId) => ({ claimId, verdict: "supported" as const, reason: null })),
     decision: {
       disposition: "adapt", operation: "api_adapter", historicalEvidence: sourceRefs, requestQuotes: [],
       adaptations: [{ text: "Adapt the recorded adapter to the current client.", sourceRefs, requestQuotes: [] }],
       checks: [{ kind: "client_api_access", text: OPERATION_CHECKS.api_adapter.client_api_access, sourceRefs, requestQuotes: [] }],
+      obligations: [],
     },
   };
 };
-const checkedBriefDecisions = { cases: [{ caseId: "case-1", artifactWork: [{ artifactId: "art", disposition: "adapt" as const }] }], artifactReviews: [checkedReview("art")] };
+const checkedBriefDecisions = { cases: [{ caseId: "case-1", artifactWork: [{ artifactId: "art", disposition: "adapt" as const }] }], artifactReviews: [checkedReview("art")], claims: [] } as never;
 
 test("an interrupted provider body keeps its generation ID and cannot be treated as a free failure", async () => {
   const originalFetch = globalThis.fetch;
@@ -118,6 +127,95 @@ test("transport diagnostics distinguish the observed deadline from other failure
         return true;
       });
       assert.equal(requests, 1, "Failure classification must not retry provider access");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    AbortSignal.timeout = originalTimeout;
+  }
+});
+
+test("a long non-streaming generation completes through buffering, but a stalled body still fails closed", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalTimeout = AbortSignal.timeout;
+  // Drive deadlines explicitly after the real HTTP headers arrive; no wall-clock waits.
+  try {
+    for (const scenario of [{ buffered: false, complete: true }, { buffered: true, complete: true }, { buffered: false, complete: false }, { buffered: true, complete: false }]) {
+      const deadlines: { ms: number; controller: AbortController }[] = [];
+      AbortSignal.timeout = (ms) => {
+        const controller = new AbortController();
+        deadlines.push({ ms, controller });
+        return controller.signal;
+      };
+      let requests = 0;
+      let markHeaders!: () => void;
+      const headersReady = new Promise<void>((resolve) => { markHeaders = resolve; });
+      let completeBody!: () => void;
+      const server = createServer((request, response) => {
+        requests++;
+        request.resume();
+        response.writeHead(200, { "content-type": "application/json", "x-generation-id": "gen-delayed" });
+        response.flushHeaders();
+        response.write(" ");
+        completeBody = () => response.end(JSON.stringify({
+          id: "gen-delayed", choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
+            claimVerdicts: { "claim-one": "supported" }, constraintQuotes: {},
+          }) } }], usage: { cost: 0.01 },
+        }));
+      });
+      server.listen(0, "127.0.0.1");
+      await once(server, "listening");
+      const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      globalThis.fetch = async (url, options) => {
+        assert.equal(new URL(String(url)).origin, origin, "Only loopback access is allowed");
+        const response = await originalFetch(url, scenario.buffered ? {
+          ...options, signal: AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
+        } : options);
+        markHeaders();
+        if (!scenario.buffered) return response;
+        // Same complete-body-before-response boundary as the exposed runner.
+        return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
+      };
+      try {
+        const result = callModel({
+          MODEL_BASE_URL: `${origin}/api/v1`, OPENROUTER_API_KEY: "offline-only",
+        } as Env, "brief_review", {
+          instructions: "Offline delayed response check", untrustedData: {},
+          reviewTargets: { claimIds: ["claim-one"], selections: [] },
+        });
+        await headersReady;
+        // Recovered generation + latency = 241.640 s; an unfinished body reaches the deadline.
+        const elapsedMs = scenario.complete ? 241_640 : MODEL_REQUEST_TIMEOUT_MS;
+        for (const { ms, controller } of deadlines) {
+          if (elapsedMs >= ms) controller.abort(new DOMException("Virtual deadline", "TimeoutError"));
+        }
+        if (scenario.complete) completeBody();
+        if (scenario.complete) {
+          const reply = await result;
+          assert.deepEqual(reply.output, {
+            claimReviews: [{ claimId: "claim-one", verdict: "supported" }], constraintReviews: [],
+          });
+          assert.deepEqual(reply.rawOutput, {
+            claimVerdicts: { "claim-one": "supported" }, constraintQuotes: {},
+          });
+          assert.equal(reply.usage.reportedCostUsd, 0.01);
+        } else {
+          await assert.rejects(result, (error: unknown) => {
+            assert.ok(error instanceof ModelCallError);
+            assert.equal(error.code, "MODEL_DISPATCH_UNCERTAIN");
+            assert.equal(error.uncertain, true);
+            assert.equal(error.failureCause, "deadline_exceeded");
+            assert.equal(error.failurePhase, scenario.buffered ? "fetch" : "response_body");
+            assert.equal(error.status, scenario.buffered ? null : 200);
+            assert.equal(error.generationId, scenario.buffered ? null : "gen-delayed");
+            assert.equal(error.usage, null);
+            return true;
+          });
+        }
+        assert.equal(requests, 1, "Timeouts must not trigger another dispatch");
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     }
   } finally {
     globalThis.fetch = originalFetch;
@@ -384,42 +482,40 @@ test("Responses refuses partial, refused, ambiguous, or non-JSON outputs and pre
     globalThis.fetch = originalFetch;
   }
 });
-test("provider output selects a request identity whose original quotation remains visible after normalization", async () => {
-  const request = "Check the target window first.";
-  const corpus = {
-    manifest: { schemaVersion: 2, corpusVersion: "test", cases: [{
-      caseId: "case-1", title: "Case", fictional: true, records: [],
-      artifacts: [{ artifactId: "art", title: "Art", fictional: true, versions: [{
-        versionId: "art-v1", sourcePath: "corpora/test/originals/x", mimeType: "text/plain", sha256: "x",
-        statedDate: null, importedAt: "2026-01-01", extractionStatus: "complete", exclusionReasons: [],
-        passages: [{ passageId: "p1", excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }],
-      }] }],
-    }] },
-    manifestSha256: "x", availableVersions: new Set(["art-v1"]), caseAvailability: new Map(),
-    passages: new Map([["p1", { caseId: "case-1", artifactId: "art", versionId: "art-v1", passageId: "p1", title: "Art", fictional: true, statedDate: null, excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }]]),
-    versions: new Map(),
-  } as never;
-  const selected = [{ caseId: "case-1", artifactId: "art", versionId: "art-v1", passageIds: ["p1"] }];
-  const prompt = { instructions: "Draft a brief", untrustedData: {}, responseSchema: briefDraftSchemaFor(request, selected, corpus, checkedBriefDecisions) };
-  const wire = (text: string) => JSON.stringify({
-    items: { "case-1/art/art-v1": {
-      disposition: "adapt",
-      recommendation: { text, sourceRefs: ["e1"], requestQuotes: [requestSpans(request)[0].spanId] },
-      claims: [],
-    } },
-  });
+
+test("only billed stopped draft failures preserve repairable raw output", async () => {
   const originalFetch = globalThis.fetch;
+  const cases = [
+    { stage: "assessment_draft", text: "not-json", cost: 0.001, raw: "not-json", repairable: true },
+    { stage: "assessment_draft", text: "{}", cost: 0.001, raw: {}, repairable: true },
+    { stage: "assessment_draft", text: "{}", cost: undefined, raw: {}, repairable: false },
+    { stage: "assessment_draft", text: "{}", cost: -0.001, raw: {}, repairable: false },
+    { stage: "assessment_review", text: "{}", cost: 0.001, raw: {}, repairable: false },
+  ] as const;
   try {
-    globalThis.fetch = async () => Response.json({ id: "gen-brief-visible-quote", choices: [{ finish_reason: "stop", message: { content: wire(`Adapt only after this check: ${request}`) } }] });
-    const accepted = await callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt);
-    assert.equal((accepted.output as { adapt: unknown[] }).adapt.length, 1);
-    globalThis.fetch = async () => Response.json({
-      id: "gen-brief-hidden-quote", choices: [{ finish_reason: "stop", message: { content: wire("Adapt after checking compatibility.") } }],
-    });
-    const composed = await callModel({ OPENROUTER_API_KEY: "local-test-only" } as Env, "brief_draft", prompt);
-    const composedClaim = (composed.output as { claims: { text: string }[] }).claims[0];
-    assert.ok(composedClaim.text.startsWith("Check the target window first. "),
-      "Hidden quotation metadata is never trusted as-is: the declared sentence is composed verbatim into the visible claim text before any brief is accepted");
+    for (const scenario of cases) {
+      globalThis.fetch = async () => Response.json({
+        id: "gen-repairable-draft",
+        model: "openai/gpt-6-luna",
+        choices: [{ finish_reason: "stop", message: { content: scenario.text } }],
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 20,
+          ...(scenario.cost === undefined ? {} : { cost: scenario.cost }),
+        },
+      });
+      await assert.rejects(callModel({ OPENROUTER_API_KEY: "synthetic-only" } as Env, scenario.stage, {
+        instructions: "Synthetic model output", untrustedData: {},
+        ...(scenario.stage === "assessment_review"
+          ? { currentRequest: "request", reviewTargets: { claimIds: ["claim-one"], artifacts: [] } }
+          : {}),
+      }), (error: unknown) => {
+        assert.ok(error instanceof ModelCallError);
+        assert.equal(error.repairableDraft !== null, scenario.repairable);
+        if (scenario.repairable) assert.deepEqual(error.repairableDraft?.output, scenario.raw);
+        return true;
+      });
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -547,11 +643,13 @@ test("brief citations derive exact item-local facts and preserve independent rej
   const schema = briefDraftSchemaFor(request, selected, corpus, {
     cases: [{ caseId: "case-1", artifactWork: artifacts.map(({ artifactId }) => ({ artifactId, disposition: "adapt" as const })) }],
     artifactReviews: artifacts.map(({ artifactId }) => checkedReview(artifactId)),
-  });
+    claims: [],
+  } as never);
   const wire = { items: Object.fromEntries(keys.map((key, index) => [key, {
     disposition: "adapt",
-    recommendation: { text: "Adapt after checking the target window.", sourceRefs: [`e${index * 2 + 1}`], requestQuotes: [] },
-    claims: [{ kind: "recommendation", text: "Stop for client review on rejection.", sourceRefs: [`e${index * 2 + 2}`, `e${index * 2 + 2}`], requestQuotes: [] }],
+    recommendation: { text: "Adapt after checking the target window.", sourceRefs: [`e${index * 2 + 1}`] },
+    requestRecommendations: Object.fromEntries(requestSpans(request).map(({ spanId }) => [spanId, null])),
+    claims: [{ text: "Stop for client review on rejection.", sourceRefs: [`e${index * 2 + 2}`, `e${index * 2 + 2}`] }],
   }])) };
   const parsed = schema.parse(wire);
   assert.equal(validateBriefDraft(parsed, request, selected, corpus).size, 0);
@@ -600,44 +698,3 @@ test("brief citations derive exact item-local facts and preserve independent rej
   assert.ok(checked.claims.every((claim) => claim.sourceRefs.every((ref) => ref.artifactId === "other-art") || claim.kind === "source_fact"));
 });
 
-test("brief wire format composes a declared quotation verbatim instead of requiring retyped prose", async () => {
-  const request = "Check the target window first. Preserve the audit trail after cutover.";
-  const corpus = {
-    manifest: { schemaVersion: 2, corpusVersion: "test", cases: [{
-      caseId: "case-1", title: "Case", fictional: true, records: [],
-      artifacts: [{ artifactId: "art", title: "Art", fictional: true, versions: [{
-        versionId: "art-v1", sourcePath: "corpora/test/originals/x", mimeType: "text/plain", sha256: "x",
-        statedDate: null, importedAt: "2026-01-01", extractionStatus: "complete", exclusionReasons: [],
-        passages: [{ passageId: "p1", excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }],
-      }] }],
-    }] },
-    manifestSha256: "x", availableVersions: new Set(["art-v1"]), caseAvailability: new Map(),
-    passages: new Map([["p1", { caseId: "case-1", artifactId: "art", versionId: "art-v1", passageId: "p1", title: "Art", fictional: true, statedDate: null, excerpt: "Recorded procedure.", sourceKind: "source", location: "L1" }]]),
-    versions: new Map(),
-  } as never;
-  const selected = [{ caseId: "case-1", artifactId: "art", versionId: "art-v1", passageIds: ["p1"] }];
-  const schema = briefDraftSchemaFor(request, selected, corpus, checkedBriefDecisions);
-  const draft = (claims: { kind: string; text: string; sourceRefs: string[]; requestQuotes: string[] }[]) => ({
-    items: { "case-1/art/art-v1": {
-      disposition: "adapt", recommendation: {
-        text: claims[0].text, sourceRefs: claims[0].sourceRefs,
-        requestQuotes: claims[0].requestQuotes.map((quote) => requestSpans(request).find((span) => span.text === quote)!.spanId),
-      }, claims: claims.slice(1),
-    } },
-  });
-  // The claim declares its sentence exactly but states only the check in
-  // prose: the declared sentence is composed verbatim into the stored text.
-  const parsed = schema.parse(draft([
-    { kind: "recommendation", text: "Adapt only after confirming the window with the client.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."] },
-  ]));
-  assert.ok(parsed.adapt[0].claimIds.includes("brief-0-disposition"));
-  const composed = parsed.claims.find((claim) => claim.claimId === "brief-0-disposition")!;
-  assert.ok(composed.text.startsWith("Check the target window first. "),
-    "The declared quotation heads the stored claim text verbatim.");
-  assert.ok(composed.text.includes("confirming the window with the client."));
-  // Prose carrying a different complete request sentence than the declared
-  // one is still rejected at parse time; composition never repairs that.
-  assert.throws(() => schema.parse(draft([
-    { kind: "recommendation", text: "Preserve the audit trail after cutover. Then adapt.", sourceRefs: ["e1"], requestQuotes: ["Check the target window first."] },
-  ])));
-});

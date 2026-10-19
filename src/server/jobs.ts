@@ -72,7 +72,11 @@ export function jobView(job: JobRecord, now = Date.now()): JobView {
     MODEL_OUTPUT_NOT_STOPPED: "The model did not finish normally. No unchecked output is shown.",
     MODEL_OUTPUT_CONTENT_MISSING: "The model returned no text response. No unchecked output is shown.",
     STRUCTURAL_CHECK_FAILED: "The generated response failed reference or evidence checks. No unchecked output is shown.",
+    REPAIR_REJECTED: "The single targeted repair failed required validation. No repaired output is shown.",
+    REPAIR_EXHAUSTED: "This job has already used its single targeted repair. No unchecked output is shown.",
+    REPAIR_CREDIT_EXHAUSTED: "Available authorized credit cannot cover the targeted repair and fresh review. No additional model call was made.",
     MODEL_DISPATCH_UNCERTAIN: "The model dispatch outcome is uncertain. Operator reconciliation is required; no automatic retry was made.",
+    MODEL_USAGE_UNAVAILABLE: "Reported model cost is unavailable. Operator reconciliation is required; no additional repair call was made.",
     INTERNAL_FAILURE: "The requested stage failed. No unchecked output is shown.",
   } as Record<string, string>)[job.error_code] ?? "The requested stage failed. No unchecked output is shown." : undefined;
   return {

@@ -186,6 +186,15 @@ function isArtifactReview(value: unknown): value is ArtifactReview {
       && isText(reason.explanation) && isSourceRefs(reason.sourceRefs) && isTextList(reason.requestQuotes));
 }
 
+function isMissingEvidenceReview(value: unknown): value is AssessmentResult["missingEvidenceReview"] {
+  if (!isRecord(value) || !isTextList(value.claimIds) || value.claimIds.length > 16
+    || new Set(value.claimIds).size !== value.claimIds.length) return false;
+  if (value.verdict === "supported") return value.reason === null;
+  return ["unsupported", "uncertain"].includes(value.verdict as string) && isRecord(value.reason)
+    && isText(value.reason.explanation) && isSourceRefs(value.reason.sourceRefs) && value.reason.sourceRefs.length > 0
+    && isTextList(value.reason.requestQuotes);
+}
+
 
 function isAssessment(value: unknown, request: string): value is AssessmentResult {
   if (!isRecord(value)
@@ -195,6 +204,9 @@ function isAssessment(value: unknown, request: string): value is AssessmentResul
     || !Array.isArray(value.claims) || !value.claims.every(isClaim)
     || !isAssessmentConclusion(value.conclusion)
     || !isTextList(value.clarifyingClaimIds)
+    || !isMissingEvidenceReview(value.missingEvidenceReview)
+    || !Array.isArray(value.missingEvidenceRequests) || value.missingEvidenceRequests.length > 16
+    || !value.missingEvidenceRequests.every((item: unknown) => isRecord(item) && isText(item.caseId) && isText(item.artifactId) && isText(item.claimId))
     || !isRequestConstraints(value.requestConstraints)
     || !Array.isArray(value.artifactReviews) || !value.artifactReviews.every(isArtifactReview)
     || !Array.isArray(value.comparisons) || value.comparisons.length > 24 || !value.comparisons.every(isComparison)
@@ -202,6 +214,7 @@ function isAssessment(value: unknown, request: string): value is AssessmentResul
     || !value.nextActions.every((item: unknown) => isRecord(item) && isText(item.caseId) && isText(item.artifactId) && isText(item.claimId))
     || !isCount(value.withheldClaimCount)) return false;
   const requestConstraints = value.requestConstraints;
+  const missingEvidenceReview = value.missingEvidenceReview;
   if (Object.values(requestConstraints).some((quotes) => quotes.some((quote) => !request.includes(quote)))) return false;
   const claims = new Map<string, Claim>(value.claims.map((claim: Claim) => [claim.claimId, claim]));
   if (claims.size !== value.claims.length || value.claims.some((claim: Claim) => claim.dependsOnClaimIds.some((id) => !claims.has(id)))) return false;
@@ -216,6 +229,13 @@ function isAssessment(value: unknown, request: string): value is AssessmentResul
     && (row.requirementClaimId === null || claims.get(row.assessmentClaimId)?.dependsOnClaimIds.includes(row.requirementClaimId))
     && claims.get(row.implicationClaimId)?.dependsOnClaimIds.includes(row.assessmentClaimId))) return false;
   const cases: CaseAssessment[] = value.cases;
+  if (!value.missingEvidenceRequests.every((item: AssessmentResult["missingEvidenceRequests"][number]) => {
+    const claim = claims.get(item.claimId);
+    return claim?.kind === "interpretation" && claim.requestQuotes.length > 0 && claim.requestQuotes.every((quote) => request.includes(quote))
+      && missingEvidenceReview.claimIds.includes(item.claimId)
+      && claim.sourceRefs.every((ref) => ref.caseId === item.caseId && ref.artifactId === item.artifactId)
+      && cases.some((candidate) => candidate.caseId === item.caseId && candidate.artifactWork.some((work) => work.artifactId === item.artifactId));
+  })) return false;
   const roles = new Map<string, ArtifactRole>(value.artifactReviews.map((item: { caseId: string; artifactId: string; role: ArtifactRole }) => [`${item.caseId}/${item.artifactId}`, item.role]));
   if (roles.size !== value.artifactReviews.length
     || value.artifactReviews.some((review: { caseId: string; artifactId: string }) => !cases.some((item) => item.caseId === review.caseId && item.artifactWork.some((work) => work.artifactId === review.artifactId)))
@@ -243,6 +263,8 @@ function visibleConclusion(result: AssessmentResult, claims: ClaimMap): Assessme
     && (result.cases.length !== 8
       || result.cases.some((item) => item.availability !== "available")
       || result.leads.length > 0
+      || result.missingEvidenceReview.verdict !== "supported"
+      || result.missingEvidenceReview.claimIds.some((id) => !claims.has(id) || !result.missingEvidenceRequests.some((item) => item.claimId === id))
       || result.artifactReviews.some((item) => item.role === "starting_point" || item.role === "unresolved"))) {
     return "cannot_be_established";
   }
@@ -1436,6 +1458,8 @@ function App({ active }: { active: boolean }) {
   }, [session, pollMode]);
 
   const assessment = job?.assessmentState === "ready" ? job.assessment : undefined;
+  const incompleteEvidenceRequests = assessment !== undefined && (assessment.missingEvidenceReview.verdict !== "supported"
+    || assessment.missingEvidenceReview.claimIds.some((id) => !assessment.missingEvidenceRequests.some((item) => item.claimId === id)));
   useEffect(() => {
     const controller = new AbortController();
     setSelectionSources(null);
@@ -1899,6 +1923,14 @@ function App({ active }: { active: boolean }) {
                     <WithheldNote count={assessment.withheldClaimCount} />
                   </div>
                 </div>
+                {(assessment.missingEvidenceRequests.length > 0 || incompleteEvidenceRequests) && <section className="content-section" aria-labelledby="missing-evidence-title">
+                  <div className="section-heading"><div><p className="eyebrow">Evidence required</p><h3 id="missing-evidence-title">Missing evidence to request</h3></div></div>
+                  <p className="field-hint">These requests do not offer implementation work.</p>
+                  {incompleteEvidenceRequests && <p className="field-hint" role="status">The complete missing-evidence answer could not be established.</p>}
+                  <div className="card-grid">{assessment.missingEvidenceRequests.map((item) =>
+                    <ClaimCard key={item.claimId} claim={assessmentClaims.get(item.claimId)!} inspect={setPassageRef} />,
+                  )}</div>
+                </section>}
                 {assessment.nextActions.length > 0 && <section className="content-section" aria-label="Checked next actions">
                   <div className="section-heading"><div><p className="eyebrow">Action Required</p><h3>What to verify next</h3></div></div>
                   <div className="card-grid">{assessment.nextActions.map((action) => <article className="action-card" key={action.claimId}>

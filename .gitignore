@@ -13,3 +13,4 @@ postgres-data/
 ingestion/audit.json
 .wrangler/
 .cloudflare/
+.local/

@@ -191,26 +191,51 @@ function selectionFixture(role: "starting_point" | "context_only" | "not_relevan
     manifestSha256: "c".repeat(64), availableVersions: new Set(["source-v1", "source-v2"]),
     caseAvailability: new Map([[caseId, "available"]]), passages: passageMap, versions: sourceMap,
   };
+  const sourceRefs = [{ caseId, artifactId, versionId: "source-v1", passageId: "p-cited" }];
+  const historyClaim: Claim = {
+    claimId: "history", text: "Recorded source history.", kind: "source_fact",
+    sourceRefs, requestQuotes: [], dependsOnClaimIds: [],
+  };
+  const operationClaim: Claim = {
+    claimId: "operation", text: "The historical operation is data mapping.", kind: "interpretation",
+    sourceRefs, requestQuotes: [], dependsOnClaimIds: [historyClaim.claimId],
+  };
   const dispositionClaim: Claim = {
     claimId: "decision", text: "Adapt this checked source.", kind: "recommendation",
-    sourceRefs: [{ caseId, artifactId, versionId: "source-v1", passageId: "p-cited" }], requestQuotes: [], dependsOnClaimIds: [],
+    sourceRefs, requestQuotes: [], dependsOnClaimIds: [historyClaim.claimId, operationClaim.claimId],
   };
+  const adaptationClaim: Claim = {
+    claimId: "adaptation", text: "Adapt the recorded mapping to the client.", kind: "recommendation",
+    sourceRefs, requestQuotes: [], dependsOnClaimIds: [dispositionClaim.claimId, historyClaim.claimId],
+  };
+  const checkClaim: Claim = {
+    claimId: "check", text: OPERATION_CHECKS.data_mapping.field_identity, kind: "recommendation",
+    sourceRefs, requestQuotes: [], dependsOnClaimIds: [dispositionClaim.claimId, historyClaim.claimId],
+  };
+  const artifactClaims = [historyClaim, operationClaim, dispositionClaim, adaptationClaim, checkClaim];
   const assessment: AssessmentResult = {
     conclusion: "precedent_found", clarifyingClaimIds: [], comparisons: [],
+    missingEvidenceRequests: [], missingEvidenceReview: { verdict: "supported", reason: null, claimIds: [] },
     requestConstraints: { product_version: [], environment: [], scale: [], identity_access: [], recovery_operations: [] },
-    artifactReviews: [{ caseId, artifactId, role, verdict: "supported", reasons: [], decision: {
-      disposition: "adapt", operation: "data_mapping", historicalEvidence: dispositionClaim.sourceRefs, requestQuotes: [],
-      adaptations: [{ text: "Adapt the recorded mapping to the client.", sourceRefs: dispositionClaim.sourceRefs, requestQuotes: [] }],
-      checks: [{ kind: "field_identity", text: OPERATION_CHECKS.data_mapping.field_identity, sourceRefs: dispositionClaim.sourceRefs, requestQuotes: [] }],
-    } }], nextActions: [],
+    artifactReviews: [{
+      caseId, artifactId, role, verdict: "supported", reasons: [],
+      claimFindings: [historyClaim, operationClaim, adaptationClaim, checkClaim].map((claim) => ({ claimId: claim.claimId, verdict: "supported" as const, reason: null })),
+      decision: {
+        disposition: "adapt", operation: "data_mapping", historicalEvidence: sourceRefs, requestQuotes: [],
+        adaptations: [{ text: adaptationClaim.text, sourceRefs, requestQuotes: [] }],
+        checks: [{ kind: "field_identity", text: checkClaim.text, sourceRefs, requestQuotes: [] }],
+        obligations: [],
+      },
+    }],
+    nextActions: [],
     cases: [{
-      caseId, availability: "available", outcome: "unknown", outcomeClaimIds: [], claimIds: ["decision"],
+      caseId, availability: "available", outcome: "unknown", outcomeClaimIds: [], claimIds: artifactClaims.map((claim) => claim.claimId),
       artifactWork: [{
         artifactId, availability: "available", exclusionReasons: [], disposition: "adapt", dispositionClaimId: "decision",
-        claimIds: ["decision"], blockerClaimIds: [], verificationClaimIds: [],
+        claimIds: artifactClaims.map((claim) => claim.claimId), blockerClaimIds: [], verificationClaimIds: ["check"],
       }],
     }],
-    leads: [], contrasts: [], claims: [dispositionClaim], withheldClaimCount: 0,
+    leads: [], contrasts: [], claims: artifactClaims, withheldClaimCount: 0,
   };
   return { caseId, artifactId, assessment, corpus };
 }

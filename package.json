@@ -11,7 +11,7 @@
     "deploy:check": "cf deploy --dry-run --mode production",
     "smoke:production": "node --network-family-autoselection-attempt-timeout=2000 --env-file=.dev.vars.production scripts/smoke-production.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/**/*.test.ts && python3 -m unittest discover -s ingestion -p '*_test.py'",
+    "test": "node --experimental-strip-types --test src/**/*.test.ts scripts/*.test.mjs && python3 -m unittest discover -s ingestion -p '*_test.py'",
     "ingest": "python3 ingestion/build_manifest.py",
     "publish:corpus": "python3 ingestion/publish_corpus.py",
     "publish:corpus:production": "python3 ingestion/publish_corpus.py --production",

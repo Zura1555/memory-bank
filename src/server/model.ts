@@ -1,8 +1,10 @@
 import * as z from "zod";
 import type { Env } from "./env.ts";
+import type { RepairIssue } from "./repair.ts";
 import { assessmentDraftSchema, briefDraftSchema, openRouterSchema, reviewSchema } from "./schemas.ts";
 import type { AssessmentOutput, AssessmentReview, BriefDraft, SupportReview } from "./schemas.ts";
 import type { StagePrompt } from "./prompts.ts";
+import { MODEL_REQUEST_TIMEOUT_MS } from "./model-deadlines.ts";
 
 export type ModelStage = "assessment_draft" | "assessment_review" | "brief_draft" | "brief_review";
 
@@ -18,8 +20,10 @@ export interface ModelUsage {
 
 export interface ModelReply {
   output: StageOutput;
+  rawOutput: unknown;
   usage: ModelUsage;
 }
+
 
 type FailurePhase = "request" | "fetch" | "response_headers" | "response_body" | "response_validation" | "output_validation";
 type FailureCause = "deadline_exceeded" | "timeout" | "aborted" | "transport_error";
@@ -31,8 +35,8 @@ export class ModelCallError extends Error {
   readonly failurePhase: FailurePhase;
   readonly failureCause: FailureCause | null;
   generationId: string | null = null;
+  repairableDraft: { output: unknown; issues: RepairIssue[] } | null = null;
   usage: ModelUsage | null = null;
-
   constructor(
     code: string, status: number | null, uncertain: boolean,
     failurePhase: FailurePhase = "request",
@@ -48,7 +52,15 @@ export class ModelCallError extends Error {
   }
 }
 
-export function modelConfig(env: Env) {
+export interface ModelConfig {
+  provider: "openrouter" | "openai" | "anthropic" | "opencode-go";
+  api: "chat-completions" | "messages" | "responses";
+  model: string;
+  url: string;
+  apiKey: string | undefined;
+}
+
+export function modelConfig(env: Env): ModelConfig {
   const provider = env.MODEL_PROVIDER?.trim() || "openrouter";
   if (provider !== "openrouter" && provider !== "openai" && provider !== "anthropic" && provider !== "opencode-go") {
     throw new ModelCallError("MODEL_CONFIGURATION_INVALID", null, false);
@@ -200,6 +212,25 @@ function resultSchema(stage: ModelStage, prompt: StagePrompt) {
 
 export type StageOutput = AssessmentOutput | AssessmentReview | BriefDraft | SupportReview;
 
+function knownReportedCost(usage: ModelUsage | null): usage is ModelUsage & { reportedCostUsd: number } {
+  return usage !== null && typeof usage.reportedCostUsd === "number"
+    && Number.isFinite(usage.reportedCostUsd) && usage.reportedCostUsd >= 0;
+}
+
+function sanitizedIssues(error: z.ZodError): RepairIssue[] {
+  return error.issues.slice(0, 200).map((issue) => ({
+    path: issue.path.slice(0, 32).map((part) => typeof part === "string" ? part.slice(0, 200) : part)
+      .filter((part): part is string | number => typeof part === "string" || typeof part === "number"),
+    message: (issue.code === "unrecognized_keys" ? "Unrecognized fields are not allowed." : issue.message).slice(0, 500),
+  }));
+}
+
+function setRepairableDraft(error: ModelCallError, stage: ModelStage, usage: ModelUsage | null, output: unknown, issues: RepairIssue[]): void {
+  if ((stage === "assessment_draft" || stage === "brief_draft") && knownReportedCost(usage)) {
+    error.repairableDraft = { output, issues };
+  }
+}
+
 export async function callModel(env: Env, stage: ModelStage, prompt: StagePrompt, sessionId?: string): Promise<ModelReply> {
   const config = modelConfig(env);
   if (!config.apiKey) throw new ModelCallError("MODEL_CREDENTIAL_UNAVAILABLE", null, false);
@@ -207,7 +238,6 @@ export async function callModel(env: Env, stage: ModelStage, prompt: StagePrompt
     throw new ModelCallError("MODEL_SESSION_INVALID", null, false);
   }
   const schema = resultSchema(stage, prompt);
-  const timeoutMs = 120_000;
   let deadline: AbortSignal | undefined;
   let response: Response;
   try {
@@ -254,7 +284,7 @@ export async function callModel(env: Env, stage: ModelStage, prompt: StagePrompt
     if (new TextEncoder().encode(requestBody).byteLength > MAX_MODEL_REQUEST_BYTES) {
       throw new ModelCallError("MODEL_CONTEXT_TOO_LARGE", null, false);
     }
-    deadline = AbortSignal.timeout(timeoutMs);
+    deadline = AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS);
     response = await fetch(config.url, {
       method: "POST",
       signal: deadline,
@@ -309,8 +339,9 @@ export async function callModel(env: Env, stage: ModelStage, prompt: StagePrompt
         || !message.content?.length || message.content.some((part) => part.type !== "output_text" || typeof part.text !== "string")) {
         throw new ModelCallError("MODEL_OUTPUT_INCOMPLETE_OR_REFUSED", response.status, true, "output_validation");
       }
+      const rawContent = message.content.map((part) => part.text).join("");
       try {
-        decoded = JSON.parse(message.content.map((part) => part.text).join(""));
+        decoded = JSON.parse(rawContent);
       } catch {
         throw new ModelCallError("MODEL_OUTPUT_INVALID_JSON", response.status, true, "output_validation");
       }
@@ -352,15 +383,22 @@ export async function callModel(env: Env, stage: ModelStage, prompt: StagePrompt
       if (choice.finish_reason === "length") throw new ModelCallError("MODEL_OUTPUT_TOKEN_LIMIT", response.status, true, "output_validation");
       if (choice.finish_reason !== "stop") throw new ModelCallError("MODEL_OUTPUT_NOT_STOPPED", response.status, true, "output_validation");
       if (typeof choice.message?.content !== "string") throw new ModelCallError("MODEL_OUTPUT_CONTENT_MISSING", response.status, true, "output_validation");
+      const rawContent = choice.message.content;
       try {
-        decoded = JSON.parse(choice.message.content);
+        decoded = JSON.parse(rawContent);
       } catch {
-        throw new ModelCallError("MODEL_OUTPUT_INVALID_JSON", response.status, true, "output_validation");
+        const error = new ModelCallError("MODEL_OUTPUT_INVALID_JSON", response.status, true, "output_validation");
+        setRepairableDraft(error, stage, usage, rawContent, [{ path: [], message: "The draft is not valid JSON." }]);
+        throw error;
       }
     }
     const parsed = schema.safeParse(decoded);
-    if (!parsed.success) throw new ModelCallError("MODEL_OUTPUT_SCHEMA_INVALID", response.status, true, "output_validation");
-    return { output: parsed.data, usage: usage! };
+    if (!parsed.success) {
+      const error = new ModelCallError("MODEL_OUTPUT_SCHEMA_INVALID", response.status, true, "output_validation");
+      setRepairableDraft(error, stage, usage, decoded, sanitizedIssues(parsed.error));
+      throw error;
+    }
+    return { output: parsed.data, rawOutput: decoded, usage: usage! };
   } catch (error) {
     if (error instanceof ModelCallError) {
       error.generationId = generationId;

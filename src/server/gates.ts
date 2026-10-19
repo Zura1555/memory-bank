@@ -1,9 +1,10 @@
-import type { ArtifactReview, AssessmentResult, BriefConstraintReview, BriefResult, BriefDisposition, Claim, CaseAssessment, Lead, RequestConstraints, SupportVerdict } from "../shared/protocol.ts";
+import type { ArtifactReview, AssessmentResult, BriefConstraintReview, BriefResult, BriefDisposition, Claim, CaseAssessment, Lead, MissingEvidenceReview, RequestConstraints, SupportVerdict } from "../shared/protocol.ts";
 import { EvidenceUnavailable, type CorpusSnapshot } from "./corpus.ts";
 import type { AssessmentDraft, AssessmentReview, BriefDraft, SupportReview } from "./schemas.ts";
-import { artifactReviewsSchema, briefSupportReviewSchema, requestConstraintsSchema } from "./schemas.ts";
-import { completeRequestQuotes } from "./request-constraints.ts";
+import { artifactReviewsSchema, briefSupportReviewSchema, missingEvidenceRequestsSchema, missingEvidenceReviewSchema, obligationClaimText, requestConstraintsSchema } from "./schemas.ts";
+import { boundAssessmentQuotes, completeRequestQuotes } from "./request-constraints.ts";
 import { invalidSourceHistoryQualifications, isSourceHistoryQualification } from "./source-history.ts";
+import { REQUIRED_OPERATION_CHECKS } from "../shared/operations.ts";
 
 export class GateFailure extends Error {
   readonly code: string;
@@ -178,6 +179,7 @@ export function validateAssessmentDraft(draft: AssessmentDraft, request: string,
     ...draft.leads.flatMap((item) => item.reasonClaimIds),
     ...draft.contrasts.flatMap((item) => item.reasonClaimIds),
     ...draft.clarifyingClaimIds,
+    ...draft.missingEvidenceRequests.map((item) => item.claimId),
     ...draft.comparisons.flatMap((row) => [row.evidenceClaimId, row.assessmentClaimId, row.implicationClaimId, ...(row.requirementClaimId === null ? [] : [row.requirementClaimId])]),
   ];
   if (!allIdsExist(claimLinks, claimById)) throw new GateFailure("UNKNOWN_CLAIM_REFERENCE", "The assessment references a missing claim.");
@@ -280,12 +282,110 @@ function keepAll(ids: string[], accepted: Set<string>): boolean {
   return ids.length > 0 && ids.every((id) => accepted.has(id));
 }
 
-function invalidDecisionReasons(review: ArtifactReview, request: string, corpus: CorpusSnapshot): boolean {
-  return review.reasons.some((reason) => reason.requestQuotes.some((quote) => !request.includes(quote))
+function invalidReviewEvidence(evidence: { requestQuotes: string[]; sourceRefs: Claim["sourceRefs"] }[], request: string, corpus: CorpusSnapshot): boolean {
+  return evidence.some((reason) => reason.requestQuotes.some((quote) => !request.includes(quote))
     || reason.sourceRefs.some((ref) => {
       const passage = corpus.passages.get(ref.passageId);
       return !passage || passage.caseId !== ref.caseId || passage.artifactId !== ref.artifactId || passage.versionId !== ref.versionId;
     }));
+}
+
+function invalidDecisionReasons(review: ArtifactReview, request: string, corpus: CorpusSnapshot): boolean {
+  return invalidReviewEvidence([...review.reasons, ...review.claimFindings.flatMap((finding) => finding.reason ? [finding.reason] : [])], request, corpus);
+}
+
+function invalidMissingEvidenceRequests(draft: AssessmentDraft, claims: Map<string, Claim>, corpus: CorpusSnapshot): string[] {
+  const links = missingEvidenceRequestsSchema.safeParse(draft.missingEvidenceRequests);
+  if (!links.success || new Set(links.data.map((item) => item.claimId)).size !== links.data.length) {
+    throw new GateFailure("INVALID_MISSING_EVIDENCE_REVIEW", "Missing-evidence requests need unique scoped claim links.");
+  }
+  return links.data.flatMap((item) => {
+    const claim = claims.get(item.claimId);
+    return !claim || claim.kind !== "interpretation" || !claim.text.startsWith("Missing evidence request: ")
+      || claim.requestQuotes.length === 0
+      || !corpus.manifest.cases.some((candidate) => candidate.caseId === item.caseId && candidate.artifacts.some((artifact) => artifact.artifactId === item.artifactId))
+      || claim.sourceRefs.some((ref) => ref.caseId !== item.caseId || ref.artifactId !== item.artifactId
+        || !claim.dependsOnClaimIds.some((id) => {
+          const fact = claims.get(id);
+          return fact?.kind === "source_fact" && sameReferences(fact.sourceRefs, [ref]);
+        }))
+      || claim.dependsOnClaimIds.some((id) => {
+        const fact = claims.get(id);
+        return fact?.kind !== "source_fact" || (fact.sourceRefs.some((ref) => ref.caseId !== item.caseId || ref.artifactId !== item.artifactId)
+          && !isSourceHistoryQualification(corpus, fact));
+      }) ? [item.claimId] : [];
+  });
+}
+
+function sameReferences(left: Claim["sourceRefs"], right: Claim["sourceRefs"]): boolean {
+  return left.length === right.length && left.every((ref, index) => {
+    const other = right[index];
+    return ref.caseId === other.caseId && ref.artifactId === other.artifactId
+      && ref.versionId === other.versionId && ref.passageId === other.passageId;
+  });
+}
+
+function operationObligationsAreBound(
+  work: AssessmentDraft["cases"][number]["artifactWork"][number],
+  claims: Map<string, Claim>,
+  request: string,
+  corpus: CorpusSnapshot,
+): boolean {
+  const decision = work.decision;
+  try {
+    const localQuotes = new Set(completeRequestQuotes(request, decision.requestQuotes));
+    for (const condition of [...decision.adaptations, ...decision.checks]) {
+      if (completeRequestQuotes(request, condition.requestQuotes).some((quote) => !localQuotes.has(quote))) return false;
+    }
+    if (decision.disposition === null) return decision.obligations.length === 0;
+    if (decision.disposition !== "reuse" && (decision.operation === null || REQUIRED_OPERATION_CHECKS[decision.operation].some((kind) =>
+      !decision.checks.some((check) => check.kind === kind && work.verificationClaimIds.some((id) => {
+        const claim = claims.get(id);
+        return claim?.kind === "recommendation" && claim.text === check.text
+          && sameReferences(claim.sourceRefs, check.sourceRefs)
+          && claim.requestQuotes.length === check.requestQuotes.length && claim.requestQuotes.every((quote, index) => quote === check.requestQuotes[index]);
+      }))))) return false;
+    if ([...localQuotes].some((quote) => !decision.obligations.some((obligation) => obligation.requestQuote === quote))) return false;
+    const obligationIds = new Set<string>();
+    const obligationKeys = new Set<string>();
+    for (const obligation of decision.obligations) {
+      const key = JSON.stringify([obligation.requestQuote, obligation.requirement, obligation.checkKind]);
+      if (obligationIds.has(obligation.claimId) || obligationKeys.has(key)
+        || !localQuotes.has(obligation.requestQuote) || !obligation.requestQuote.includes(obligation.requirement)) return false;
+      obligationIds.add(obligation.claimId);
+      obligationKeys.add(key);
+      const coverage = claims.get(obligation.claimId);
+      const dependencies = new Set([work.dispositionClaimId, ...obligation.adaptationClaimIds, ...obligation.checkClaimIds]);
+      if (!work.claimIds.includes(obligation.claimId) || coverage?.kind !== "interpretation"
+        || coverage.text !== obligationClaimText(obligation.requirement)
+        || coverage.requestQuotes.length !== 1 || coverage.requestQuotes[0] !== obligation.requestQuote
+        || !sameReferences(coverage.sourceRefs, decision.historicalEvidence)
+        || new Set(coverage.dependsOnClaimIds).size !== coverage.dependsOnClaimIds.length
+        || [...dependencies].some((id) => !coverage.dependsOnClaimIds.includes(id))
+        || coverage.dependsOnClaimIds.some((id) => !dependencies.has(id)
+          && (!claims.has(id) || !isSourceHistoryQualification(corpus, claims.get(id)!)))) return false;
+      if (new Set(obligation.adaptationClaimIds).size !== obligation.adaptationClaimIds.length
+        || new Set(obligation.checkClaimIds).size !== obligation.checkClaimIds.length
+        || (obligation.requiresAdaptation && obligation.adaptationClaimIds.length === 0)) return false;
+      if (obligation.adaptationClaimIds.some((id) => {
+        const claim = claims.get(id);
+        return !work.claimIds.includes(id) || id === work.dispositionClaimId || work.verificationClaimIds.includes(id)
+          || claim?.kind !== "recommendation" || !claim.requestQuotes.includes(obligation.requestQuote);
+      })) return false;
+      if (obligation.checkKind === null) {
+        if (obligation.checkClaimIds.length > 0) return false;
+      } else if (obligation.checkClaimIds.length === 0 || obligation.checkClaimIds.some((id) => {
+        const claim = claims.get(id);
+        return !work.claimIds.includes(id) || !work.verificationClaimIds.includes(id) || claim?.kind !== "recommendation"
+          || !decision.checks.some((check) => check.kind === obligation.checkKind
+            && check.requestQuotes.includes(obligation.requestQuote) && claim.text === check.text
+            && claim.requestQuotes.includes(obligation.requestQuote) && sameReferences(claim.sourceRefs, check.sourceRefs));
+      })) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function buildCheckedAssessment(
@@ -294,7 +394,7 @@ export function buildCheckedAssessment(
   invalidRefs: Set<string>,
   corpus: CorpusSnapshot,
   artifactReviews: Map<string, ArtifactReview>,
-  requirementReview: { request: string; constraints: RequestConstraints },
+  requirementReview: { request: string; constraints: RequestConstraints; missingEvidenceReview: MissingEvidenceReview },
 ): AssessmentResult {
   const reviewEntries = [...artifactReviews.entries()];
   if (reviewEntries.some(([key, review]) => key !== `${review.caseId}/${review.artifactId}`)
@@ -309,6 +409,13 @@ export function buildCheckedAssessment(
     || Object.values(constraints.data).some((quotes) => quotes.some((quote) => !requirementReview.request.includes(quote)))
     || Object.values(draftConstraints.data).some((quotes) => quotes.some((quote) => !requirementReview.request.includes(quote)))) {
     throw new GateFailure("INVALID_REQUEST_CONSTRAINT_REVIEW", "Draft and independent review need every request-constraint dimension with exact request quotations.");
+  }
+  const missingEvidenceReview = missingEvidenceReviewSchema.safeParse(requirementReview.missingEvidenceReview);
+  if (!missingEvidenceReview.success
+    || new Set(missingEvidenceReview.data.claimIds).size !== missingEvidenceReview.data.claimIds.length
+    || draft.missingEvidenceRequests.some((item) => !missingEvidenceReview.data.claimIds.includes(item.claimId))
+    || invalidReviewEvidence(missingEvidenceReview.data.reason ? [missingEvidenceReview.data.reason] : [], requirementReview.request, corpus)) {
+    throw new GateFailure("INVALID_MISSING_EVIDENCE_REVIEW", "A complete independent missing-evidence review with exact evidence is required.");
   }
   try {
     for (const inventory of [constraints.data, draftConstraints.data]) {
@@ -337,11 +444,19 @@ export function buildCheckedAssessment(
     }
   }
   const draftClaims = new Map(draft.claims.map((claim) => [claim.claimId, claim]));
-  const scaleQuotes = [...new Set([...constraints.data.scale, ...draftConstraints.data.scale])];
-  const missingLimitQuotes = new Map<string, string[]>();
+  for (const id of invalidMissingEvidenceRequests(draft, draftClaims, corpus)) rejected.add(id);
   for (const item of draft.cases) {
     for (const work of item.artifactWork) {
       const review = artifactReviews.get(`${item.caseId}/${work.artifactId}`)!;
+      const findings = new Map(review.claimFindings.map((finding) => [finding.claimId, finding]));
+      const ownIds = work.claimIds.filter((id) => id !== work.dispositionClaimId);
+      if (findings.size !== ownIds.length || ownIds.some((id) => !findings.has(id))) {
+        throw new GateFailure("INCOMPLETE_ARTIFACT_REVIEW", "Every decisive artifact claim needs its canonical independent finding.");
+      }
+      for (const finding of review.claimFindings) {
+        if (verdicts.get(finding.claimId) !== finding.verdict) rejected.add(finding.claimId);
+        if (finding.verdict !== "supported") decisionVerdicts.set(finding.claimId, finding.verdict);
+      }
       decisionVerdicts.set(work.dispositionClaimId, review.verdict);
       if (review.decision.disposition !== work.disposition || JSON.stringify(review.decision) !== JSON.stringify(work.decision)
         || (review.verdict !== "supported" && review.reasons.length === 0)
@@ -349,30 +464,7 @@ export function buildCheckedAssessment(
         throw new GateFailure("INVALID_ARTIFACT_DECISION_REVIEW", "Decision review has mismatched disposition, missing reasons or invalid evidence.");
       }
       if (work.disposition !== null && review.role !== "starting_point") rejected.add(work.dispositionClaimId);
-      if (review.decision.operation === "api_adapter" && (work.disposition === "adapt" || work.disposition === "verify")) {
-        const ownedQuotes = new Set(completeRequestQuotes(requirementReview.request, [
-          ...review.decision.requestQuotes,
-          ...review.decision.adaptations.flatMap((condition) => condition.requestQuotes),
-          ...review.decision.checks.flatMap((condition) => condition.requestQuotes),
-        ]));
-        const missing = scaleQuotes.filter((quote) => ownedQuotes.has(quote) && !review.decision.checks.some((check) =>
-          check.kind === "client_operation_limits" && check.requestQuotes.includes(quote)
-          && work.verificationClaimIds.some((id) => {
-            const claim = draftClaims.get(id);
-            return work.claimIds.includes(id) && claim?.kind === "recommendation"
-              && claim.text === check.text && claim.requestQuotes.includes(quote)
-              && claim.sourceRefs.length === check.sourceRefs.length
-              && claim.sourceRefs.every((ref, index) => {
-                const checkedRef = check.sourceRefs[index];
-                return ref.caseId === checkedRef.caseId && ref.artifactId === checkedRef.artifactId
-                  && ref.versionId === checkedRef.versionId && ref.passageId === checkedRef.passageId;
-              });
-          })));
-        if (missing.length) {
-          missingLimitQuotes.set(`${item.caseId}/${work.artifactId}`, missing);
-          rejected.add(work.dispositionClaimId);
-        }
-      }
+      if (!operationObligationsAreBound(work, draftClaims, requirementReview.request, corpus)) rejected.add(work.dispositionClaimId);
     }
   }
   const offeringIds = new Set<string>();
@@ -413,6 +505,7 @@ export function buildCheckedAssessment(
   const structuredInterpretations = new Set([
     ...draft.cases.flatMap((item) => [...item.outcomeClaimIds, ...item.artifactWork.flatMap((work) => work.claimIds)]),
     ...draft.comparisons.flatMap((row) => [row.requirementClaimId, row.assessmentClaimId, row.implicationClaimId]),
+    ...draft.missingEvidenceRequests.map((item) => item.claimId),
   ]);
   for (const claim of draft.claims) {
     if (claim.kind === "recommendation" && !offeringIds.has(claim.claimId)) rejected.add(claim.claimId);
@@ -433,21 +526,17 @@ export function buildCheckedAssessment(
     const work = draft.cases.find((item) => item.caseId === review.caseId)?.artifactWork.find((work) => work.artifactId === review.artifactId);
     if (!work || checked.accepted.has(work.dispositionClaimId) || review.verdict !== "supported") return review;
     const failed = work.claimIds.flatMap((id) => !checked.accepted.has(id) && id !== work.dispositionClaimId && draftClaims.has(id) ? [draftClaims.get(id)!] : []);
-    const reasons = failed.length ? failed.map((claim) => ({
-      target: (claim.kind === "source_fact" ? "history" : work.verificationClaimIds.includes(claim.claimId) ? "check" : "adaptation") as "history" | "check" | "adaptation",
-      explanation: `Server gate: decisive claim ${claim.claimId} was withheld (${invalidRefs.has(claim.claimId) ? "invalid or unavailable evidence" : verdicts.get(claim.claimId) ?? "dependency rejected"}); the disposition cannot drop that prerequisite.`,
-      sourceRefs: claim.sourceRefs, requestQuotes: claim.requestQuotes,
-    })) : [{
+    const reasons = failed.filter((claim) => !review.reasons.some((reason) => reason.claimId === claim.claimId)).map((claim) => ({
       target: "disposition" as const,
-      explanation: `Server gate: the proposed disposition is not eligible under role ${review.role} or its evidence dependencies.`,
-      sourceRefs: review.decision.historicalEvidence, requestQuotes: review.decision.requestQuotes,
-    }];
-    const missingLimits = (missingLimitQuotes.get(`${review.caseId}/${review.artifactId}`) ?? []).map((quote) => ({
-      target: "check" as const,
-      explanation: "Server gate: current-tenant acceptance of this exact requested operation limit lacks an owned, reviewed pre-use check; a proposed cap or historical test is not confirmation.",
-      sourceRefs: review.decision.historicalEvidence, requestQuotes: [quote],
+      explanation: `Server gate: decisive claim ${claim.claimId} was withheld (${invalidRefs.has(claim.claimId) ? "invalid or unavailable evidence" : decisionVerdicts.get(claim.claimId) === "supported" ? "required coverage or dependency rejected" : decisionVerdicts.get(claim.claimId) ?? "dependency rejected"}); the disposition cannot drop that prerequisite.`,
+      sourceRefs: claim.sourceRefs, requestQuotes: claim.requestQuotes,
     }));
-    return { ...review, reasons: [...review.reasons, ...missingLimits, ...reasons].slice(0, 8) };
+    if (reasons.length === 0 && review.reasons.length === 0) reasons.push({
+      target: "disposition",
+      explanation: "Server gate: the proposed disposition lacks a supported starting-point role or complete, owned atomic-obligation coverage.",
+      sourceRefs: review.decision.historicalEvidence, requestQuotes: review.decision.requestQuotes,
+    });
+    return { ...review, reasons: [...review.reasons, ...reasons].slice(0, 8) };
   });
   const cases: CaseAssessment[] = draft.cases.map((item, caseIndex) => {
     const classificationId = `outcome-${caseIndex}`;
@@ -504,6 +593,8 @@ export function buildCheckedAssessment(
     && keepAll([row.evidenceClaimId, row.assessmentClaimId, row.implicationClaimId, ...(row.requirementClaimId === null ? [] : [row.requirementClaimId])], checked.accepted))
     || draft.cases.some((item) => item.artifactWork.some((work) => work.disposition === null && checked.accepted.has(work.dispositionClaimId)));
   const noUsefulPrecedent = complete && invalidRefs.size === 0 && !requirementConflict && negativeExplanation
+    && missingEvidenceReview.data.verdict === "supported"
+    && missingEvidenceReview.data.claimIds.every((id) => checked.accepted.has(id) && draft.missingEvidenceRequests.some((item) => item.claimId === id))
     && artifactReviews.size === knownArtifacts.size
     && cases.every((item) => item.artifactWork.every((work) => work.availability === "unavailable" || (work.disposition === null && work.dispositionClaimId !== null)))
     && [...artifactReviews.values()].every((review) => review.verdict === "supported" && (review.role === "context_only" || review.role === "not_relevant"));
@@ -523,6 +614,8 @@ export function buildCheckedAssessment(
   return {
     conclusion,
     clarifyingClaimIds: draft.clarifyingClaimIds.filter((id) => checked.accepted.has(id)),
+    missingEvidenceRequests: draft.missingEvidenceRequests.filter((item) => checked.accepted.has(item.claimId)),
+    missingEvidenceReview: missingEvidenceReview.data,
     comparisons,
     requestConstraints: constraints.data,
     artifactReviews: explainedReviews,
@@ -546,46 +639,6 @@ function deterministicOrder(leads: Lead[], cases: CaseAssessment[]): Lead[] {
     || a.caseId.localeCompare(b.caseId));
 }
 
-function sameSelectedVersion(claim: Claim, selection: { caseId: string; artifactId: string; versionId: string }): boolean {
-  return claim.sourceRefs.some((ref) => ref.caseId === selection.caseId && ref.artifactId === selection.artifactId && ref.versionId === selection.versionId);
-}
-
-// Quotations the checked assessment already accepted for this exact artifact/version.
-// The brief must keep them even when a later reviewer inventories nothing.
-export function boundAssessmentQuotes(
-  assessment: AssessmentResult,
-  selection: { caseId: string; artifactId: string; versionId: string },
-): string[] {
-  const work = assessment.cases.find((item) => item.caseId === selection.caseId)?.artifactWork.find((item) => item.artifactId === selection.artifactId);
-  const assigned = new Set([
-    ...(work?.claimIds ?? []),
-    ...(work?.blockerClaimIds ?? []),
-    ...(work?.verificationClaimIds ?? []),
-    ...(work?.dispositionClaimId ? [work.dispositionClaimId] : []),
-  ]);
-  // Only claims assigned to this artifact's own work floor its brief coverage.
-  // Comparison requirement claims state whole-request dimensions for the case;
-  // they are not relevance judgments for this artifact, and flooring from them
-  // forced one combined-brief item to carry another item's decisive quotation
-  // (a support-access sign-off sentence on a connector item) even though both
-  // the draft and the independent brief review judged it irrelevant there.
-  // A quotation binds to this item only when its own work claim both declares
-  // it in requestQuotes and states it verbatim in prose. Declared-but-unstated
-  // provenance (a combined request's disposition claim listing every request
-  // sentence) and prose mentions harvested from the global inventory are not
-  // per-item coverage obligations; binding them forced a connector item to
-  // carry a handover sentence its own checked work never asserted.
-  const quotes = new Set<string>();
-  const decision = assessment.artifactReviews.find((item) => item.caseId === selection.caseId && item.artifactId === selection.artifactId)?.decision;
-  if (decision?.historicalEvidence.some((ref) => ref.versionId === selection.versionId)) {
-    for (const quote of [...decision.requestQuotes, ...decision.adaptations.flatMap((item) => item.requestQuotes), ...decision.checks.flatMap((item) => item.requestQuotes)]) quotes.add(quote);
-  }
-  for (const claim of assessment.claims) {
-    if (!sameSelectedVersion(claim, selection) || !assigned.has(claim.claimId)) continue;
-    for (const quote of claim.requestQuotes) if (claim.text.includes(quote)) quotes.add(quote);
-  }
-  return [...quotes];
-}
 
 export function withAssessmentConstraintFloor(
   reviews: BriefConstraintReview[],
@@ -671,6 +724,9 @@ export function buildCheckedBrief(
 }
 
 export function revalidateAssessment(result: AssessmentResult, request: string, corpus: CorpusSnapshot): AssessmentResult {
+  if (!missingEvidenceReviewSchema.safeParse(result.missingEvidenceReview).success || !missingEvidenceRequestsSchema.safeParse(result.missingEvidenceRequests).success) {
+    throw new EvidenceUnavailable("Required independent missing-evidence review is unavailable; a new checked assessment is needed.");
+  }
   const reviewed = artifactReviewsSchema.safeParse(result.artifactReviews);
   if (!reviewed.success || new Set(reviewed.data.map((item) => `${item.caseId}/${item.artifactId}`)).size !== reviewed.data.length) {
     throw new EvidenceUnavailable("Required independent artifact-role review is unavailable; a new checked assessment is needed.");
@@ -697,13 +753,13 @@ export function revalidateAssessment(result: AssessmentResult, request: string, 
   const verdicts = new Map(result.claims.map((claim) => [claim.claimId, "supported" as const]));
   const artifactReviews = new Map(reviewed.data.map((item) => [`${item.caseId}/${item.artifactId}`, item]));
   try {
-    const checked = buildCheckedAssessment(draft, verdicts, validClaimReferences(result.claims, request, corpus), corpus, artifactReviews, { request, constraints: result.requestConstraints });
+    const checked = buildCheckedAssessment(draft, verdicts, validClaimReferences(result.claims, request, corpus), corpus, artifactReviews, { request, constraints: result.requestConstraints, missingEvidenceReview: result.missingEvidenceReview });
     // Revalidation may withhold stale evidence, never upgrade a stored uncertain conclusion.
     if (result.conclusion === "cannot_be_established" && checked.conclusion === "no_useful_precedent") checked.conclusion = result.conclusion;
     checked.withheldClaimCount += result.withheldClaimCount;
     return checked;
   } catch (error) {
-    if (error instanceof GateFailure && (error.code === "INVALID_REQUEST_CONSTRAINT_REVIEW" || error.code === "INCOMPLETE_ARTIFACT_REVIEW")) {
+    if (error instanceof GateFailure && ["INVALID_REQUEST_CONSTRAINT_REVIEW", "INCOMPLETE_ARTIFACT_REVIEW", "INVALID_MISSING_EVIDENCE_REVIEW"].includes(error.code)) {
       throw new EvidenceUnavailable("Required independent request/implementation review is unavailable; a new checked assessment is needed.");
     }
     throw error;

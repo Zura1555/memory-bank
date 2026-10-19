@@ -36,7 +36,7 @@ export function requireOperator(env: Env, authorization: string | null): void {
 
 export async function operatorStatus(env: Env): Promise<object> {
   const pool = database(env);
-  const [budgetResult, controlResult, jobsResult, attemptsResult, reservationsResult, outboxResult, reconciliationsResult] = await Promise.all([
+  const [budgetResult, controlResult, jobsResult, attemptsResult, reservationsResult, outboxResult, reconciliationsResult, repairsResult] = await Promise.all([
     pool.query<BudgetRow>(
       `SELECT campaign_limit_micro_usd, available_credit_micro_usd, held_micro_usd,
          reconciled_spend_micro_usd, admission_enabled FROM campaign_budget WHERE singleton`,
@@ -69,6 +69,11 @@ export async function operatorStatus(env: Env): Promise<object> {
       `SELECT reservation_id, actual_micro_usd, note, operator_subject, confirmed_abandoned_dispatch, created_at
        FROM operator_reconciliations ORDER BY created_at DESC LIMIT 50`,
     ),
+    pool.query(
+      `SELECT job_id, phase, draft_attempt_id, review_attempt_id,
+         plan_json IS NOT NULL AS plan_retained, created_at
+       FROM job_repairs ORDER BY created_at DESC LIMIT 50`,
+    ),
   ]);
   const budget = budgetResult.rows[0];
   if (!budget) throw new Error("CAMPAIGN_BUDGET_UNINITIALIZED");
@@ -89,6 +94,7 @@ export async function operatorStatus(env: Env): Promise<object> {
     pendingJobs: jobsResult.rows,
     recentModelAttempts: attemptsResult.rows,
     reconciliations: reconciliationsResult.rows,
+    repairs: repairsResult.rows,
     workflows: outboxResult.rows,
   };
 }
@@ -112,6 +118,10 @@ export async function updateOperatorBudget(env: Env, update: OperatorBudgetUpdat
 
 export async function reconcileReservation(env: Env, input: OperatorReconciliation): Promise<{ reservationId: string; alreadyReconciled: boolean }> {
   return transaction(database(env), async (client) => {
+    const controlResult = await client.query<{ active_attempt_id: string | null }>(
+      "SELECT active_attempt_id FROM workflow_control WHERE singleton FOR UPDATE",
+    );
+    await client.query("SELECT singleton FROM campaign_budget WHERE singleton FOR UPDATE");
     const reservationResult = await client.query<{
       id: string;
       job_id: string;
@@ -147,10 +157,7 @@ export async function reconcileReservation(env: Env, input: OperatorReconciliati
       throw new HttpFailure(409, "MODEL_ATTEMPT_STILL_ACTIVE");
     }
     if (attempts.rows.length === 0 && input.actualMicroUsd !== 0) throw new HttpFailure(400, "NO_MODEL_DISPATCH_RECORDED");
-    const control = await client.query<{ active_attempt_id: string | null }>(
-      "SELECT active_attempt_id FROM workflow_control WHERE singleton FOR UPDATE",
-    );
-    const active = control.rows[0]?.active_attempt_id === input.reservationId;
+    const active = controlResult.rows[0]?.active_attempt_id === input.reservationId;
     const stateColumn = reservation.phase === "assessment" ? "assessment_state" : "brief_state";
     const finishedColumn = reservation.phase === "assessment" ? "assessment_finished_at" : "brief_finished_at";
     const job = await client.query<{ state: string }>(
@@ -162,7 +169,7 @@ export async function reconcileReservation(env: Env, input: OperatorReconciliati
       "SELECT id FROM phase_reservations WHERE job_id = $1 AND phase = $2 ORDER BY attempt_no DESC LIMIT 1",
       [reservation.job_id, reservation.phase],
     );
-    const ownsPhase = active || (!control.rows[0]?.active_attempt_id && currentPhase && latest.rows[0]?.id === input.reservationId);
+    const ownsPhase = active || (!controlResult.rows[0]?.active_attempt_id && currentPhase && latest.rows[0]?.id === input.reservationId);
     const held = await client.query(
       `UPDATE campaign_budget SET held_micro_usd = held_micro_usd - $1,
          reconciled_spend_micro_usd = reconciled_spend_micro_usd + $2, updated_at = now()
