@@ -33,7 +33,9 @@ Memory Bank also offers semantic search in **Sources** for browsing passages. Th
 
 Unknowns stay unknown. Every example in this demo is fictional; checked recommendations are not production approval.
 
-**[Open the HTML workflow diagram](docs/hackathon-workflow.html)** · [Local setup and technical notes](#developer-and-operator-notes)
+![Memory Bank workflow: a lead and the app move from a request through checked examples, selected evidence, and a checked brief](docs/images/hackathon-workflow.svg)
+
+[Open the standalone HTML diagram](docs/hackathon-workflow.html) · [Local setup and technical notes](#developer-and-operator-notes)
 
 <details id="developer-and-operator-notes">
 <summary>Developer and operator notes</summary>

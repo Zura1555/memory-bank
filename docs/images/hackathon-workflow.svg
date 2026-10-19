@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1100 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="workflow-title workflow-desc" id="hackathon-workflow-root">
+          <title id="workflow-title">Memory Bank reuse workflow</title>
+          <desc id="workflow-desc">A delivery lead describes a request, Memory Bank checks fictional examples, the lead selects exact evidence, and the app provides an independently checked brief for the lead to review and export.</desc>
+          <defs>
+      <style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Noto+Serif:ital@0;1&amp;family=Noto+Sans+KR:wght@400;500;600&amp;family=Noto+Serif+KR:wght@400&amp;family=Noto+Sans+TC:wght@400;500;600&amp;family=Noto+Serif+TC:wght@400&amp;display=swap');
+      #hackathon-workflow-root { color-scheme: light;
+        --paper: #f4f7fb;
+        --surface: #ffffff;
+        --ink: #162950;
+        --muted: #526277;
+        --accent: #0158ae;
+        --line: #e2e8f0;
+        font-family: Manrope, system-ui, sans-serif; }
+      #hackathon-workflow-root { color: var(--ink); }
+      #hackathon-workflow-root .intro { margin: 10px 0 24px; color: var(--muted); line-height: 1.55; }
+      #hackathon-workflow-root .scroll-hint { display: none; color: var(--muted); font-size: 13px; }
+      #hackathon-workflow-root .diagram { overflow-x: auto; }
+      #hackathon-workflow-root .lane { fill: #f8fafc; stroke: var(--line); }
+      #hackathon-workflow-root .lane-label { fill: var(--muted); font: 600 12px Manrope, system-ui, sans-serif; letter-spacing: .08em; }
+      #hackathon-workflow-root .stage-label { fill: var(--muted); font: 500 10px "Geist Mono", ui-monospace, monospace; letter-spacing: .08em; }
+      #hackathon-workflow-root .stage-title { fill: var(--ink); font: 600 14px Manrope, system-ui, sans-serif; }
+      #hackathon-workflow-root .node { fill: var(--surface); stroke: #cbd5e1; stroke-width: 1.5; }
+      #hackathon-workflow-root .node-title { fill: var(--ink); font: 600 13px Manrope, system-ui, sans-serif; }
+      #hackathon-workflow-root .node-copy { fill: var(--muted); font: 400 11px Manrope, system-ui, sans-serif; }
+      #hackathon-workflow-root .focal { fill: #edf5ff; stroke: var(--accent); stroke-width: 2; }
+      #hackathon-workflow-root .focal-title { fill: var(--accent); }
+      #hackathon-workflow-root .flow { fill: none; stroke: #738095; stroke-width: 2; marker-end: url(#hackathon-workflow-arrow); }
+      #hackathon-workflow-root .scroll-hint { display: block; }
+      #hackathon-workflow-root .diagram { overflow: visible; }</style>
+            <marker id="hackathon-workflow-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0 0 L8 4 L0 8 Z" fill="#738095" />
+            </marker>
+          </defs>
+          <rect class="lane" x="20" y="112" width="1060" height="112" rx="6" />
+          <rect class="lane" x="20" y="276" width="1060" height="112" rx="6" />
+          <text class="lane-label" x="40" y="174">DELIVERY LEAD</text>
+          <text class="lane-label" x="40" y="338">MEMORY BANK</text>
+          <text class="stage-label" x="280" y="40" text-anchor="middle">STEP 01</text>
+          <text class="stage-title" x="280" y="64" text-anchor="middle">Request</text>
+          <text class="stage-label" x="500" y="40" text-anchor="middle">STEP 02</text>
+          <text class="stage-title" x="500" y="64" text-anchor="middle">Checked examples</text>
+          <text class="stage-label" x="720" y="40" text-anchor="middle">STEP 03</text>
+          <text class="stage-title" x="720" y="64" text-anchor="middle">Selected work</text>
+          <text class="stage-label" x="940" y="40" text-anchor="middle">STEP 04</text>
+          <text class="stage-title" x="940" y="64" text-anchor="middle">Checked brief</text>
+          <path class="flow" d="M374 168 H492 Q500 168 500 176 V292" />
+          <path class="flow" d="M594 332 H712 Q720 332 720 324 V208" />
+          <path class="flow" d="M814 168 H932 Q940 168 940 176 V292" />
+          <path class="flow" d="M940 292 V208" />
+          <rect class="node" x="186" y="132" width="188" height="72" rx="6" />
+          <text class="node-title" x="202" y="158">Describe the request</text>
+          <text class="node-copy" x="202" y="181">Goal and constraints</text>
+          <rect class="node" x="406" y="296" width="188" height="72" rx="6" />
+          <text class="node-title" x="422" y="322">Assess all cases</text>
+          <text class="node-copy" x="422" y="345">Pinned context; exact refs</text>
+          <rect class="node" x="626" y="132" width="188" height="72" rx="6" />
+          <text class="node-title" x="642" y="158">Select evidence</text>
+          <text class="node-copy" x="642" y="181">Artifact, version, passage</text>
+          <rect class="node" x="846" y="296" width="188" height="72" rx="6" />
+          <text class="node-title" x="862" y="322">Draft and check</text>
+          <text class="node-copy" x="862" y="345">Independent claim review</text>
+          <rect class="node focal" x="846" y="132" width="188" height="72" rx="6" />
+          <text class="node-title focal-title" x="862" y="158">Review and export</text>
+          <text class="node-copy" x="862" y="181">Reuse · Adapt · Verify</text>
+          <text class="node-copy" x="550" y="430" text-anchor="middle">The app checks evidence; the delivery lead makes the decision.</text>
+        </svg>
