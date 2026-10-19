@@ -1,0 +1,709 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+                                        viewBox="0 0 1280 720"
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        role="img"
+                                        aria-labelledby="memory-bank-service-blueprint-title memory-bank-service-blueprint-desc" id="memory-bank-service-blueprint-root"
+                                >
+                                        <title
+                                                id="memory-bank-service-blueprint-title"
+                                        >
+                                                Evidence, in view.
+                                        </title>
+                                        <desc
+                                                id="memory-bank-service-blueprint-desc"
+                                        >
+                                                The delivery lead moves from a
+                                                request through checked leads,
+                                                exact evidence selection, and a
+                                                reviewed brief while the
+                                                application keeps supporting
+                                                evidence and safeguards
+                                                inspectable.
+                                        </desc>
+  <defs>
+      <style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Noto+Serif:ital@0;1&amp;family=Noto+Sans+KR:wght@400;500;600&amp;family=Noto+Serif+KR:wght@400&amp;family=Noto+Sans+TC:wght@400;500;600&amp;family=Noto+Serif+TC:wght@400&amp;display=swap');
+      #memory-bank-service-blueprint-root { --paper: #f4f7fb;
+                                --surface: #ffffff;
+                                --ink: #162950;
+                                --muted: #526277;
+                                --accent: #0158ae;
+                                --line: #e2e8f0;
+                                --backstage: #edf2f8;
+                                --accent-tint: #edf5ff;
+                                --font-sans: "Manrope", system-ui, sans-serif;
+                                --font-serif:
+                                        "Instrument Serif", "Noto Serif", serif;
+                                --font-mono:
+                                        "Geist Mono", ui-monospace, monospace; }
+      #memory-bank-service-blueprint-root { color: var(--ink); font-family: var(--font-sans); }
+      #memory-bank-service-blueprint-root .dek { max-width: 760px;
+                                margin-bottom: 24px;
+                                color: var(--muted);
+                                font-size: 15px;
+                                line-height: 1.5; }
+      #memory-bank-service-blueprint-root .scroll-hint { display: none;
+                                margin: -12px 0 12px;
+                                color: var(--muted);
+                                font: 500 8px/1.4 var(--font-mono);
+                                letter-spacing: 0.08em;
+                                text-transform: uppercase; }
+      #memory-bank-service-blueprint-root .diagram-container { width: 100%;
+                                overflow-x: auto; }
+      #memory-bank-service-blueprint-root .scroll-hint { display: block; }
+      #memory-bank-service-blueprint-root .diagram-container { overflow-x: visible; }</style>
+  </defs>
+                                        <rect
+                                                width="1280"
+                                                height="720"
+                                                fill="#f4f7fb"
+                                        />
+
+                                        <rect
+                                                x="96"
+                                                y="40"
+                                                width="260"
+                                                height="48"
+                                                fill="none"
+                                                data-stage="frame-request"
+                                        />
+                                        <text
+                                                x="226"
+                                                y="56"
+                                                fill="#526277"
+                                                font-size="8"
+                                                font-family="'Geist Mono', monospace"
+                                                text-anchor="middle"
+                                                letter-spacing="0.14em"
+                                        >
+                                                STAGE 01
+                                        </text>
+                                        <text
+                                                x="226"
+                                                y="76"
+                                                fill="#162950"
+                                                font-size="12"
+                                                font-family="'Manrope', sans-serif"
+                                                font-weight="600"
+                                                text-anchor="middle"
+                                        >
+                                                Frame request
+                                        </text>
+
+                                        <rect
+                                                x="372"
+                                                y="40"
+                                                width="260"
+                                                height="48"
+                                                fill="none"
+                                                data-stage="inspect-leads"
+                                        />
+                                        <text
+                                                x="502"
+                                                y="56"
+                                                fill="#526277"
+                                                font-size="8"
+                                                font-family="'Geist Mono', monospace"
+                                                text-anchor="middle"
+                                                letter-spacing="0.14em"
+                                        >
+                                                STAGE 02
+                                        </text>
+                                        <text
+                                                x="502"
+                                                y="76"
+                                                fill="#162950"
+                                                font-size="12"
+                                                font-family="'Manrope', sans-serif"
+                                                font-weight="600"
+                                                text-anchor="middle"
+                                        >
+                                                Inspect leads
+                                        </text>
+
+                                        <rect
+                                                x="648"
+                                                y="40"
+                                                width="260"
+                                                height="48"
+                                                fill="none"
+                                                data-stage="choose-evidence"
+                                        />
+                                        <text
+                                                x="778"
+                                                y="56"
+                                                fill="#526277"
+                                                font-size="8"
+                                                font-family="'Geist Mono', monospace"
+                                                text-anchor="middle"
+                                                letter-spacing="0.14em"
+                                        >
+                                                STAGE 03
+                                        </text>
+                                        <text
+                                                x="778"
+                                                y="76"
+                                                fill="#162950"
+                                                font-size="12"
+                                                font-family="'Manrope', sans-serif"
+                                                font-weight="600"
+                                                text-anchor="middle"
+                                        >
+                                                Choose evidence
+                                        </text>
+
+                                        <rect
+                                                x="924"
+                                                y="40"
+                                                width="260"
+                                                height="48"
+                                                fill="none"
+                                                data-stage="review-export"
+                                        />
+                                        <text
+                                                x="1054"
+                                                y="56"
+                                                fill="#526277"
+                                                font-size="8"
+                                                font-family="'Geist Mono', monospace"
+                                                text-anchor="middle"
+                                                letter-spacing="0.14em"
+                                        >
+                                                STAGE 04
+                                        </text>
+                                        <text
+                                                x="1054"
+                                                y="76"
+                                                fill="#162950"
+                                                font-size="12"
+                                                font-family="'Manrope', sans-serif"
+                                                font-weight="600"
+                                                text-anchor="middle"
+                                        >
+                                                Review &amp; export
+                                        </text>
+
+                                        <rect
+                                                x="96"
+                                                y="352"
+                                                width="1088"
+                                                height="64"
+                                                fill="#edf2f8"
+                                        />
+
+                                        <line
+                                                x1="96"
+                                                y1="248"
+                                                x2="1184"
+                                                y2="248"
+                                                stroke="#e2e8f0"
+                                                stroke-width="1"
+                                                data-role="interaction"
+                                        />
+                                        <line
+                                                x1="96"
+                                                y1="336"
+                                                x2="1184"
+                                                y2="336"
+                                                stroke="#526277"
+                                                stroke-width="2"
+                                                data-role="visibility"
+                                        />
+                                        <line
+                                                x1="96"
+                                                y1="432"
+                                                x2="1184"
+                                                y2="432"
+                                                stroke="#e2e8f0"
+                                                stroke-width="1"
+                                                data-role="internal-interaction"
+                                        />
+
+                                        <g data-layer="evidence">
+                                                <text
+                                                        x="88"
+                                                        y="140"
+                                                        fill="#526277"
+                                                        font-size="8"
+                                                        font-family="'Geist Mono', monospace"
+                                                        text-anchor="end"
+                                                        letter-spacing="0.12em"
+                                                >
+                                                        EVIDENCE
+                                                </text>
+                                                <rect
+                                                        x="96"
+                                                        y="112"
+                                                        width="260"
+                                                        height="48"
+                                                        rx="4"
+                                                        fill="#ffffff"
+                                                        stroke="#cbd6e4"
+                                                        data-stage="frame-request"
+                                                        data-name="Request + clarifications"
+                                                />
+                                                <text
+                                                        x="226"
+                                                        y="140"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Request + clarifications
+                                                </text>
+                                                <rect
+                                                        x="372"
+                                                        y="112"
+                                                        width="260"
+                                                        height="48"
+                                                        rx="4"
+                                                        fill="#ffffff"
+                                                        stroke="#cbd6e4"
+                                                        data-stage="inspect-leads"
+                                                        data-name="Cited lead cards"
+                                                />
+                                                <text
+                                                        x="502"
+                                                        y="140"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Cited lead cards
+                                                </text>
+                                                <rect
+                                                        x="648"
+                                                        y="112"
+                                                        width="260"
+                                                        height="48"
+                                                        rx="4"
+                                                        fill="#ffffff"
+                                                        stroke="#cbd6e4"
+                                                        data-stage="choose-evidence"
+                                                        data-name="Artifact · version · passage"
+                                                />
+                                                <text
+                                                        x="778"
+                                                        y="140"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Artifact · version ·
+                                                        passage
+                                                </text>
+                                                <rect
+                                                        x="924"
+                                                        y="112"
+                                                        width="260"
+                                                        height="48"
+                                                        rx="4"
+                                                        fill="#ffffff"
+                                                        stroke="#cbd6e4"
+                                                        data-stage="review-export"
+                                                        data-name="Checked brief + pack exports"
+                                                />
+                                                <text
+                                                        x="1054"
+                                                        y="140"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Checked brief + pack
+                                                        exports
+                                                </text>
+                                        </g>
+
+                                        <g data-layer="customer">
+                                                <text
+                                                        x="88"
+                                                        y="212"
+                                                        fill="#526277"
+                                                        font-size="8"
+                                                        font-family="'Geist Mono', monospace"
+                                                        text-anchor="end"
+                                                        letter-spacing="0.12em"
+                                                >
+                                                        LEAD
+                                                </text>
+                                                <rect
+                                                        x="96"
+                                                        y="176"
+                                                        width="260"
+                                                        height="64"
+                                                        rx="4"
+                                                        fill="#ffffff"
+                                                        stroke="#cbd6e4"
+                                                        data-stage="frame-request"
+                                                        data-name="State need + constraints"
+                                                />
+                                                <text
+                                                        x="226"
+                                                        y="212"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        State need + constraints
+                                                </text>
+                                                <rect
+                                                        x="372"
+                                                        y="176"
+                                                        width="260"
+                                                        height="64"
+                                                        rx="4"
+                                                        fill="#ffffff"
+                                                        stroke="#cbd6e4"
+                                                        data-stage="inspect-leads"
+                                                        data-name="Inspect leads + contrasts"
+                                                />
+                                                <text
+                                                        x="502"
+                                                        y="212"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Inspect leads +
+                                                        contrasts
+                                                </text>
+                                                <rect
+                                                        x="648"
+                                                        y="176"
+                                                        width="260"
+                                                        height="64"
+                                                        rx="4"
+                                                        fill="#ffffff"
+                                                        stroke="#cbd6e4"
+                                                        data-stage="choose-evidence"
+                                                        data-name="Choose exact evidence"
+                                                />
+                                                <text
+                                                        x="778"
+                                                        y="212"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Choose exact evidence
+                                                </text>
+                                                <rect
+                                                        x="924"
+                                                        y="176"
+                                                        width="260"
+                                                        height="64"
+                                                        rx="4"
+                                                        fill="#ffffff"
+                                                        stroke="#cbd6e4"
+                                                        data-stage="review-export"
+                                                        data-name="Review brief + export pack"
+                                                />
+                                                <text
+                                                        x="1054"
+                                                        y="212"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Review brief + export
+                                                        pack
+                                                </text>
+                                        </g>
+
+                                        <g data-layer="frontstage">
+                                                <text
+                                                        x="88"
+                                                        y="292"
+                                                        fill="#526277"
+                                                        font-size="8"
+                                                        font-family="'Geist Mono', monospace"
+                                                        text-anchor="end"
+                                                        letter-spacing="0.12em"
+                                                >
+                                                        IN VIEW
+                                                </text>
+                                                <rect
+                                                        x="96"
+                                                        y="256"
+                                                        width="260"
+                                                        height="64"
+                                                        rx="4"
+                                                        fill="#ffffff"
+                                                        stroke="#cbd6e4"
+                                                        data-stage="frame-request"
+                                                        data-name="Request stays visible"
+                                                />
+                                                <text
+                                                        x="226"
+                                                        y="292"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Request stays visible
+                                                </text>
+                                                <rect
+                                                        x="372"
+                                                        y="256"
+                                                        width="260"
+                                                        height="64"
+                                                        rx="4"
+                                                        fill="#ffffff"
+                                                        stroke="#cbd6e4"
+                                                        data-stage="inspect-leads"
+                                                        data-name="Open exact passages"
+                                                />
+                                                <text
+                                                        x="502"
+                                                        y="292"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Open exact passages
+                                                </text>
+                                                <rect
+                                                        x="648"
+                                                        y="256"
+                                                        width="260"
+                                                        height="64"
+                                                        rx="4"
+                                                        fill="#ffffff"
+                                                        stroke="#cbd6e4"
+                                                        data-stage="choose-evidence"
+                                                        data-name="Picker mirrors checked evidence"
+                                                />
+                                                <text
+                                                        x="778"
+                                                        y="292"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Picker mirrors checked
+                                                        evidence
+                                                </text>
+                                                <rect
+                                                        x="924"
+                                                        y="256"
+                                                        width="260"
+                                                        height="64"
+                                                        rx="4"
+                                                        fill="#ffffff"
+                                                        stroke="#cbd6e4"
+                                                        data-stage="review-export"
+                                                        data-name="Unknowns + withheld work shown"
+                                                />
+                                                <text
+                                                        x="1054"
+                                                        y="292"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Unknowns + withheld work
+                                                        shown
+                                                </text>
+                                        </g>
+
+                                        <g data-layer="backstage">
+                                                <text
+                                                        x="88"
+                                                        y="388"
+                                                        fill="#526277"
+                                                        font-size="8"
+                                                        font-family="'Geist Mono', monospace"
+                                                        text-anchor="end"
+                                                        letter-spacing="0.12em"
+                                                >
+                                                        BEHIND THE LINE
+                                                </text>
+                                                <rect
+                                                        x="96"
+                                                        y="352"
+                                                        width="260"
+                                                        height="64"
+                                                        rx="4"
+                                                        fill="#edf2f8"
+                                                        stroke="#9eacbf"
+                                                        data-stage="frame-request"
+                                                        data-name="Submission alone requests admission"
+                                                />
+                                                <text
+                                                        x="226"
+                                                        y="388"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Submission alone
+                                                        requests admission
+                                                </text>
+                                                <rect
+                                                        x="372"
+                                                        y="352"
+                                                        width="260"
+                                                        height="64"
+                                                        rx="4"
+                                                        fill="#edf2f8"
+                                                        stroke="#9eacbf"
+                                                        data-stage="inspect-leads"
+                                                        data-name="Review withholds unsupported work"
+                                                />
+                                                <text
+                                                        x="502"
+                                                        y="388"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Review withholds
+                                                        unsupported work
+                                                </text>
+                                                <rect
+                                                        x="648"
+                                                        y="352"
+                                                        width="260"
+                                                        height="64"
+                                                        rx="4"
+                                                        fill="#edf2f8"
+                                                        stroke="#9eacbf"
+                                                        data-stage="choose-evidence"
+                                                        data-name="Server enforces exact selection"
+                                                />
+                                                <text
+                                                        x="778"
+                                                        y="388"
+                                                        fill="#162950"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        text-anchor="middle"
+                                                >
+                                                        Server enforces exact
+                                                        selection
+                                                </text>
+                                                <rect
+                                                        x="924"
+                                                        y="352"
+                                                        width="260"
+                                                        height="64"
+                                                        rx="4"
+                                                        fill="#edf5ff"
+                                                        stroke="#0158ae"
+                                                        data-stage="review-export"
+                                                        data-name="Coverage gaps block recommendations"
+                                                        data-focal="true"
+                                                />
+                                                <text
+                                                        x="1054"
+                                                        y="388"
+                                                        fill="#0158ae"
+                                                        font-size="12"
+                                                        font-family="'Manrope', sans-serif"
+                                                        font-weight="600"
+                                                        text-anchor="middle"
+                                                >
+                                                        Coverage gaps block
+                                                        recommendations
+                                                </text>
+                                        </g>
+
+                                        <text
+                                                x="88"
+                                                y="340"
+                                                fill="#526277"
+                                                font-size="8"
+                                                font-family="'Geist Mono', monospace"
+                                                text-anchor="end"
+                                                letter-spacing="0.12em"
+                                        >
+                                                VISIBILITY
+                                        </text>
+
+                                        <line
+                                                x1="96"
+                                                y1="620"
+                                                x2="1184"
+                                                y2="620"
+                                                stroke="#e2e8f0"
+                                                stroke-width="1"
+                                        />
+                                        <text
+                                                x="96"
+                                                y="644"
+                                                fill="#526277"
+                                                font-size="8"
+                                                font-family="'Geist Mono', monospace"
+                                                letter-spacing="0.18em"
+                                        >
+                                                KEY
+                                        </text>
+                                        <line
+                                                x1="96"
+                                                y1="668"
+                                                x2="124"
+                                                y2="668"
+                                                stroke="#526277"
+                                                stroke-width="2"
+                                        />
+                                        <text
+                                                x="136"
+                                                y="672"
+                                                fill="#526277"
+                                                font-size="10"
+                                                font-family="'Manrope', sans-serif"
+                                        >
+                                                Line of visibility
+                                        </text>
+                                        <rect
+                                                x="296"
+                                                y="660"
+                                                width="16"
+                                                height="12"
+                                                rx="2"
+                                                fill="#edf2f8"
+                                                stroke="#9eacbf"
+                                        />
+                                        <text
+                                                x="320"
+                                                y="672"
+                                                fill="#526277"
+                                                font-size="10"
+                                                font-family="'Manrope', sans-serif"
+                                        >
+                                                Backstage checks
+                                        </text>
+                                        <rect
+                                                x="488"
+                                                y="660"
+                                                width="16"
+                                                height="12"
+                                                rx="2"
+                                                fill="#edf5ff"
+                                                stroke="#0158ae"
+                                        />
+                                        <text
+                                                x="512"
+                                                y="672"
+                                                fill="#526277"
+                                                font-size="10"
+                                                font-family="'Manrope', sans-serif"
+                                        >
+                                                Coverage gate
+                                        </text>
+                                </svg>
