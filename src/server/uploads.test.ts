@@ -78,10 +78,32 @@ test("private sources enforce ownership, observed indexing, exact originals and 
   objects.set(originalKey, original);
   t.mock.method(Date, "now", () => Date.parse(source.expiresAt) + 1);
   await assert.rejects(uploadDetail(env, owner, source.id), { code: "UPLOAD_NOT_FOUND" });
+  await assert.rejects(uploadOriginal(env, owner, source.id), { code: "UPLOAD_NOT_FOUND" });
   await assert.rejects(attachmentRequest(env, owner, "Request", [source.id]), { code: "UPLOAD_NOT_FOUND" });
   await expireUploads(env);
   assert.deepEqual([...objects.keys()], []);
   assert.equal(vectors.size, 0);
+});
+
+test("original download overlaps storage reads while preserving the checked bytes", async (t) => {
+  const { env } = storage();
+  const owner = await uploadOwner(authorization);
+  const content = "Sandbox only; no production writes.";
+  const source = await createUpload(env, owner, uploadRequest("request.txt", content));
+  const get = env.ORIGINALS.get.bind(env.ORIGINALS);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let originalStarted = false;
+  t.mock.method(env.ORIGINALS, "get", async (key: string) => {
+    if (key.includes("/records/")) await gate;
+    else originalStarted = true;
+    return get(key);
+  });
+  const download = uploadOriginal(env, owner, source.id);
+  const overlapped = originalStarted;
+  release();
+  assert.equal(await (await download).text(), content);
+  assert.equal(overlapped, true, "original retrieval must start before metadata retrieval completes");
 });
 
 test("format, byte and extraction limits reject unsafe input without truncation", async () => {

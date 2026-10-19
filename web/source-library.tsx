@@ -40,6 +40,7 @@ export function SourceLibrary({ sources, indexStatus, inspect, loading, error }:
   inspect: (ref: SourceRef) => void; loading: boolean; error: boolean;
 }) {
   const library = usePrivateUploads();
+  const { focusedId, setFocusedId } = library;
   const [query, setQuery] = useState("");
   const [space, setSpace] = useState("");
   const [caseId, setCaseId] = useState("");
@@ -59,12 +60,14 @@ export function SourceLibrary({ sources, indexStatus, inspect, loading, error }:
   const [actionError, setActionError] = useState<string | null>(null);
   const detailElement = useRef<HTMLElement>(null);
   const libraryHeading = useRef<HTMLHeadingElement>(null);
-  const caseOptions = [...new Map(sources.map((source) => [source.caseId, source.caseTitle])).entries()];
-  const caseTitles = new Map(caseOptions);
-  const resources = useMemo<Resource[]>(() => [
-    ...library.sources.map((source) => ({ key: `private:${source.id}`, title: source.name, caseId: source.caseId ?? "", group: caseTitles.get(source.caseId ?? "") ?? "Unassigned", type: source.mimeType, date: source.createdAt, status: uploadStateLabels[source.state], privateSource: source })),
-    ...sources.map((source) => ({ key: `corpus:${source.versionId}`, title: source.title, caseId: source.caseId, group: source.caseTitle, type: source.mimeType, date: source.statedDate ?? "", status: source.availability === "available" ? indexStatus?.[source.versionId] === "indexed" ? "Indexed" : indexStatus?.[source.versionId] === "partial" ? "Partially indexed" : indexStatus?.[source.versionId] === "pending" ? "Not indexed" : "Index unconfirmed" : source.availability === "incomplete" ? "Needs review" : "Unavailable", corpusSource: source })),
-  ], [sources, library.sources, indexStatus]);
+  const caseOptions = useMemo(() => [...new Map(sources.map((source) => [source.caseId, source.caseTitle])).entries()], [sources]);
+  const resources = useMemo<Resource[]>(() => {
+    const caseTitles = new Map(caseOptions);
+    return [
+      ...library.sources.map((source) => ({ key: `private:${source.id}`, title: source.name, caseId: source.caseId ?? "", group: caseTitles.get(source.caseId ?? "") ?? "Unassigned", type: source.mimeType, date: source.createdAt, status: uploadStateLabels[source.state], privateSource: source })),
+      ...sources.map((source) => ({ key: `corpus:${source.versionId}`, title: source.title, caseId: source.caseId, group: source.caseTitle, type: source.mimeType, date: source.statedDate ?? "", status: source.availability === "available" ? indexStatus?.[source.versionId] === "indexed" ? "Indexed" : indexStatus?.[source.versionId] === "partial" ? "Partially indexed" : indexStatus?.[source.versionId] === "pending" ? "Not indexed" : "Index unconfirmed" : source.availability === "incomplete" ? "Needs review" : "Unavailable", corpusSource: source })),
+    ];
+  }, [sources, library.sources, indexStatus, caseOptions]);
   const filtered = resources.filter((source) => (!space || Boolean(source.privateSource) === (space === "private")) && (!caseId || source.caseId === caseId) && (!type || fileLabel(source.type) === type) && (!status || source.status === status)
     && `${source.title} ${source.group} ${source.corpusSource?.versionId ?? ""} ${source.privateSource?.sourceUrl ?? ""}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
     .sort((a, b) => sort === "name" ? a.title.localeCompare(b.title) : sort === "oldest" ? a.date.localeCompare(b.date) || a.title.localeCompare(b.title) : b.date.localeCompare(a.date) || a.title.localeCompare(b.title));
@@ -83,20 +86,16 @@ export function SourceLibrary({ sources, indexStatus, inspect, loading, error }:
     });
   };
   useEffect(() => {
-    if (library.focusedId) { select(`private:${library.focusedId}`); library.setFocusedId(null); }
-  }, [library.focusedId]);
+    if (focusedId) { setSelected(`private:${focusedId}`); setTab("Overview"); setFocusedId(null); }
+  }, [focusedId, setFocusedId]);
   useEffect(() => {
     if (current) {
       detailElement.current?.focus({ preventScroll: true });
       if (window.matchMedia("(max-width: 1199px)").matches) detailElement.current?.scrollIntoView({ block: "start" });
     }
   }, [current?.key]);
-  useEffect(() => {
-    setChecked((items) => items.filter((key) => resources.some((source) => source.key === key)));
-  }, [resources]);
-  useEffect(() => {
-    if (selected && !current) setSelected(null);
-  }, [selected, current]);
+  if (checkedResources.length !== checked.length) setChecked(checkedResources.map((source) => source.key));
+  if (selected && !current) setSelected(null);
   async function runBulk() {
     if (!allPrivate || busy) return;
     setBusy(true); setActionError(null);
@@ -152,10 +151,11 @@ export function SourceLibrary({ sources, indexStatus, inspect, loading, error }:
 
 function SourceDetail({ resource, sources, caseOptions, tab, setTab, relatedView, setRelatedView, mapViewport, inspect, close, select, pointerMotion }: { resource: Resource; sources: SourceCatalogEntry[]; caseOptions: [string, string][]; tab: Tab; setTab: (tab: Tab) => void; relatedView: "list" | "map"; setRelatedView: (view: "list" | "map") => void; mapViewport: RefObject<MapViewport | null>; inspect: (ref: SourceRef) => void; close: () => void; select: (key: string, tab?: Tab) => void; pointerMotion: boolean }) {
   const library = usePrivateUploads();
+  const { detail: loadDetail, token } = library;
   const [detail, setDetail] = useState<PrivateSourceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<{ kind: "move" | "delete"; open: boolean }>({ kind: "move", open: false });
-  const [targetCase, setTargetCase] = useState(resource.caseId);
+  const [targetCase, setTargetCase] = useState("");
   const [notes, setNotes] = useState(resource.privateSource?.notes ?? "");
   const [notesBase, setNotesBase] = useState(resource.privateSource?.notes ?? "");
   const [saved, setSaved] = useState(false);
@@ -165,21 +165,28 @@ function SourceDetail({ resource, sources, caseOptions, tab, setTab, relatedView
   const privateSource = resource.privateSource;
   const corpusSource = resource.corpusSource;
   const processing = ["Extracting", "Indexing"].includes(resource.status);
+  const activityRows = useMemo(() => {
+    const occurrences = new Map<string, number>();
+    return (privateSource?.activity ?? []).map((event) => {
+      const identity = JSON.stringify([event.at, event.state, event.message]);
+      const occurrence = occurrences.get(identity) ?? 0;
+      occurrences.set(identity, occurrence + 1);
+      return { event, key: `${identity}:${occurrence}` };
+    });
+  }, [privateSource?.activity]);
   const savedNotes = privateSource?.notes ?? "";
   const notesConflict = savedNotes !== notesBase && notes !== savedNotes;
-  useEffect(() => {
-    if (savedNotes !== notesBase && (notes === notesBase || notes === savedNotes)) {
-      setNotes(savedNotes);
-      setNotesBase(savedNotes);
-    }
-  }, [savedNotes, notesBase, notes]);
+  if (savedNotes !== notesBase && (notes === notesBase || notes === savedNotes)) {
+    setNotes(savedNotes);
+    setNotesBase(savedNotes);
+  }
   useEffect(() => {
     setDetail(null); setError(null);
     if (!privateSource) return;
     const controller = new AbortController();
-    void library.detail(privateSource.id, controller.signal).then((source) => { if (!controller.signal.aborted) setDetail(source); }).catch((failure: unknown) => { if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "Content could not be retrieved."); });
+    void loadDetail(privateSource.id, controller.signal).then((source) => { if (!controller.signal.aborted) setDetail(source); }).catch((failure: unknown) => { if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "Content could not be retrieved."); });
     return () => controller.abort();
-  }, [privateSource?.id, privateSource?.updatedAt, privateSource?.state, library.token]);
+  }, [privateSource?.id, privateSource?.updatedAt, privateSource?.state, loadDetail, token]);
   const related = sources.filter((source) => source.caseId === resource.caseId && source.versionId !== corpusSource?.versionId);
   async function save(changes: { notes?: string; caseId?: string | null }) {
     if (!privateSource || busy) return;
@@ -204,7 +211,7 @@ function SourceDetail({ resource, sources, caseOptions, tab, setTab, relatedView
         {privateSource?.sourceUrl && <p className="source-source-url">Source URL: <a href={privateSource.sourceUrl} target="_blank" rel="noreferrer">{privateSource.sourceUrl}</a></p>}
         {privateSource?.warning && <p className="notice notice-warning">{privateSource.warning}</p>}{privateSource?.error && <p className="notice notice-error">{privateSource.error}</p>}
         {corpusSource && corpusSource.availability !== "available" && <p className="notice notice-warning">{corpusSource.exclusionReasons.join(" ")}</p>}
-        <div className="source-action-row">{privateSource ? <><button className="secondary-button" onClick={() => setTab("Notes")}><Icon name="note" />{privateSource.notes ? "Edit notes" : "Add note"}</button><button className="secondary-button" disabled={processing} onClick={() => setAction({ kind: "move", open: true })}><Icon name="move" />Move to case</button><button className="secondary-button source-danger" onClick={() => setAction({ kind: "delete", open: true })}><Icon name="delete" />Delete source</button>{["Pending", "Failed", "Needs review"].includes(resource.status) && <button className="secondary-button" onClick={() => void library.process(privateSource.id)}>Process again</button>}</> : <button className="secondary-button" onClick={openContent} disabled={corpusSource!.availability !== "available"}>Read exact passages</button>}</div>
+        <div className="source-action-row">{privateSource ? <><button className="secondary-button" onClick={() => setTab("Notes")}><Icon name="note" />{privateSource.notes ? "Edit notes" : "Add note"}</button><button className="secondary-button" disabled={processing} onClick={() => { setTargetCase(resource.caseId); setAction({ kind: "move", open: true }); }}><Icon name="move" />Move to case</button><button className="secondary-button source-danger" onClick={() => setAction({ kind: "delete", open: true })}><Icon name="delete" />Delete source</button>{["Pending", "Failed", "Needs review"].includes(resource.status) && <button className="secondary-button" onClick={() => void library.process(privateSource.id)}>Process again</button>}</> : <button className="secondary-button" onClick={openContent} disabled={corpusSource!.availability !== "available"}>Read exact passages</button>}</div>
       </>}
       {tab === "Content" && (privateSource ? detail ? detail.text ? <><p className="source-reading-note">{detail.textKind.replaceAll("_", " ")} · Unreviewed client context, not checked evidence.</p><label className="source-document-search"><Icon name="search" /><span className="visually-hidden">Search in this document</span><input type="search" placeholder="Search in this document…" value={documentQuery} onChange={(event) => setDocumentQuery(event.target.value)} /></label><article className="source-private-content">{documentQuery && !detail.text.toLocaleLowerCase().includes(documentQuery.toLocaleLowerCase()) ? <p role="status">No matching text in this document.</p> : <pre><Highlight text={detail.text} query={documentQuery} /></pre>}</article><a className="primary-button source-use-ask" href="/" onClick={() => window.dispatchEvent(new CustomEvent("memory-bank:attach-source", { detail: privateSource.id }))}>Use reviewed text in Ask</a></> : <p>Extracted content is not ready. The exact original remains available; inspect its status in Overview.</p> : !error && <p role="status">Loading private content…</p> : <CorpusReader source={corpusSource!} inspect={inspect} />)}
       {tab === "Related" && <>
@@ -212,8 +219,8 @@ function SourceDetail({ resource, sources, caseOptions, tab, setTab, relatedView
         <p className="source-reading-note">Sources grouped by case—not a semantic relevance or evidence-approval claim.</p>
         {relatedView === "map" && resource.caseId ? <SourceMap resource={resource} related={related} select={select} mapViewport={mapViewport} /> : related.length ? <ul className="source-related-list">{related.map((source) => <li key={source.versionId}><button onClick={() => select(`corpus:${source.versionId}`)}><FileIcon type={source.mimeType} /><span><strong>{source.title}</strong><small>{source.versionId}</small></span><Icon name="right" /></button></li>)}</ul> : <p>No related sources have been established{privateSource && !privateSource.caseId ? ". Assign a case to organize this private file alongside its public case documents." : "."}</p>}
       </>}
-      {tab === "Notes" && (privateSource ? <form className="source-notes-form" onSubmit={(event) => { event.preventDefault(); void save({ notes }); }}><label htmlFor={`${tabId}-notes`}>Private source notes</label><p className="field-hint">Notes share this source’s access and expiry. They are not evidence and are not sent to Ask.</p><textarea id={`${tabId}-notes`} maxLength={4000} value={notes} onChange={(event) => { setNotes(event.target.value); setSaved(false); }} placeholder="Add context, questions, or things to review…" />{notesConflict && <p className="notice notice-warning" role="alert">These notes changed in another tab. Your draft has been kept. Copy it before loading the newer saved notes. <button className="text-button" type="button" onClick={() => { setNotes(savedNotes); setNotesBase(savedNotes); }}>Load latest notes</button></p>}<div><small>{notes.length} / 4,000</small><button className="primary-button" disabled={busy || processing || notesConflict || notes === privateSource.notes}>{busy ? "Saving…" : "Save notes"}</button></div>{processing && <p className="field-hint">Notes can be saved once processing finishes.</p>}{saved && <p role="status">Notes saved.</p>}</form> : <p>Public corpus documents are read-only. Notes and case assignment are available for your private sources.</p>)}
-      {tab === "Activity" && (privateSource ? <ol className="source-activity-list">{privateSource.activity.map((event, index) => <li key={`${event.at}-${index}`}><strong>{uploadStateLabels[event.state]}</strong><time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time><p>{event.message}</p></li>)}</ol> : <><h3>Retained source version</h3><p>{corpusSource!.versionId}</p><p className="field-hint">Source-stated date: {dateLabel(resource.date)}. No upload, author, or processing history is inferred for this curated document.</p><Status value={resource.status} /></>)}
+      {tab === "Notes" && (privateSource ? <form className="source-notes-form" onSubmit={(event) => { event.preventDefault(); void save({ notes }); }}><label htmlFor={`${tabId}-notes`}>Private source notes</label><p className="field-hint">Notes share this source’s access and expiry. They are not evidence and are not sent to Ask.</p><textarea id={`${tabId}-notes`} maxLength={4000} value={notes} onChange={(event) => { setNotes(event.target.value); setSaved(false); }} placeholder="Add context, questions, or things to review…" />{notesConflict && <p className="notice notice-warning" role="alert">These notes changed in another tab. Your draft has been kept. Copy it before loading the newer saved notes. <button className="text-button" type="button" onClick={() => { setNotes(savedNotes); setNotesBase(savedNotes); }}>Load latest notes</button></p>}<div><small>{notes.length} / 4,000</small><button className="primary-button" type="submit" disabled={busy || processing || notesConflict || notes === privateSource.notes}>{busy ? "Saving…" : "Save notes"}</button></div>{processing && <p className="field-hint">Notes can be saved once processing finishes.</p>}{saved && <p role="status">Notes saved.</p>}</form> : <p>Public corpus documents are read-only. Notes and case assignment are available for your private sources.</p>)}
+      {tab === "Activity" && (privateSource ? <ol className="source-activity-list">{activityRows.map(({ event, key }) => <li key={key}><strong>{uploadStateLabels[event.state]}</strong><time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time><p>{event.message}</p></li>)}</ol> : <><h3>Retained source version</h3><p>{corpusSource!.versionId}</p><p className="field-hint">Source-stated date: {dateLabel(resource.date)}. No upload, author, or processing history is inferred for this curated document.</p><Status value={resource.status} /></>)}
     </div>
     <Dialog.Root open={action.open} onOpenChange={(open) => { if (!open && !busy) setAction((current) => ({ ...current, open: false })); }}><Dialog.Portal className="source-dialog-portal" data-pointer-motion={pointerMotion || undefined}><Dialog.Backdrop className="evidence-backdrop" /><Dialog.Popup className="source-upload-dialog"><Dialog.Title>{action.kind === "delete" ? "Delete this source?" : "Move to case"}</Dialog.Title><Dialog.Description>{action.kind === "delete" ? `Remove ${resource.title}, its extracted content, and notes. Downloaded copies and previously submitted requests are not deleted.` : "Organize this private file under a case. It stays private and does not become historical evidence."}</Dialog.Description>{action.kind === "move" && <label className="source-form-field">Case<select value={targetCase} onChange={(event) => setTargetCase(event.target.value)}><option value="">Unassigned</option>{caseOptions.map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></label>}{error && <p className="notice notice-error" role="alert">{error}</p>}<div className="source-modal-actions"><button className="secondary-button" disabled={busy} onClick={() => setAction((current) => ({ ...current, open: false }))}>Cancel</button><button className={action.kind === "delete" ? "secondary-button source-danger" : "primary-button"} disabled={busy} onClick={() => {
       if (action.kind === "move") void save({ caseId: targetCase || null });
@@ -273,6 +280,7 @@ function CorpusReader({ source, inspect }: { source: SourceCatalogEntry; inspect
   const [selected, setSelected] = useState("");
   useEffect(() => {
     if (source.availability !== "available") return;
+    setPassages(null); setError(null);
     const controller = new AbortController();
     void Promise.all(source.passages.map(async (ref) => {
       const response = await fetch(`/api/evidence/passages/${encodeURIComponent(ref.passageId)}`, { signal: controller.signal });
@@ -282,7 +290,7 @@ function CorpusReader({ source, inspect }: { source: SourceCatalogEntry; inspect
       return body;
     })).then((items) => { if (!controller.signal.aborted) { setPassages(items); setSelected(items[0]?.passageId ?? ""); } }).catch((failure: unknown) => { if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "Passages are unavailable."); });
     return () => controller.abort();
-  }, [source.versionId]);
+  }, [source.versionId, source.availability, source.passages]);
   const matches = passages?.filter((passage) => `${passage.excerpt} ${passage.passageId}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())) ?? [];
   const current = matches.find((passage) => passage.passageId === selected) ?? matches[0];
   const index = current ? matches.indexOf(current) : -1;
