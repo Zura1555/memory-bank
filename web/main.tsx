@@ -629,7 +629,7 @@ function KnowledgeEntry({ record }: { record: KnowledgeCard }) {
           </button>)}</div>
           {selectedSource && <div className="knowledge-source-excerpt">
             <h4>Source excerpt</h4>
-            <EvidencePassage key={sourceKey(selectedSource)} sourceRef={selectedSource} />
+            <EvidencePassage key={sourceKey(selectedSource)} sourceRef={selectedSource} plainLanguage />
           </div>}
         </section>
         <a href={`?knowledge=${encodeURIComponent(record.recordId)}`}>Open this entry on its own</a>
@@ -638,7 +638,10 @@ function KnowledgeEntry({ record }: { record: KnowledgeCard }) {
   </article>;
 }
 
-function CuratedKnowledge({ caseId, recordId, inspect }: { caseId?: string; recordId?: string; inspect: InspectPassage }) {
+type CuratedKnowledgeProps = { caseId: string; inspect: InspectPassage; recordId?: never }
+  | { caseId?: undefined; inspect?: never; recordId?: string };
+
+function CuratedKnowledge({ caseId, recordId, inspect }: CuratedKnowledgeProps) {
   const [records, setRecords] = useState<KnowledgeCard[] | null>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
@@ -698,14 +701,13 @@ function CuratedKnowledge({ caseId, recordId, inspect }: { caseId?: string; reco
 }
 
 function KnowledgePage({ recordId }: { recordId?: string }) {
-  const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
-  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow knowledge-page" aria-labelledby="knowledge-title">
+  return <section className="workflow knowledge-page" aria-labelledby="knowledge-title">
     <div className="intro"><p className="eyebrow">Past experience</p><h1 id="knowledge-title">Knowledge from past work</h1>
       <span className="title-accent-bar" aria-hidden="true" />
       <p>Reviewed decisions and lessons to help teams learn from previous work.</p></div>
     {recordId && <a href="/?knowledge" className="back-link">← Back to all knowledge</a>}
-    <div className="screen"><CuratedKnowledge recordId={recordId} inspect={setPassageRef} /></div>
-  </section></EvidenceWorkspace>;
+    <div className="screen"><CuratedKnowledge recordId={recordId} /></div>
+  </section>;
 }
 
 function isSourceCatalogEntry(value: unknown): value is SourceCatalogEntry {
@@ -1157,7 +1159,7 @@ function readBrowserJobs() {
   catch { return { entries: [] as LocalJob[], error: "Local History/Saved persistence failed. Browser storage may be unavailable or full; use browser settings to clear retained data. The main workflow still works in this tab." }; }
 }
 
-function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef; preview?: boolean }) {
+function EvidencePassage({ sourceRef, preview = false, plainLanguage = false }: { sourceRef: SourceRef; preview?: boolean; plainLanguage?: boolean }) {
   const [passage, setPassage] = useState<PassageView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1200,16 +1202,16 @@ function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef;
       {error && <p role="alert" className="notice notice-error">{error}</p>}
       {passage && (
         <div className={`passage-content${preview ? " passage-preview" : ""}`}>
-          <div className="badge-row"><Badge tone="fictional">Past example</Badge></div>
+          <div className="badge-row">{plainLanguage ? <Badge tone="fictional">Past example</Badge> : <><Badge tone="fictional">Fictional record</Badge><Badge>{label(passage.sourceKind)}</Badge></>}</div>
           <h3>{passage.title}</h3>
-          {passage.statedDate && <p className="muted">{passage.statedDate}</p>}
+          {passage.statedDate ? <p className="muted">{plainLanguage ? passage.statedDate : `Stated date: ${passage.statedDate}`}</p> : !plainLanguage && <p className="muted">No stated date</p>}
           <blockquote>{passage.excerpt}</blockquote>
           {Object.keys(passage.location).length > 0 && (
             <dl className="location-list">
               {Object.entries(passage.location).map(([key, value]) => <div key={key}><dt>{key.replace(/([a-z])([A-Z])/g, "$1 $2")}</dt><dd>{Array.isArray(value) ? value.join(", ") : value === null ? "Not stated" : String(value)}</dd></div>)}
             </dl>
           )}
-          <div className="source-links"><a href={`/api/evidence/originals/${encodeURIComponent(passage.versionId)}`}>Download original</a></div>
+          <div className="source-links"><a href={`/api/evidence/originals/${encodeURIComponent(passage.versionId)}`}>{plainLanguage ? "Download original" : "Download exact fictional original"}</a></div>
         </div>
       )}
     </>
@@ -1251,22 +1253,23 @@ function EvidenceWorkspace({ sourceRef, onInspect, children }: {
     };
   }, [sourceRef, desktop, onInspect]);
   const content = sourceRef && <>
-    <p className="field-hint">This excerpt shows what was recorded at the time. Review it alongside the needs of the current request.</p>
+    <p className="field-hint">Inspecting a source does not select work or establish its applicability to this request.</p>
+    <p className="record-id">Case {sourceRef.caseId} · Artifact {sourceRef.artifactId} · Retained version {sourceRef.versionId} · Passage {sourceRef.passageId}</p>
     <EvidencePassage key={JSON.stringify(sourceRef)} sourceRef={sourceRef} />
   </>;
   return <div className="evidence-workspace" data-inspecting={open && desktop ? "" : undefined}>
     <div className="evidence-main">{children}</div>
-    {desktop ? open && <aside className="evidence-pane" aria-label="Source excerpt" tabIndex={-1} ref={pane}>
-      <div className="dialog-header"><div><p className="eyebrow">From the original source</p><h2>Source excerpt</h2></div>
-        <button className="icon-button" type="button" onClick={() => onInspect(null)} aria-label="Close source excerpt">Close</button></div>
+    {desktop ? open && <aside className="evidence-pane" aria-label="Source inspection" tabIndex={-1} ref={pane}>
+      <div className="dialog-header"><div><p className="eyebrow">Source inspection · Fictional</p><h2>Exact passage</h2></div>
+        <button className="icon-button" type="button" onClick={() => onInspect(null)} aria-label="Close passage">Close</button></div>
       {content}
     </aside> : <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onInspect(null); }}>
       <Dialog.Portal>
         <Dialog.Backdrop className="evidence-backdrop" />
         <Dialog.Popup className="evidence-dialog" aria-modal="true">
           <div className="dialog-header"><div>
-            <Dialog.Description className="eyebrow">From the original source</Dialog.Description>
-            <Dialog.Title>Source excerpt</Dialog.Title>
+            <Dialog.Description className="eyebrow">Source inspection · Fictional</Dialog.Description>
+            <Dialog.Title>Exact passage</Dialog.Title>
           </div><Dialog.Close className="icon-button" aria-label="Close passage">Close</Dialog.Close></div>
           {content}
         </Dialog.Popup>
