@@ -637,7 +637,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   min-width: 0;
   padding: env(safe-area-inset-top, 0px) max(var(--space-8), env(safe-area-inset-right, 0px)) 0 var(--space-8);
 }
-.workflow, .app-footer { width: min(100%, 68rem); margin-inline: auto; }
+.workflow, .app-footer, .app-header { width: min(100%, 88rem); margin-inline: auto; }
 .app-header {
   min-height: 4.1rem;
   display: flex;

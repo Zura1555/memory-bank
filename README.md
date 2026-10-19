@@ -156,6 +156,7 @@ Observed local verification (2026-10-16): the smoke failed against tmpfs after r
 ### Workspace shell and Sources
 
 The shared shell uses the installed Base UI Navigation Menu, Drawer, Button, Field, Input, Select, and Collapsible primitives with the existing Anduin CSS tokens. Desktop has a persistent 5rem icon rail that blends into the page canvas without a divider, shadow, or separate background strip: a quiet monogram, horizontally and vertically centered navigation, 44px targets, a soft active tile, and animated hover and keyboard-focus labels. Icon and active-state colors use the shared light palette regardless of system theme; screens up to 900px retain the labelled, swipe-dismissible navigation drawer without an edge border. Ask (`/`), Sources (`/?sources`), and reviewed knowledge (`/?knowledge` and permanent record links) are real destinations. History and Saved remain in a native disclosure inside Ask, not separate shell destinations. Global search, account controls, and decorative unsupported actions are omitted.
+Ask, Sources, reviewed knowledge, the shell header, and footer share a fluid container that fills available space up to 88rem; their edges stay aligned as the viewport grows or narrows.
 
 Sidebar navigation and the mobile menu use the MIT-licensed Hugeicons Stroke Rounded set (`@hugeicons/react` with `@hugeicons/core-free-icons`), imported by icon subpath and rendered at 22px with 1.5px strokes. Icons are decorative; the existing text labels and menu button label remain the accessible names.
 
