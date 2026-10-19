@@ -2,13 +2,18 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "re
 import { Button } from "@base-ui/react/button";
 import { Drawer } from "@base-ui/react/drawer";
 import { NavigationMenu } from "@base-ui/react/navigation-menu";
-import { Separator } from "@base-ui/react/separator";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import BookOpen01Icon from "@hugeicons/core-free-icons/BookOpen01Icon";
+import FolderLibraryIcon from "@hugeicons/core-free-icons/FolderLibraryIcon";
+import Menu01Icon from "@hugeicons/core-free-icons/Menu01Icon";
+import Message01Icon from "@hugeicons/core-free-icons/Message01Icon";
 
 type Page = "ask" | "sources" | "knowledge";
-const destinations: { page: Page; href: string; label: string; detail: string; icon: string }[] = [
-  { page: "ask", href: "/", label: "Ask", detail: "Work brief builder", icon: "M4 5h16v11H9l-5 4V5Z" },
-  { page: "sources", href: "/?sources", label: "Sources", detail: "Original corpus", icon: "M7 3h7l4 4v14H7V3Zm7 0v5h4M10 12h5m-5 4h5" },
-  { page: "knowledge", href: "/?knowledge", label: "Reviewed knowledge", detail: "Decisions & lessons", icon: "m4 6 8-3 8 3v14l-8-3-8 3V6Zm8-3v14" },
+const pageLabels: Record<Page, string> = { ask: "Ask", sources: "Sources", knowledge: "Reviewed knowledge" };
+const destinations: { page: Page; href: string; label: string; detail: string; icon: IconSvgElement }[] = [
+  { page: "ask", href: "/", label: pageLabels.ask, detail: "Work brief builder", icon: Message01Icon },
+  { page: "sources", href: "/?sources", label: pageLabels.sources, detail: "Corpus & private files", icon: FolderLibraryIcon },
+  { page: "knowledge", href: "/?knowledge", label: pageLabels.knowledge, detail: "Decisions & lessons", icon: BookOpen01Icon },
 ];
 
 function locationView() {
@@ -23,7 +28,7 @@ function Navigation({ page }: { page: Page }) {
     <NavigationMenu.List className="primary-nav-list">
       {destinations.map((item) => <NavigationMenu.Item key={item.page}>
         <NavigationMenu.Link href={item.href} active={page === item.page} aria-current={page === item.page ? "page" : undefined} className="nav-link">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={item.icon} /></svg>
+          <HugeiconsIcon icon={item.icon} size={22} strokeWidth={1.5} aria-hidden="true" focusable="false" />
           <span><span className="nav-label">{item.label}</span><span className="nav-detail">{item.detail}</span></span>
         </NavigationMenu.Link>
       </NavigationMenu.Item>)}
@@ -53,7 +58,7 @@ export function AppShell({ ask, sources, knowledge }: {
   }, []);
 
   useEffect(() => {
-    document.title = `${destinations.find((item) => item.page === view.page)!.label} — Memory Bank`;
+    document.title = `${pageLabels[view.page]} — Memory Bank`;
     if (previousLocation.current !== window.location.href) {
       previousLocation.current = window.location.href;
       main.current?.focus({ preventScroll: true });
@@ -82,15 +87,12 @@ export function AppShell({ ask, sources, knowledge }: {
     setDrawerOpen(false);
   }
 
-  const brand = <a href="/" className="brand" aria-label="Memory Bank home"><span className="brand-mark" aria-hidden="true">M</span><span>Memory Bank</span></a>;
+  const brand = <a href="/" className="brand" aria-label="Memory Bank home"><img className="brand-mark" src="/logo.png" width="32" height="32" alt="" /></a>;
   return <div className="app-shell" onClick={navigate}>
     <a className="skip-link" href="#main-content">Skip to content</a>
     <aside className="app-sidebar" aria-label="Workspace sidebar">
-      <div className="sidebar-brand">{brand}<span className="workspace-caption">Evidence Workbench</span></div>
-      <Separator className="shell-separator" />
-      <p className="nav-group-label">Navigation</p>
+      {brand}
       <Navigation page={view.page} />
-      <div className="sidebar-note"><span className="eyebrow">Verified Corpus</span><p>Fictional onboarding records</p></div>
     </aside>
     <div className="app-body">
       <header className="app-header">
@@ -98,14 +100,14 @@ export function AppShell({ ask, sources, knowledge }: {
           <Drawer.Root open={drawerOpen} onOpenChange={(open) => { if (open) navigating.current = false; setDrawerOpen(open); }}
             onOpenChangeComplete={(open) => { if (!open && navigating.current) main.current?.focus({ preventScroll: true }); }} swipeDirection="left">
             <Drawer.Trigger render={<Button className="icon-button mobile-nav-trigger" aria-label="Open navigation" />}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+              <HugeiconsIcon icon={Menu01Icon} size={22} strokeWidth={1.5} aria-hidden="true" focusable="false" />
             </Drawer.Trigger>
             <Drawer.Portal>
               <Drawer.Backdrop className="navigation-backdrop" />
               <Drawer.Viewport className="navigation-viewport">
                 <Drawer.Popup className="navigation-drawer" finalFocus={() => navigating.current ? false : true}>
                   <Drawer.Content>
-                    <div className="drawer-heading"><Drawer.Title className="drawer-title">Memory Bank</Drawer.Title><Drawer.Close render={<Button className="icon-button" aria-label="Close navigation" />}>Close</Drawer.Close></div>
+                    <div className="drawer-heading">{brand}<Drawer.Title className="drawer-title">Memory Bank</Drawer.Title><Drawer.Close render={<Button className="icon-button" aria-label="Close navigation" />}>Close</Drawer.Close></div>
                     <Drawer.Description className="muted">Evidence Workbench</Drawer.Description>
                     <Navigation page={view.page} />
                     <p className="drawer-disclaimer">Fictional evidence · checked before use</p>
@@ -115,7 +117,7 @@ export function AppShell({ ask, sources, knowledge }: {
             </Drawer.Portal>
           </Drawer.Root>
           <span className="header-workspace">Workspace <span aria-hidden="true">/</span></span>
-          <span className="header-page">{destinations.find((item) => item.page === view.page)!.label}</span>
+          <span className="header-page">{pageLabels[view.page]}</span>
         </div>
         <span className="fictional-banner">Fictional examples</span>
       </header>

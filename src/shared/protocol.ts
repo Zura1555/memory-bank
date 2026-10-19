@@ -211,6 +211,7 @@ export interface BriefResult {
 
 export interface CreateJobRequest {
   request: string;
+  attachmentIds?: string[];
 }
 
 export interface CreateJobResponse {

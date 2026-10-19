@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { Dialog } from "@base-ui/react/dialog";
 import { Select } from "@base-ui/react/select";
@@ -6,6 +6,9 @@ import { Button } from "@base-ui/react/button";
 import { Field } from "@base-ui/react/field";
 import { Input } from "@base-ui/react/input";
 import { Collapsible } from "@base-ui/react/collapsible";
+import { Popover } from "@base-ui/react/popover";
+import { Tabs } from "@base-ui/react/tabs";
+import { WorkflowDrawer } from "./workflow-drawer";
 import { AppShell } from "./shell";
 import type {
   ArtifactAssessment,
@@ -43,6 +46,10 @@ import { dispositionChanges } from "../src/ui/lineage";
 import { readLocalJobs, writeLocalJobs, reopenedJobMode, type LocalJob } from "../src/ui/local-jobs";
 import { checkedArtifactRefs } from "../src/ui/checked-sources";
 import { isPassage } from "../src/ui/passage";
+import { refinedRequest } from "../src/ui/request-thread";
+import { PrivateUploadsProvider, RequestAttachments, usePrivateUploads } from "./uploads";
+import { SourceLibrary } from "./source-library";
+import type { SourceIndexStatus } from "../src/shared/uploads";
 import "./styles.css";
 
 const phaseStates: PhaseState[] = ["not_started", "queued", "running", "ready", "failed", "reconciliation_required"];
@@ -71,6 +78,9 @@ async function admissionFailure(response: Response, subject: string): Promise<st
     ADMISSION_NOT_ENABLED: "Paid admission is disabled.",
     AUTHORIZED_CREDIT_EXHAUSTED: "Authorized credit is exhausted.",
     WORKFLOW_BUSY: "The service cannot admit another workflow yet.",
+    UPLOAD_NOT_FOUND: "An attached file is missing, expired, or belongs to another browser. Review the selected files.",
+    UPLOAD_TEXT_NOT_READY: "An attached file has no usable extracted text yet. Review its Sources status.",
+    ATTACHED_REQUEST_TOO_LARGE: "The request and complete attached text exceed 16 KiB. Remove an attachment or shorten the request; nothing was truncated.",
   };
   const code = isRecord(body) && isRecord(body.error) && typeof body.error.code === "string" ? body.error.code : "";
   return Object.hasOwn(reasons, code)
@@ -553,7 +563,7 @@ function AssessmentLineage({ previous, current, inspect }: { previous: PreviousA
   const previousClaims = new Map(previous.assessment.claims.map((claim) => [claim.claimId, claim]));
   const currentClaims = new Map((current?.claims ?? []).map((claim) => [claim.claimId, claim]));
   return <section className="content-section lineage-section" aria-label="Assessment lineage">
-    <h3>Clarification recheck</h3>
+    <h3>What changed after your follow-up</h3>
     <p>Previous selections were cleared. Only the immediately previous checked assessment is retained in this tab, until its original expiry.</p>
     {current ? <><p>Previous conclusion: {label(visibleConclusion(previous.assessment, previousClaims))}. Current conclusion: {label(visibleConclusion(current, currentClaims))}.</p>
       <h4>Supported disposition changes</h4>
@@ -611,7 +621,72 @@ function CuratedCard({ record, inspect }: { record: KnowledgeCard; inspect: Insp
   </article>;
 }
 
-function CuratedKnowledge({ caseId, recordId, inspect }: { caseId?: string; recordId?: string; inspect: InspectPassage }) {
+function KnowledgeEntry({ record }: { record: KnowledgeCard }) {
+  const [open, setOpen] = useState(false);
+  const [selectedSource, setSelectedSource] = useState<SourceRef | null>(null);
+  const decision = record.kind === "decision";
+  const title = decision ? record.choice : record.observation;
+  const summary = decision ? record.context : record.recommendedFutureAction;
+  const sources = Array.from(new Map(record.evidence.map((ref) => [
+    `${ref.versionId}\u0000${ref.passageId}`, ref,
+  ])).values());
+  const selectedSourceKey = selectedSource && `${selectedSource.versionId}\u0000${selectedSource.passageId}`;
+  const sourceKey = (source: SourceRef) => `${source.versionId}\u0000${source.passageId}`;
+  const reviewedDate = new Date(`${record.reviewedAt}T00:00:00`).toLocaleDateString(undefined, {
+    year: "numeric", month: "short", day: "numeric",
+  });
+  return <article className="knowledge-entry">
+    <div className="knowledge-entry-meta">
+      <span className={`knowledge-kind knowledge-kind-${record.kind}`}>{decision ? "Decision" : "Lesson"}</span>
+      <time dateTime={record.reviewedAt}>Reviewed {reviewedDate}</time>
+      <span className="knowledge-entry-basis">{record.basis === "source_fact" ? "From the source" : "Reviewed takeaway"}</span>
+    </div>
+    <h3>{title}</h3>
+    <p className="knowledge-entry-summary">{summary}</p>
+    {record.supersededById && <div className="knowledge-update">
+      <div><strong>This entry has been updated.</strong><span>Keep it for history; use the newer entry for current guidance.</span></div>
+      <a href={`?knowledge=${encodeURIComponent(record.supersededById)}`}>See updated entry</a>
+    </div>}
+    {record.supersedesId && <p className="knowledge-revision">This entry replaces an earlier decision.</p>}
+    <WorkflowDrawer open={open} onOpenChange={setOpen}
+      trigger={<Button type="button" className="secondary-button knowledge-entry-trigger">Read the full entry</Button>}
+      title={decision ? "Decision details" : "Lesson details"}
+      description={`Reviewed ${reviewedDate}. Past experience is a starting point, not a decision for a new request.`}>
+      <div className="knowledge-detail">
+        <section><h3>{decision ? "What happened" : "What we learned"}</h3><p>{decision ? record.context : record.observation}</p></section>
+        <section><h3>{decision ? "The decision" : "What to do next"}</h3><p>{decision ? record.choice : record.recommendedFutureAction}</p></section>
+        {decision && record.recordedRationale && <section><h3>Why</h3><p>{record.recordedRationale}</p></section>}
+        {decision && record.recordedRejectedAlternatives && record.recordedRejectedAlternatives.length > 0 && <section>
+          <h3>Other options considered</h3><ul>{record.recordedRejectedAlternatives.map((item) => <li key={item}>{item}</li>)}</ul>
+        </section>}
+        {!decision && <section><h3>What remains unknown</h3><p>{record.outcomeLimitations}</p></section>}
+        <section><h3>Where this applies</h3><p>{record.applicability}</p>
+          <p className="knowledge-caution">Check the source and the needs of the current request before applying this experience.</p>
+        </section>
+        {record.supersededById && <p className="knowledge-update"><span>This entry has a newer version.</span>
+          <a href={`?knowledge=${encodeURIComponent(record.supersededById)}`}>See updated entry</a></p>}
+        {record.supersedesId && <p className="knowledge-revision">This entry replaces an earlier decision. <a href={`?knowledge=${encodeURIComponent(record.supersedesId)}`}>Read the earlier entry</a></p>}
+        <section><h3>Source notes</h3><div className="knowledge-sources">{sources.map((source, index) =>
+          <button className="secondary-button" key={sourceKey(source)} type="button"
+            aria-label={`Read source note ${index + 1}`} aria-pressed={selectedSourceKey === sourceKey(source)}
+            onClick={() => setSelectedSource(source)}>
+            <span>Source note {index + 1}</span><span aria-hidden="true">Read excerpt →</span>
+          </button>)}</div>
+          {selectedSource && <div className="knowledge-source-excerpt">
+            <h4>Source excerpt</h4>
+            <EvidencePassage key={sourceKey(selectedSource)} sourceRef={selectedSource} plainLanguage />
+          </div>}
+        </section>
+        <a href={`?knowledge=${encodeURIComponent(record.recordId)}`}>Open this entry on its own</a>
+      </div>
+    </WorkflowDrawer>
+  </article>;
+}
+
+type CuratedKnowledgeProps = { caseId: string; inspect: InspectPassage; recordId?: never }
+  | { caseId?: undefined; inspect?: never; recordId?: string };
+
+function CuratedKnowledge({ caseId, recordId, inspect }: CuratedKnowledgeProps) {
   const [records, setRecords] = useState<KnowledgeCard[] | null>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
@@ -626,31 +701,58 @@ function CuratedKnowledge({ caseId, recordId, inspect }: { caseId?: string; reco
         const body: unknown = await response.json();
         const items: unknown = recordId ? [body] : isRecord(body) ? body.records : null;
         if (!Array.isArray(items) || !items.every(isKnowledgeCard)) throw new Error("Invalid knowledge response");
-        setRecords(items);
+        if (!controller.signal.aborted) setRecords(items);
       } catch {
         if (!controller.signal.aborted) setError(true);
       }
     })();
     return () => controller.abort();
   }, [caseId, recordId]);
-  if (error) return <p className="notice notice-error" role="alert">Reviewed knowledge or its exact source evidence is unavailable.</p>;
-  if (records === null) return <p role="status">Loading reviewed knowledge…</p>;
-  if (records.length === 0) return caseId ? null : <p>No reviewed knowledge records are available.</p>;
-  return <section className="content-section" aria-label="Reviewed decisions and lessons">
-    <h2>Reviewed decisions and lessons</h2>
-    <div className="claim-list">{records.map((record) => <CuratedCard key={record.recordId} record={record} inspect={inspect} />)}</div>
+  if (error) return <p className="notice notice-error" role="alert">We couldn’t load these entries. Please try again.</p>;
+  if (records === null) return <div className="knowledge-loading" role="status"><span className="knowledge-loading-indicator" aria-hidden="true" /><span>Gathering past decisions and lessons…</span></div>;
+  if (caseId) {
+    if (records.length === 0) return null;
+    return <section className="content-section" aria-label="Reviewed decisions and lessons">
+      <h3>Past decisions and lessons</h3>
+      <div className="claim-list">{records.map((record) => <CuratedCard key={record.recordId} record={record} inspect={inspect} />)}</div>
+    </section>;
+  }
+  if (records.length === 0) return <p className="knowledge-empty">No entries to explore yet.</p>;
+  const corrections = records.filter((record) => record.supersededById || record.supersedesId);
+  const groups = [
+    { value: "all", label: "All entries", entries: records },
+    { value: "decisions", label: "Decisions", entries: records.filter((record) => record.kind === "decision") },
+    { value: "lessons", label: "Lessons", entries: records.filter((record) => record.kind === "lesson") },
+    { value: "corrections", label: "Corrections", entries: corrections },
+  ];
+  return <section className="knowledge-library" aria-label="Reviewed decisions and lessons">
+    <div className="knowledge-library-heading"><div><h2>Past decisions and lessons</h2>
+      <p>What happened, what changed, and what to keep in mind next time.</p></div>
+      <span>{records.length} {records.length === 1 ? "entry" : "entries"}</span>
+    </div>
+    <Tabs.Root defaultValue="all" className="knowledge-tabs-root">
+      <Tabs.List className="workflow-tabs knowledge-tabs" aria-label="Filter past experience">
+        {groups.map((group) => <Tabs.Tab value={group.value} key={group.value}>
+          {group.label}<span className="knowledge-tab-count">{group.entries.length}</span>
+        </Tabs.Tab>)}
+      </Tabs.List>
+      {groups.map((group) => <Tabs.Panel value={group.value} key={group.value} className="knowledge-tab-panel">
+        {group.entries.length === 0 ? <p className="knowledge-empty">Nothing in this group yet.</p> :
+          <div className="knowledge-entry-list">{group.entries.map((record) =>
+            <KnowledgeEntry key={record.recordId} record={record} />)}</div>}
+      </Tabs.Panel>)}
+    </Tabs.Root>
   </section>;
 }
 
 function KnowledgePage({ recordId }: { recordId?: string }) {
-  const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
-  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow" aria-labelledby="knowledge-title">
-    <div className="intro"><p className="eyebrow">Curated Context</p><h1 id="knowledge-title">Reviewed knowledge</h1>
+  return <section className="workflow knowledge-page" aria-labelledby="knowledge-title">
+    <div className="intro"><p className="eyebrow">Past experience</p><h1 id="knowledge-title">Knowledge from past work</h1>
       <span className="title-accent-bar" aria-hidden="true" />
-      <p>Human-reviewed decisions and lessons from fictional past work.</p></div>
-    {recordId && <a href="/?knowledge" className="back-link">← All reviewed records</a>}
-    <div className="screen"><CuratedKnowledge recordId={recordId} inspect={setPassageRef} /></div>
-  </section></EvidenceWorkspace>;
+      <p>Reviewed decisions and lessons to help teams learn from previous work.</p></div>
+    {recordId && <a href="/?knowledge" className="back-link">← Back to all knowledge</a>}
+    <div className="screen"><CuratedKnowledge recordId={recordId} /></div>
+  </section>;
 }
 
 function isSourceCatalogEntry(value: unknown): value is SourceCatalogEntry {
@@ -705,7 +807,7 @@ function SourceFilter({ title, value, options, onChange }: {
 function SourcesPage() {
   const [sources, setSources] = useState<SourceCatalogEntry[] | null>(null);
   const [error, setError] = useState(false);
-  const [query, setQuery] = useState("");
+  const [indexStatus, setIndexStatus] = useState<Record<string, SourceIndexStatus> | null>(null);
   const [caseId, setCaseId] = useState("");
   const [mimeType, setMimeType] = useState("");
   const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
@@ -716,6 +818,15 @@ function SourcesPage() {
   const [semanticError, setSemanticError] = useState<string | null>(null);
   const semanticSearchController = useRef<AbortController | null>(null);
   useEffect(() => () => semanticSearchController.current?.abort(), []);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/sources/index-status", { signal: controller.signal }).then(async (response) => {
+      if (!response.ok) return;
+      const body: unknown = await response.json();
+      if (isRecord(body) && isRecord(body.status) && Object.values(body.status).every((status) => ["indexed", "partial", "pending", "unavailable"].includes(status as string)) && !controller.signal.aborted) setIndexStatus(body.status as Record<string, SourceIndexStatus>);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
@@ -741,10 +852,6 @@ function SourcesPage() {
   }, [sources]);
   const caseOptions = [...new Map((sources ?? []).map((source) => [source.caseId, { value: source.caseId, label: source.caseTitle }])).values()];
   const typeOptions = [...new Set((sources ?? []).map((source) => source.mimeType))].map((type) => ({ value: type, label: type }));
-  const needle = query.trim().toLocaleLowerCase();
-  const filtered = (sources ?? []).filter((source) => (!caseId || source.caseId === caseId)
-    && (!mimeType || source.mimeType === mimeType)
-    && (!needle || `${source.title} ${source.caseTitle}`.toLocaleLowerCase().includes(needle)));
   const cancelSemanticSearch = () => {
     semanticSearchController.current?.abort();
     semanticSearchController.current = null;
@@ -799,25 +906,19 @@ function SourcesPage() {
       }
     }
   };
-  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow" aria-labelledby="sources-title">
-    <div className="intro"><p className="eyebrow">Original Corpus</p><h1 id="sources-title">Sources</h1>
-      <span className="title-accent-bar" aria-hidden="true" />
-      <p>Browse fictional source versions, inspect retained passages, and download verified originals.</p></div>
-    {error ? <p className="notice notice-error" role="alert">The source inventory could not be verified. Reload to try again.</p>
-      : sources === null ? <p role="status">Loading source inventory…</p> : <>
-        <div className="screen source-controls" role="search" aria-label="Search the source corpus">
-          <Field.Root name="source-search"><Field.Label>Search sources</Field.Label>
-            <Input value={query} onValueChange={setQuery} placeholder="Source title or case name…" className="source-search" type="search" />
-          </Field.Root>
-          <SourceFilter title="Case" value={caseId} onChange={(next) => { if (next !== caseId) { cancelSemanticSearch(); setCaseId(next); } }} options={[{ value: "", label: "All cases" }, ...caseOptions]} />
-          <SourceFilter title="File type" value={mimeType} onChange={(next) => { if (next !== mimeType) { cancelSemanticSearch(); setMimeType(next); } }} options={[{ value: "", label: "All file types" }, ...typeOptions]} />
-          <Button className="secondary-button" type="button" onClick={() => { if (caseId || mimeType) cancelSemanticSearch(); setQuery(""); setCaseId(""); setMimeType(""); }} disabled={!query && !caseId && !mimeType}>Clear filters</Button>
-        </div>
+  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow sources-page" aria-labelledby="sources-title">
+    <SourceLibrary sources={sources ?? []} indexStatus={indexStatus} inspect={setPassageRef} loading={sources === null && !error} error={error} />
+    {sources !== null && !error && <details className="sources-search-disclosure">
+      <summary>Search public corpus passages by meaning</summary>
         <form className="screen source-semantic-search" role="search" aria-labelledby="semantic-search-title" aria-busy={semanticLoading} onSubmit={submitSemanticSearch}>
           <div>
             <h2 id="semantic-search-title">Semantic passage search</h2>
             <p id="semantic-search-privacy" className="field-hint">Only on submit, your query is sent to Cloudflare Workers AI for embedding. The app does not persist submitted queries; semantic search is separate from the checked assessment workflow.</p>
             <p id="semantic-search-note" className="field-hint">Semantic similarity is not applicability and is not a checked recommendation.</p>
+          </div>
+          <div className="source-controls">
+            <SourceFilter title="Search case" value={caseId} onChange={(next) => { cancelSemanticSearch(); setCaseId(next); }} options={[{ value: "", label: "All cases" }, ...caseOptions]} />
+            <SourceFilter title="Search file type" value={mimeType} onChange={(next) => { cancelSemanticSearch(); setMimeType(next); }} options={[{ value: "", label: "All file types" }, ...typeOptions]} />
           </div>
           <div className="source-semantic-controls">
             <Field.Root name="semantic-search"><Field.Label>Search passage meaning</Field.Label>
@@ -849,36 +950,7 @@ function SourcesPage() {
             </li>;
           })}</ol>
         </section>}
-        <p className="source-count muted" role="status">{filtered.length} of {sources.length} retained source versions</p>
-        {filtered.length === 0 ? <p className="screen empty-state">No sources match these filters. Clear the filters to browse the corpus.</p>
-          : <div className="source-catalog">{filtered.map((source) => <article className="screen source-card" key={`${source.caseId}-${source.artifactId}-${source.versionId}`}>
-            <div className="card-heading">
-              <div className="avatar-title-row">
-                <AvatarCircle name={source.caseTitle} />
-                <div>
-                  <p className="eyebrow">{source.caseTitle}</p>
-                  <h2>{source.title}</h2>
-                </div>
-              </div>
-              <Badge tone={source.availability}>{label(source.availability)}</Badge>
-            </div>
-            <div className="badge-row">
-              <span className="token-pill">[{source.caseId} / {source.artifactId}]</span>
-              <span className="token-pill">[{source.versionId}]</span>
-              <Badge tone="fictional">Fictional source</Badge>
-              <Badge>{source.mimeType}</Badge>
-              {[...new Set(source.passages.map((ref) => ref.sourceKind))].map((kind) => <Badge key={kind}>{label(kind)}</Badge>)}
-              <span className="muted small">{source.statedDate ? `Stated: ${source.statedDate}` : "No stated date"}</span>
-            </div>
-            {source.availability === "available" ? <div className="source-card-footer">
-              <a className="download-link" href={`/api/evidence/originals/${encodeURIComponent(source.versionId)}`}>Download exact fictional original</a>
-              {source.passages.length > 0 ? <Collapsible.Root className="source-passages">
-                <Collapsible.Trigger render={<Button className="secondary-button" />}>Inspect passages ({source.passages.length})</Collapsible.Trigger>
-                <Collapsible.Panel><SourceLinks refs={source.passages} inspect={setPassageRef} previews /></Collapsible.Panel>
-              </Collapsible.Root> : <p className="muted">No inspectable passages are retained.</p>}
-            </div> : <StringList title="Source unavailable for use" items={source.exclusionReasons} />}
-          </article>)}</div>}
-      </>}
+    </details>}
   </section></EvidenceWorkspace>;
 }
 
@@ -1143,13 +1215,13 @@ function readBrowserJobs() {
   catch { return { entries: [] as LocalJob[], error: "Local History/Saved persistence failed. Browser storage may be unavailable or full; use browser settings to clear retained data. The main workflow still works in this tab." }; }
 }
 
-function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef; preview?: boolean }) {
+function EvidencePassage({ sourceRef, preview = false, plainLanguage = false }: { sourceRef: SourceRef; preview?: boolean; plainLanguage?: boolean }) {
   const [passage, setPassage] = useState<PassageView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { caseId, artifactId, versionId, passageId } = sourceRef;
 
   useEffect(() => {
-    const passageId = sourceRef.passageId;
     const controller = new AbortController();
     let active = true;
     setPassage(null);
@@ -1162,7 +1234,7 @@ function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef;
       })
       .then((body) => {
         if (!active) return;
-        if (!isPassage(body, sourceRef)) {
+        if (!isPassage(body, { caseId, artifactId, versionId, passageId })) {
           setError("This passage could not be verified as the requested fictional source.");
           return;
         }
@@ -1178,7 +1250,7 @@ function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef;
       active = false;
       controller.abort();
     };
-  }, [sourceRef.caseId, sourceRef.artifactId, sourceRef.versionId, sourceRef.passageId]);
+  }, [caseId, artifactId, versionId, passageId]);
 
   return (
     <>
@@ -1186,16 +1258,16 @@ function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef;
       {error && <p role="alert" className="notice notice-error">{error}</p>}
       {passage && (
         <div className={`passage-content${preview ? " passage-preview" : ""}`}>
-          <div className="badge-row"><Badge tone="fictional">Fictional record</Badge><Badge>{label(passage.sourceKind)}</Badge></div>
+          <div className="badge-row">{plainLanguage ? <Badge tone="fictional">Past example</Badge> : <><Badge tone="fictional">Fictional record</Badge><Badge>{label(passage.sourceKind)}</Badge></>}</div>
           <h3>{passage.title}</h3>
-          <p className="muted">{passage.statedDate ? `Stated date: ${passage.statedDate}` : "No stated date"}</p>
+          {passage.statedDate ? <p className="muted">{plainLanguage ? passage.statedDate : `Stated date: ${passage.statedDate}`}</p> : !plainLanguage && <p className="muted">No stated date</p>}
           <blockquote>{passage.excerpt}</blockquote>
           {Object.keys(passage.location).length > 0 && (
             <dl className="location-list">
               {Object.entries(passage.location).map(([key, value]) => <div key={key}><dt>{key.replace(/([a-z])([A-Z])/g, "$1 $2")}</dt><dd>{Array.isArray(value) ? value.join(", ") : value === null ? "Not stated" : String(value)}</dd></div>)}
             </dl>
           )}
-          <div className="source-links"><a href={`/api/evidence/originals/${encodeURIComponent(passage.versionId)}`}>Download exact fictional original</a></div>
+          <div className="source-links"><a href={`/api/evidence/originals/${encodeURIComponent(passage.versionId)}`}>{plainLanguage ? "Download original" : "Download exact fictional original"}</a></div>
         </div>
       )}
     </>
@@ -1210,6 +1282,7 @@ function EvidenceWorkspace({ sourceRef, onInspect, children }: {
   const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
   const pane = useRef<HTMLElement>(null);
   const open = sourceRef !== null;
+  const closeInspection = useEffectEvent(() => onInspect(null));
   useEffect(() => {
     const media = window.matchMedia("(min-width: 1280px)");
     const update = () => setDesktop(media.matches);
@@ -1224,7 +1297,7 @@ function EvidenceWorkspace({ sourceRef, onInspect, children }: {
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
-        onInspect(null);
+        closeInspection();
       }
     };
     document.addEventListener("keydown", escape);
@@ -1235,7 +1308,7 @@ function EvidenceWorkspace({ sourceRef, onInspect, children }: {
         opener.focus({ preventScroll: true });
       }
     };
-  }, [sourceRef, desktop, onInspect]);
+  }, [sourceRef, open, desktop]);
   const content = sourceRef && <>
     <p className="field-hint">Inspecting a source does not select work or establish its applicability to this request.</p>
     <p className="record-id">Case {sourceRef.caseId} · Artifact {sourceRef.artifactId} · Retained version {sourceRef.versionId} · Passage {sourceRef.passageId}</p>
@@ -1264,6 +1337,24 @@ function EvidenceWorkspace({ sourceRef, onInspect, children }: {
 
 const stepNames = ["Client request", "Checked examples", "Selected work", "Checked brief"];
 
+const assessmentSteps = [
+  ["assembling", "Assembling source evidence"],
+  ["drafting", "Drafting comparisons — not yet checked"],
+  ["reference_check", "Checking source references"],
+  ["support_review", "Independent support review"],
+] as const;
+
+function AssessmentProgress({ stage }: { stage?: JobStage }) {
+  const current = assessmentSteps.findIndex(([key]) => key === stage);
+  return <ol className="assessment-progress" aria-label="Evidence check stages">{assessmentSteps.map(([key, title], index) => (
+    <li key={key} aria-current={current === index ? "step" : undefined} data-complete={index < current || undefined}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+        {index < current ? <path d="m5 12 4 4 10-10" /> : <circle cx="12" cy="12" r={current === index ? 6 : 8} fill={current === index ? "currentColor" : "none"} />}
+      </svg>{title}
+    </li>
+  ))}</ol>;
+}
+
 // Authored from public fictional corpus requests, never held-out evaluation requests.
 const suggestedRequests: { title: string; basis: string; focus: string; tone: AvatarTone; request: string }[] = [
   { title: "Plan a sandbox CSV import", basis: "Cedar Supply", focus: "CSV mapping & reconciliation", tone: "blue", request: "Plan a sandbox import of active supplier records from a UTF-8 CSV. Preserve source keys and reconcile accepted, rejected, and duplicate rows. What past mapping and reconciliation work could help, and what must we verify for a new target? No production writes are authorized." },
@@ -1271,9 +1362,46 @@ const suggestedRequests: { title: string; basis: string; focus: string; tone: Av
   { title: "Prepare an operator handover", basis: "Ibis Foods", focus: "Runbook & recovery drill", tone: "amber", request: "Prepare a test-environment handover of a nightly inventory import to a primary and backup operator. We need a runbook, escalation contact, recovery procedure, and witnessed recovery exercise. Which past work is useful, and which acceptance gaps remain? Production scheduling is out of scope." },
 ];
 
+function SuggestionList({ suggestions, onChoose }: { suggestions: typeof suggestedRequests; onChoose: (request: string) => void }) {
+  return <div className="suggestion-list">{suggestions.map((suggestion) => <Button key={suggestion.title} type="button" className="suggestion-row" onClick={() => onChoose(suggestion.request)}>
+    <AvatarCircle name={suggestion.basis} tone={suggestion.tone} />
+    <span className="suggestion-copy"><strong>{suggestion.title}</strong><span>{suggestion.basis}</span><span>{suggestion.focus}</span></span>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+  </Button>)}</div>;
+}
+
+function TemplatePicker({ onChoose }: { onChoose: (request: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const applied = useRef(false);
+  const matches = suggestedRequests.filter((item) => `${item.title} ${item.basis} ${item.focus}`.toLowerCase().includes(query.trim().toLowerCase()));
+  return <WorkflowDrawer open={open} onOpenChange={(next) => { if (next) applied.current = false; setOpen(next); }}
+    trigger={<Button type="button" className="text-button">Use a template</Button>}
+    title="Use a template" description="Choose a fictional scenario, then edit it for your client. Nothing is submitted automatically."
+    finalFocus={() => applied.current ? document.getElementById("client-request") : true}>
+    <label className="field-label" htmlFor="template-search">Search templates</label>
+    <Input id="template-search" className="source-search" value={query} onValueChange={setQuery} placeholder="Search scenarios, clients, or focus…" />
+    <SuggestionList suggestions={matches} onChoose={(value) => { applied.current = true; onChoose(value); setOpen(false); }} />
+    {matches.length === 0 && <div className="empty-state"><p>No templates match “{query}”.</p><Button type="button" className="secondary-button" onClick={() => setQuery("")}>Clear search</Button></div>}
+  </WorkflowDrawer>;
+}
+
 function App({ active }: { active: boolean }) {
   const [step, setStep] = useState(1);
   const [request, setRequest] = useState("");
+  const uploads = usePrivateUploads();
+  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
+  useEffect(() => {
+    const attach = (event: Event) => {
+      const id: unknown = (event as CustomEvent<unknown>).detail;
+      if (typeof id !== "string") return;
+      startNewRequest();
+      setAttachmentIds((ids) => ids.includes(id) ? ids : [...ids.slice(0, 4), id]);
+      window.setTimeout(() => document.getElementById("client-request")?.focus(), 0);
+    };
+    window.addEventListener("memory-bank:attach-source", attach);
+    return () => window.removeEventListener("memory-bank:attach-source", attach);
+  }, []);
   const [modelInfo, setModelInfo] = useState<{ provider: string; model: string; endpoint: string } | null>(null);
   const [modelInfoError, setModelInfoError] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
@@ -1286,10 +1414,11 @@ function App({ active }: { active: boolean }) {
   const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const [questionAnswers, setQuestionAnswers] = useState("");
-  const [submittedClarification, setSubmittedClarification] = useState<{ context: string; answers: string } | null>(null);
+  const [requestMessages, setRequestMessages] = useState<{ id: string; text: string }[]>([]);
   const [submittingBrief, setSubmittingBrief] = useState(false);
   const [localData, setLocalData] = useState(readBrowserJobs);
   const [library, setLibrary] = useState<"History" | "Saved">("History");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const sessionGeneration = useRef(0);
   const requestSubmissionId = useRef(0);
   const requestController = useRef<AbortController | null>(null);
@@ -1366,7 +1495,10 @@ function App({ active }: { active: boolean }) {
       document.removeEventListener("visibilitychange", expire);
     };
   }, [session]);
-  useEffect(() => { if (!active) setPassageRef(null); }, [active]);
+  if (!active && (passageRef !== null || historyOpen)) {
+    setPassageRef(null);
+    setHistoryOpen(false);
+  }
 
   useEffect(() => {
     if (!previousJob) return;
@@ -1434,6 +1566,7 @@ function App({ active }: { active: boolean }) {
         }
         setJob(body);
         setRequest(body.request);
+        setAttachmentIds([]);
         setServiceError(null);
         if (pollMode === "restore") setStep(mode === "brief" ? 4 : 2);
         const currentState = (pollMode === "restore" ? mode : pollMode) === "assessment" ? body.assessmentState : body.briefState;
@@ -1515,13 +1648,20 @@ function App({ active }: { active: boolean }) {
   const selectionsValid = selectedCount > 0 && selections.length === selectedCount && selections.every((selection) => selection.passageIds.length > 0);
 
   async function createAssessment(requestText: string, clarification = false) {
-    const trimmed = requestText.trim();
+    const attached = attachmentIds;
+    let trimmed: string;
+    try {
+      trimmed = refinedRequest(requestText.trim() || (attached.length ? "Use the attached files as the new client's request." : ""));
+    } catch (error) {
+      setServiceError((error as Error).message);
+      return;
+    }
     if (!trimmed || submittingRequest || !modelInfo) return;
     if (clarification && job?.assessment && job.assessmentState === "ready" && Date.parse(job.expiresAt) > Date.now()) {
       setPreviousJob({ request: job.request, expiresAt: job.expiresAt, assessment: job.assessment });
     } else if (!clarification) {
       setPreviousJob(null);
-      setSubmittedClarification(null);
+      setRequestMessages([{ id: "initial", text: trimmed }]);
     }
     sessionGeneration.current += 1;
     pollController.current?.abort();
@@ -1536,10 +1676,6 @@ function App({ active }: { active: boolean }) {
     setRequest(trimmed);
     setQuestionAnswers("");
     setServiceError(null);
-    if (new TextEncoder().encode(trimmed).byteLength > 16 * 1024) {
-      setServiceError("The request and answers must stay within 16 KiB. No new assessment was admitted; previous selections and brief were cleared.");
-      return;
-    }
     const submissionId = ++requestSubmissionId.current;
     requestController.current?.abort();
     const controller = new AbortController();
@@ -1547,10 +1683,10 @@ function App({ active }: { active: boolean }) {
     setSubmittingRequest(true);
     setServiceError(null);
     try {
-      const body: CreateJobRequest = { request: trimmed };
+      const body: CreateJobRequest = { request: trimmed, ...(attached.length ? { attachmentIds: attached } : {}) };
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(attached.length && uploads.token ? { Authorization: `Bearer ${uploads.token}` } : {}) },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -1599,9 +1735,17 @@ function App({ active }: { active: boolean }) {
   async function submitClarifications(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const answers = questionAnswers.trim();
-    if (!answers || submittingRequest) return;
-    setSubmittedClarification({ context: request.trim(), answers });
-    await createAssessment(`${request.trim()}\n\nClarifications supplied by the delivery lead:\n${answers}`, true);
+    if (!answers || rechecking || !modelInfo) return;
+    let updated: string;
+    try {
+      updated = refinedRequest(request, answers);
+    } catch (error) {
+      setServiceError((error as Error).message);
+      return;
+    }
+    const message = { id: crypto.randomUUID(), text: answers };
+    setRequestMessages((messages) => [...(messages.length ? messages : [{ id: "initial", text: request }]), message]);
+    await createAssessment(updated, true);
   }
 
   function startNewRequest() {
@@ -1614,6 +1758,8 @@ function App({ active }: { active: boolean }) {
     briefController.current = null;
     pollController.current = null;
     setStep(1);
+    setRequest("");
+    setAttachmentIds([]);
     setSession(null);
     setJob(null);
     setPreviousJob(null);
@@ -1621,7 +1767,7 @@ function App({ active }: { active: boolean }) {
     setPollMode(null);
     setWorkDrafts({});
     setQuestionAnswers("");
-    setSubmittedClarification(null);
+    setRequestMessages([]);
     setSubmittingRequest(false);
     setSubmittingBrief(false);
     setServiceError(null);
@@ -1705,8 +1851,6 @@ function App({ active }: { active: boolean }) {
   const briefState = job?.briefState ?? "not_started";
   const assessmentAvailable = assessmentState === "ready" && !!assessment;
   const rechecking = submittingRequest || pollMode === "assessment" || pollMode === "restore";
-  const questions = assessmentAvailable ? assessment : previousJob?.assessment;
-  const questionClaims = assessmentAvailable ? assessmentClaims : new Map((questions?.claims ?? []).map((claim) => [claim.claimId, claim]));
   const selectableWorkChoices = useMemo(() => workChoices.filter(({ caseId, availability, item, selectionRefs }) =>
     item.disposition !== null && item.availability !== "unavailable" && (availability === "available" || availability === "partial")
     && assessment?.artifactReviews.some((review) => review.caseId === caseId && review.artifactId === item.artifactId && review.role === "starting_point" && review.verdict === "supported" && review.decision.disposition === item.disposition)
@@ -1726,23 +1870,16 @@ function App({ active }: { active: boolean }) {
       <section className="workflow" aria-labelledby="workflow-title">
         <div className="intro-toolbar">
           <div className="intro">
-            <p className="eyebrow">Ask Memory Bank · Fictional Evidence</p>
+            <Badge tone="fictional">Fictional examples only</Badge>
             <h1 id="workflow-title">What can past work help you deliver?</h1>
-            <span className="title-accent-bar" aria-hidden="true" />
             <p>Match client constraints against verified past examples and assemble an evidence-grounded reuse brief.</p>
           </div>
-          {(session || previousJob || step > 1) && <div className="workflow-actions"><Button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</Button></div>}
-        </div>
-        <details className="local-library">
-          <summary>
-            <span>History and Saved</span>
-            <Badge>{`${localData.entries.length}`}</Badge>
-          </summary>
+          <div className="workflow-actions">
+            <WorkflowDrawer open={historyOpen && active} onOpenChange={setHistoryOpen}
+              trigger={<Button className="secondary-button" type="button">History &amp; Saved <Badge>{`${localData.entries.length}`}</Badge></Button>}
+              title="History and Saved" description="This browser/device only. Bookmarks expire seven days after creation; reopening checks live status without regenerating.">
+              <div className="local-library">
           <div className="local-library-header">
-            <div>
-              <h2 id="local-library-title">History and Saved</h2>
-              <p className="field-hint">This browser/device only — bookmarks expire 7 days after job creation. Reopen checks live server status without regenerating.</p>
-            </div>
             <div className="action-row" role="group" aria-label="Local job lists">
               <button className="secondary-button" type="button" aria-pressed={library === "History"} onClick={() => setLibrary("History")}>History</button>
               <button className="secondary-button" type="button" aria-pressed={library === "Saved"} onClick={() => setLibrary("Saved")}>Saved</button>
@@ -1761,7 +1898,7 @@ function App({ active }: { active: boolean }) {
                   </div>
                 </div>
                 <div className="action-row">
-                  <button className="secondary-button" type="button" onClick={() => reopen(entry)} aria-label={`Reopen ${entry.label}`}>Reopen ›</button>
+                  <button className="secondary-button" type="button" onClick={() => { setHistoryOpen(false); reopen(entry); }} aria-label={`Reopen ${entry.label}`}>Reopen ›</button>
                   {entry.saved && <button className="text-button" type="button" onClick={() => changeLocalJobs((entries) => entries.map((item) => item.jobId === entry.jobId ? { ...item, saved: false } : item))} aria-label={`Unsave ${entry.label}`}>Unsave</button>}
                   <button className="text-button" type="button" onClick={() => changeLocalJobs((entries) => entries.filter((item) => item.jobId !== entry.jobId))} aria-label={`Remove ${entry.label}`}>Remove</button>
                 </div>
@@ -1769,7 +1906,11 @@ function App({ active }: { active: boolean }) {
             ))}
           </ul>
           {!localData.entries.some((entry) => library === "History" || entry.saved) && <p className="empty-state">No local {library.toLowerCase()} entries.</p>}
-        </details>
+              </div>
+            </WorkflowDrawer>
+            {(session || previousJob || step > 1) && <Button className="secondary-button new-request-button" type="button" onClick={startNewRequest}>New request</Button>}
+          </div>
+        </div>
         <nav className="step-nav" aria-label="Workflow steps">
           <ol>{stepNames.map((name, index) => (
             <li key={name} className={step === index + 1 ? "step-current" : step > index + 1 ? "step-complete" : ""} aria-current={step === index + 1 ? "step" : undefined}>
@@ -1779,11 +1920,11 @@ function App({ active }: { active: boolean }) {
         </nav>
 
         {serviceError && <p role="alert" className="notice notice-error">{serviceError}</p>}
-        {step > 1 && (request.trim() || submittedClarification) && <section className="submitted-request" aria-label="Submitted request">
+        {step > 1 && request.trim() && <section className="submitted-request request-thread" aria-labelledby="conversation-title">
           <div className="submitted-request-top">
             <div>
-              <h2>Client request</h2>
-              <p>{submittedClarification?.context ?? request.trim()}</p>
+              <h2 id="conversation-title">Your conversation</h2>
+              <p className="field-hint">Follow-ups refine this request. Only the latest checked findings can be selected.</p>
             </div>
             {session && job && (assessmentAvailable || (job.briefState === "ready" && job.brief)) && (
               <button className="secondary-button" type="button" aria-pressed={localData.entries.some((entry) => entry.jobId === session.jobId && entry.saved)} onClick={toggleSaved}>
@@ -1791,29 +1932,48 @@ function App({ active }: { active: boolean }) {
               </button>
             )}
           </div>
-          {submittedClarification && <div className="submitted-clarification-box"><h3>Submitted clarification</h3><p>{submittedClarification.answers}</p></div>}
+          <ol className="request-messages" aria-label="Request messages">
+            {(requestMessages.length ? requestMessages : [{ id: "initial", text: request }]).map((message, index) => <li className="request-message" key={message.id}>
+              <span className="eyebrow">{index === 0 ? "You · initial request" : `You · follow-up ${index}`}</span>
+              <p>{message.text}</p>
+            </li>)}
+          </ol>
+          {requestMessages.length > 1 && <p className="thread-recheck-note" role="status">Earlier findings are superseded. Previous selections and brief were cleared.</p>}
+          {step === 2 && <div className="thread-response" aria-labelledby="follow-up-title">
+            <p className="eyebrow">Memory Bank · evidence-backed review</p>
+            <h3 id="follow-up-title">{rechecking ? "Checking your request against past work" : assessmentAvailable ? "Checked findings are ready below" : "No current checked findings"}</h3>
+            {assessmentAvailable && <ClaimGroup title="Before you reuse this work" ids={assessment.clarifyingClaimIds} claims={assessmentClaims} inspect={setPassageRef} />}
+            <form className="request-form follow-up-form" onSubmit={submitClarifications}>
+              <label htmlFor="follow-up-message">Follow-up or updated requirements</label>
+              <textarea id="follow-up-message" value={questionAnswers} onChange={(event) => setQuestionAnswers(event.currentTarget.value)} rows={3} maxLength={4000} required disabled={rechecking} aria-describedby="follow-up-hint" placeholder="Answer a question, add a constraint, or correct the scope…" />
+              <p id="follow-up-hint" className="field-hint">Sends the full request and attached text through a fresh evidence check. Earlier results, selections, and brief are superseded. No work is executed.</p>
+              <div className="action-row">
+                <Button className="primary-button" type="submit" disabled={rechecking || !questionAnswers.trim() || !modelInfo}>{rechecking ? "Checking evidence…" : "Send follow-up"}</Button>
+              </div>
+            </form>
+          </div>}
+          {step > 2 && <Button className="secondary-button" type="button" onClick={() => setStep(2)}>Continue conversation</Button>}
           {job && <p className="field-hint job-expiry-line">Expires <time dateTime={job.expiresAt}>{new Date(job.expiresAt).toLocaleString()}</time> (7-day job window · downloaded packs stay on your device).</p>}
         </section>}
         {step > 1 && job && <JobTimings job={job} />}
 
-        {step === 1 && (
+        {step === 1 && active && (
           <div className="step-one-grid">
-            <section className="screen" aria-labelledby="request-title">
-              <div className="screen-heading">
-                <div className="card-icon-title">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
-                  <h2 id="request-title">What does the client need?</h2>
-                </div>
-                <span className="title-accent-bar" aria-hidden="true" />
-                <p>Step 1 of 4 · Describe the onboarding scope and constraints to evaluate against verified past cases.</p>
-              </div>
+            <section className="screen request-composer" aria-labelledby="request-title">
+              <div className="composer-heading"><h2 id="request-title">Start a conversation</h2><TemplatePicker onChoose={setRequest} /></div>
               <form onSubmit={submitRequest} className="request-form">
                 <Field.Root name="request">
                   <Field.Label htmlFor="client-request">Client request <span className="required-star" aria-hidden="true">*</span></Field.Label>
-                  <Field.Description id="request-hint" className="field-hint">Target environment, scale, access requirements, and acceptance criteria. Do not include sensitive personal data.</Field.Description>
-                  <Field.Control render={<textarea id="client-request" aria-describedby="request-hint request-processing request-retention" rows={6} maxLength={6000} required placeholder="Enter client onboarding scope and constraints..." />} value={request} onValueChange={setRequest} />
-                  <details className="privacy-disclosure">
-                    <summary>Data processing &amp; 7-day retention policy</summary>
+                  <Field.Description id="request-hint" className="field-hint">Tell us what arrived from the client and what you need to deliver. Add files for context; refine the request with follow-ups after checking. Do not include sensitive personal data.</Field.Description>
+                  <Field.Control render={<textarea id="client-request" aria-describedby="request-hint request-privacy-summary" rows={8} maxLength={6000} required={!attachmentIds.length} placeholder="What past work could help with this client request?" />} value={request} onValueChange={setRequest} />
+                  <span className="request-character-count">{request.length.toLocaleString()} / 6,000</span>
+                </Field.Root>
+                <RequestAttachments selected={attachmentIds} onChange={setAttachmentIds} />
+                <p id="request-privacy-summary" className="field-hint">Sent to the configured model. Application access expires after 7 days.</p>
+                <Popover.Root>
+                  <Popover.Trigger render={<Button className="privacy-trigger" type="button" />}>Data processing &amp; 7-day retention policy <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg></Popover.Trigger>
+                  <Popover.Portal><Popover.Positioner side="bottom" align="start" sideOffset={8} className="privacy-positioner"><Popover.Popup className="privacy-popover">
+                    <div className="workflow-drawer-header"><Popover.Title>Data processing &amp; retention</Popover.Title><Popover.Close className="icon-button" aria-label="Close data policy">Close</Popover.Close></div>
                     <p id="request-processing" className="field-hint">
                       {modelInfo ? <>Requests, fictional evidence, and generated drafts/reviews are sent to <a href={modelInfo.endpoint}>{modelInfo.endpoint}</a> using the {modelInfo.provider} API and model <code>{modelInfo.model}</code>.{" "}
                         {modelInfo.endpoint === "https://openrouter.ai" ? <><a href="https://openrouter.ai/privacy">OpenRouter</a> routes requests to <a href="https://developers.openai.com/api/docs/guides/your-data">OpenAI</a>.{" "}</>
@@ -1825,40 +1985,21 @@ function App({ active }: { active: boolean }) {
                       The deployed app uses <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a> for processing/storage and <a href="https://neon.com/privacy-policy">Neon</a> for job storage; development uses local platform/database equivalents.
                     </p>
                     <p id="request-retention" className="field-hint">Application request/results and job access expire seven days after creation; minimal billing and replay-prevention records remain. Provider/platform copies follow the linked policies, not this seven-day expiry; backup retention is separate. Downloaded packs remain on your device.</p>
-                  </details>
-                </Field.Root>
+                  </Popover.Popup></Popover.Positioner></Popover.Portal>
+                </Popover.Root>
+                {modelInfoError && <p className="notice notice-error" role="alert">Model processing configuration is unavailable. Reload before submitting.</p>}
                 <div className="form-submit-row">
-                  <Button className="primary-button" type="submit" disabled={submittingRequest || !request.trim() || !modelInfo}>{submittingRequest ? "Sending request…" : "Check past examples"}</Button>
+                  <Button className="primary-button" type="submit" disabled={submittingRequest || (!request.trim() && !attachmentIds.length) || attachmentIds.some((id) => !uploads.sources.some((source) => source.id === id && source.hasText)) || !modelInfo}>{submittingRequest ? "Sending request…" : "Send request"}</Button>
                 </div>
               </form>
             </section>
             <section className="screen request-suggestions" aria-labelledby="suggestions-title">
               <div className="suggestions-header">
-                <h3 id="suggestions-title">Starter templates</h3>
-                <p className="field-hint">Select a fictional scenario to populate the request editor above.</p>
+                <h3 id="suggestions-title">Suggested requests</h3>
+                <p className="field-hint">Start with a fictional scenario. Make it your own.</p>
               </div>
-              <div className="suggestion-table" role="list">
-                <div className="suggestion-table-head" aria-hidden="true">
-                  <span>Scenario</span>
-                  <span>Corpus case</span>
-                  <span>Focus</span>
-                  <span />
-                </div>
-                {suggestedRequests.map((suggestion) => <Button key={suggestion.title} type="button" className="suggestion-row" onClick={() => {
-                  setRequest(suggestion.request);
-                  document.getElementById("client-request")?.focus();
-                }}>
-                  <span className="suggestion-main">
-                    <AvatarCircle name={suggestion.basis} tone={suggestion.tone} />
-                    <span className="suggestion-title">{suggestion.title}</span>
-                  </span>
-                  <span className="suggestion-cell">{suggestion.basis}</span>
-                  <span className="suggestion-cell">{suggestion.focus}</span>
-                  <span className="suggestion-chevron" aria-hidden="true">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
-                  </span>
-                </Button>)}
-              </div>
+              <SuggestionList suggestions={suggestedRequests} onChoose={(value) => { setRequest(value); document.getElementById("client-request")?.focus(); }} />
+              <p className="suggestions-footnote">Templates fill the editor, not the submit button. Review the scope and constraints before checking.</p>
             </section>
           </div>
         )}
@@ -1877,7 +2018,7 @@ function App({ active }: { active: boolean }) {
             {(session || submittingRequest) && (assessmentState === "queued" || assessmentState === "running" || assessmentState === "not_started") && (
               <div className="status-panel" role="status" aria-live="polite">
                 <span className="status-indicator" aria-hidden="true" />
-                <div><strong>{submittingRequest ? "Submitting request for admission" : !job ? "Retrieving job status" : assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job.stage)}</strong><p>Results appear after reference checks and independent support review complete.</p></div>
+                <div><strong>{submittingRequest ? "Submitting request for admission" : !job ? "Retrieving job status" : assessmentState === "queued" ? "Waiting in the service queue" : assessmentState === "not_started" ? "Assessment is not started" : label(job.stage)}</strong><p>Results appear after reference checks and independent support review complete.</p><AssessmentProgress stage={job?.stage} /></div>
               </div>
             )}
             {assessmentState === "failed" && <div className="notice notice-error" role="alert"><strong>Assessment failed.</strong> {job?.error?.message ?? "No checked past-example result is available."}</div>}
@@ -1885,7 +2026,13 @@ function App({ active }: { active: boolean }) {
             {assessmentState === "ready" && !assessment && <div className="notice notice-error" role="alert">The service did not return a supported checked assessment. No result is shown.</div>}
             {!session && !submittingRequest && <p className="notice notice-warning" role="status">No current checked answer is available. No selections or dependent brief remain.{previousJob ? " Previous content is historical only." : ""}</p>}
             {assessmentAvailable && (
-              <>
+              <Tabs.Root defaultValue="overview" className="assessment-tabs">
+                <Tabs.List className="workflow-tabs" aria-label="Assessment views">
+                  <Tabs.Tab value="overview">Overview</Tabs.Tab>
+                  <Tabs.Tab value="claims">Checked claims ({assessment.claims.length})</Tabs.Tab>
+                  <Tabs.Tab value="coverage">Evidence coverage ({assessment.cases.length})</Tabs.Tab>
+                </Tabs.List>
+                <Tabs.Panel value="overview">
                 <div className="anduin-overview-grid">
                   <div className={`conclusion-panel conclusion-${visibleConclusion(assessment, assessmentClaims)}`} role="status">
                     <span className="eyebrow">Assessment Conclusion</span>
@@ -1902,17 +2049,13 @@ function App({ active }: { active: boolean }) {
                     <h4>Evidence review</h4>
                     <div className="donut-layout">
                       <svg className="donut-svg" viewBox="0 0 42 42" aria-hidden="true">
-                        <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#cfe5fc" strokeWidth="6" />
-                        <circle
-                          cx="21"
-                          cy="21"
-                          r="15.9155"
-                          fill="none"
-                          stroke="#1877d2"
-                          strokeWidth="6"
-                          strokeDasharray={`${supportedPct} ${100 - supportedPct}`}
-                          strokeDashoffset="25"
-                        />
+                        <circle cx="21" cy="21" r="15.9155" fill="none" stroke="var(--chart-track)" strokeWidth="6" />
+                        <circle cx="21"
+                        cy="21"
+                        r="15.9155"
+                        fill="none" stroke="var(--chart-primary)" strokeWidth="6"
+                        strokeDasharray={`${supportedPct} ${100 - supportedPct}`}
+                        strokeDashoffset="25" />
                         <text x="21" y="22.5" textAnchor="middle" className="donut-center-text">{supportedPct}%</text>
                       </svg>
                       <div className="donut-legend">
@@ -1978,34 +2121,19 @@ function App({ active }: { active: boolean }) {
                     {unrankedComparisons.map(([caseId, rows]) => <div key={caseId}><h4>{caseId}</h4><ComparisonTable rows={rows} claims={assessmentClaims} inspect={setPassageRef} /></div>)}
                   </div>
                 </details>}
-                <details className="section-disclosure content-section">
-                  <summary><span id="claim-title">Checked claims — facts, interpretations &amp; recommendations</span><Badge>{`${assessment.claims.length}`}</Badge></summary>
-                  <div className="disclosure-body">
-                    {assessment.claims.length === 0 ? <p className="empty-state">No checked claims were returned.</p> : <div className="claim-list">{assessment.claims.map((claim) => <ClaimCard key={claim.claimId} claim={claim} inspect={setPassageRef} />)}</div>}
-                  </div>
-                </details>
-                <details className="section-disclosure content-section">
-                  <summary><span id="case-status-title">Evidence coverage across all cases</span><Badge>{`${assessment.cases.length}`}</Badge></summary>
-                  <div className="disclosure-body">
-                    {assessment.cases.length === 0 ? <p className="empty-state">No checked case records were returned.</p> : <div className="card-grid">{assessment.cases.map((item) => <CaseCard key={item.caseId} item={item} claims={assessmentClaims} inspect={setPassageRef} />)}</div>}
-                  </div>
-                </details>
+                </Tabs.Panel>
+                <Tabs.Panel value="claims">
+                  <h3>Checked facts, interpretations &amp; recommendations</h3>
+                  {assessment.claims.length === 0 ? <p className="empty-state">No checked claims were returned.</p> : <div className="claim-list">{assessment.claims.map((claim) => <ClaimCard key={claim.claimId} claim={claim} inspect={setPassageRef} />)}</div>}
+                </Tabs.Panel>
+                <Tabs.Panel value="coverage">
+                  <h3>Evidence coverage across all cases</h3>
+                  {assessment.cases.length === 0 ? <p className="empty-state">No checked case records were returned.</p> : <div className="card-grid">{assessment.cases.map((item) => <CaseCard key={item.caseId} item={item} claims={assessmentClaims} inspect={setPassageRef} />)}</div>}
+                </Tabs.Panel>
                 <div className="action-row"><button className="primary-button" type="button" onClick={() => setStep(3)}>Choose work from these examples ›</button></div>
-              </>
+              </Tabs.Root>
             )}
             </section>
-            {(assessmentAvailable || submittedClarification) && <aside className="clarification-section" aria-labelledby="clarification-title">
-              <p className="eyebrow">Decision-critical constraints</p>
-              <h3 id="clarification-title">{questions?.clarifyingClaimIds.length ? "Questions that may change which work applies" : "Add or clarify client constraints"}</h3>
-              {!assessmentAvailable && questions && <p className="field-hint">Previous checked questions — not a newly checked answer.</p>}
-              <ClaimGroup title="Checked questions and why they matter" ids={questions?.clarifyingClaimIds ?? []} claims={questionClaims} inspect={setPassageRef} />
-              <form className="request-form clarification-form" onSubmit={submitClarifications}>
-                <label htmlFor="clarification-answers">Client answers <span className="required-star" aria-hidden="true">*</span></label>
-                <textarea id="clarification-answers" value={questionAnswers} onChange={(event) => setQuestionAnswers(event.currentTarget.value)} rows={4} maxLength={4000} disabled={rechecking} aria-describedby="clarification-hint" placeholder="Supply client answers or updated constraints..." />
-                <p id="clarification-hint" className="field-hint">Submitting starts a fresh evidence check and clears current selections.</p>
-                <button className="secondary-button" type="submit" disabled={rechecking || !questionAnswers.trim()}>{rechecking ? "Rechecking…" : "Recheck with these answers"}</button>
-              </form>
-            </aside>}
             </div>
             {previousJob && <AssessmentLineage previous={previousJob} current={assessmentAvailable ? assessment : undefined} inspect={setPassageRef} />}
           </section>
@@ -2080,7 +2208,7 @@ function App({ active }: { active: boolean }) {
                     {kind === "verify" && items.length > 0 && <p className="notice notice-warning">BLOCKED: unresolved checks. Not approved for unchanged reuse or production.</p>}
                     {kind === "adapt" && items.length > 0 && <p className="field-hint">Required adaptations must be completed before use.</p>}
                     {kind === "reuse" && items.length > 0 && <p className="field-hint">Checked reusable starting points only; not production approval.</p>}
-                    {items.length === 0 ? <p className="empty-state">No supported {label(kind).toLowerCase()} items are available.</p> : <div className="card-grid">{items.map((item, index) => <BriefCard key={`${item.caseId}-${item.artifactId}-${index}`} item={item} claims={briefClaims} inspect={setPassageRef} />)}</div>}
+                    {items.length === 0 ? <p className="empty-state">No supported {label(kind).toLowerCase()} items are available.</p> : <div className="card-grid">{items.map((item) => <BriefCard key={`${item.caseId}/${item.artifactId}/${item.versionId}`} item={item} claims={briefClaims} inspect={setPassageRef} />)}</div>}
                   </section>;
                 })}
                 <details className="section-disclosure content-section">
@@ -2100,8 +2228,8 @@ function App({ active }: { active: boolean }) {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<AppShell
+createRoot(document.getElementById("root")!).render(<PrivateUploadsProvider><AppShell
   ask={(active) => <App active={active} />}
   sources={<SourcesPage />}
   knowledge={(recordId) => <KnowledgePage key={recordId ?? "all"} recordId={recordId} />}
-/>);
+ /></PrivateUploadsProvider>);

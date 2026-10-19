@@ -22,8 +22,12 @@
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",
+    "@hugeicons/core-free-icons": "4.3.5",
+    "@hugeicons/react": "1.1.10",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
+    "fast-xml-parser": "5.11.2",
+    "fflate": "0.8.3",
     "hono": "4.13.13",
     "pg": "8.23.1",
     "react": "19.3.0",

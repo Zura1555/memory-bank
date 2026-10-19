@@ -15,6 +15,14 @@ test("complete sentences fit the UTF-16 quotation bound without a 250-code-point
   assert.equal(requestSchema.safeParse({ request: "x".repeat(501) }).success, false);
 });
 
+test("attached requests retain both quotation and attachment trust-boundary checks", () => {
+  const attachmentIds = ["00000000-0000-4000-8000-000000000001"];
+  assert.deepEqual(requestSchema.parse({ request: "Sandbox writes only.", attachmentIds }).attachmentIds, attachmentIds);
+  assert.equal(requestSchema.safeParse({ request: "x".repeat(501), attachmentIds }).success, false);
+  assert.equal(requestSchema.safeParse({ request: "Sandbox writes only.", attachmentIds: ["not-a-uuid"] }).success, false);
+  assert.equal(requestSchema.safeParse({ request: "Sandbox writes only.", attachmentIds: Array(6).fill(attachmentIds[0]) }).success, false);
+});
+
 test("long sentences have stable clause spans and explicit complete coverage, including the decisive tail", () => {
   const request = `Use ${"a documented Unicode 😀 capability ".repeat(19)}; require bulk asynchronous processing and never use the retired route.`;
   const spans = requestSpans(request);

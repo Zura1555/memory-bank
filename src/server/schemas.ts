@@ -138,6 +138,7 @@ const briefItem = z.strictObject({
 
 export const requestSchema = z.strictObject({
   request: z.string().trim().min(1).max(16 * 1024),
+  attachmentIds: z.array(z.uuid()).max(5).optional(),
 }).superRefine(({ request }, ctx) => {
   try { requestSpans(request); } catch {
     ctx.addIssue({ code: "custom", path: ["request"], message: "A request must have quotation spans no longer than 500 UTF-16 units without splitting a word." });
@@ -148,6 +149,7 @@ export const passageSearchSchema = z.strictObject({
   caseId: id.optional(),
   mimeType: z.string().trim().min(1).max(128).optional(),
 });
+export const uploadUrlSchema = z.strictObject({ url: z.string().trim().min(1).max(4096) });
 export const selectionSchema = z.strictObject({
   caseId: id,
   artifactId: id,
