@@ -923,6 +923,30 @@ h1 { margin-bottom: .35rem; font-size: var(--text-display); font-weight: 800; li
 .screen-heading { max-width: 44rem; margin-bottom: 1.4rem; }
 .screen-heading h2 { margin-bottom: var(--space-1); font-size: var(--text-heading); font-weight: 800; line-height: 1.18; }
 .screen-heading > p:last-child { margin-bottom: 0; color: var(--muted); font-size: var(--text-body); line-height: 1.55; }
+.knowledge-loading {
+  display: flex;
+  min-height: 8rem;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-body);
+}
+.knowledge-loading-indicator {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: 0 0 auto;
+  border: 2px solid var(--accent-pale);
+  border-top-color: var(--accent-bright);
+  border-radius: 50%;
+  animation: knowledge-loading-spin 900ms linear infinite;
+}
+@keyframes knowledge-loading-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .knowledge-loading-indicator { animation: none; border-color: var(--accent-bright); opacity: .55; }
+}
 
 .request-form { display: grid; gap: .65rem; }
 .request-form > label, .field-label { color: var(--ink); font-size: .88rem; font-weight: 700; }
