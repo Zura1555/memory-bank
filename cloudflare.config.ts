@@ -5,7 +5,7 @@ export default defineConfig(({ mode }) => ({
   worker: {
     name: "memory-bank",
     compatibilityDate: "2025-06-01",
-    compatibilityFlags: ["nodejs_compat"],
+    compatibilityFlags: mode === "development" ? ["nodejs_compat"] : ["nodejs_compat", "global_fetch_strictly_public"],
     entrypoint: "src/server/worker.ts",
     assets: {
       notFoundHandling: "single-page-application",

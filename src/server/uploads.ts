@@ -63,12 +63,11 @@ function textChunks(text: string): string[] {
   return text.match(/[\s\S]{1,800}/gu) ?? [];
 }
 
-async function bytesFrom(request: Request): Promise<Uint8Array> {
-  if (request.headers.get("content-encoding") && request.headers.get("content-encoding") !== "identity") throw new HttpFailure(415, "UNSUPPORTED_CONTENT_ENCODING");
-  const length = request.headers.get("content-length");
+async function bytesFrom(body: ReadableStream<Uint8Array> | null, length: string | null, contentEncoding?: string | null): Promise<Uint8Array> {
+  if (contentEncoding && contentEncoding !== "identity") throw new HttpFailure(415, "UNSUPPORTED_CONTENT_ENCODING");
   if (length !== null && (!/^\d+$/u.test(length) || Number(length) > UPLOAD_LIMIT)) throw new HttpFailure(413, "UPLOAD_TOO_LARGE");
-  if (!request.body) throw new HttpFailure(400, "EMPTY_UPLOAD");
-  const reader = request.body.getReader();
+  if (!body) throw new HttpFailure(400, "EMPTY_UPLOAD");
+  const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
@@ -99,34 +98,25 @@ function checkFormat(bytes: Uint8Array, extension: string): void {
     : ["tif", "tiff"].includes(extension) ? head.startsWith("II\x2a\0") || head.startsWith("MM\0\x2a")
     : true;
   if (!valid) throw new HttpFailure(415, "UPLOAD_FORMAT_MISMATCH");
-  if (["txt", "md", "markdown", "csv"].includes(extension)) {
+  if (["txt", "md", "markdown", "csv", "html"].includes(extension)) {
     try { if (new TextDecoder("utf-8", { fatal: true }).decode(bytes).includes("\0")) throw new Error(); }
     catch { throw new HttpFailure(415, "UPLOAD_UTF8_REQUIRED"); }
   }
 }
 
-export async function createUpload(env: Env, owner: string, request: Request): Promise<PrivateSource> {
-  let name: string;
-  try { name = decodeURIComponent(request.headers.get("X-File-Name") ?? "").normalize("NFC"); }
-  catch { throw new HttpFailure(400, "INVALID_UPLOAD_NAME"); }
-  if (!name || name.length > 180 || /[\x00-\x1f\x7f/\\]/u.test(name)) throw new HttpFailure(400, "INVALID_UPLOAD_NAME");
-  const extension = name.split(".").pop()!.toLowerCase();
-  const mimeType = uploadTypes[extension];
-  if (!mimeType) throw new HttpFailure(415, "UPLOAD_TYPE_NOT_SUPPORTED");
-  const inventory = await listUploads(env, owner);
-  if (inventory.length >= 100) throw new HttpFailure(409, "UPLOAD_LIBRARY_FULL");
-  const bytes = await bytesFrom(request);
-  checkFormat(bytes, extension);
+async function storeUpload(env: Env, owner: string, name: string, mimeType: string, bytes: Uint8Array, sourceUrl?: string): Promise<PrivateSource> {
   const now = new Date().toISOString();
+  const htmlSource = mimeType === "text/html";
   const source: PrivateSourceDetail = {
-    id: crypto.randomUUID(), name, mimeType, size: bytes.byteLength,
+    id: crypto.randomUUID(), name, mimeType, ...(sourceUrl ? { sourceUrl } : {}),
     caseId: null, notes: "",
-    sha256: createHash("sha256").update(bytes).digest("hex"),
+    size: bytes.byteLength, sha256: createHash("sha256").update(bytes).digest("hex"),
     createdAt: now, updatedAt: now, expiresAt: new Date(Date.now() + RETENTION).toISOString(),
     state: "pending", hasText: false, text: null, chunkCount: 0,
-    textKind: mimeType.startsWith("image/") ? "visual_interpretation" : mimeType.startsWith("text/") ? "native_text" : "converted_text",
+    textKind: mimeType.startsWith("image/") ? "visual_interpretation" : mimeType.startsWith("text/") && !htmlSource ? "native_text" : "converted_text",
     warning: mimeType.startsWith("image/") ? "AI visual interpretation is not an audited transcription. Review it against the original before using it."
-      : mimeType.startsWith("text/") ? null : "Text conversion is not audited and may omit visual layout, embedded content, comments, or formula context. Review the original.",
+      : htmlSource ? "This webpage conversion is not audited. Review the extracted text against the original page before using it in Ask."
+        : mimeType.startsWith("text/") ? null : "Text conversion is not audited and may omit visual layout, embedded content, comments, or formula context. Review the original.",
     error: null, activity: [{ at: now, state: "pending", message: "Original retained privately for seven days." }],
   };
   const expiryKey = `private-upload-expiry/${source.expiresAt}/${owner}/${source.id}`;
@@ -139,6 +129,97 @@ export async function createUpload(env: Env, owner: string, request: Request): P
     throw error;
   }
   return publicView(source);
+}
+
+function checkedSourceUrl(value: string): URL {
+  if (value.length > 4096) throw new HttpFailure(400, "INVALID_SOURCE_URL");
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new HttpFailure(400, "INVALID_SOURCE_URL"); }
+  const host = url.hostname.toLowerCase().replace(/\.+$/u, "");
+  url.hostname = host;
+  if (url.protocol !== "https:" || url.username || url.password || url.port
+    || host.includes(":") || /^\d+(?:\.\d+){0,3}$/u.test(host) || !host.includes(".")
+    || ["localhost", "local", "internal", "lan", "home.arpa"].some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) {
+    throw new HttpFailure(400, "INVALID_SOURCE_URL");
+  }
+  url.hash = "";
+  return url;
+}
+
+function sourceFilename(url: URL, extension: string): string {
+  const segment = url.pathname.split("/").at(-1) || url.hostname;
+  let base: string;
+  try { base = decodeURIComponent(segment); }
+  catch { base = segment; }
+  base = base.normalize("NFC").replace(/[\x00-\x1f\x7f/\\]/gu, "_").trim();
+  if (!base) base = url.hostname;
+  const stem = (base.toLowerCase().endsWith(`.${extension}`) ? base.slice(0, -(extension.length + 1)) : base) || "source";
+  return `${stem.slice(0, 180 - extension.length - 1)}.${extension}`;
+}
+
+async function fetchSource(url: URL): Promise<{ response: Response; url: URL }> {
+  for (let redirects = 0; redirects <= 3; redirects++) {
+    let response: Response;
+    try {
+      response = await fetch(url.href, {
+        method: "GET", redirect: "manual", credentials: "omit", referrerPolicy: "no-referrer",
+        signal: AbortSignal.timeout(15_000),
+        headers: { Accept: "text/html,application/xhtml+xml,text/plain,text/markdown,text/csv,application/pdf,application/*,image/*" },
+      });
+    } catch { throw new HttpFailure(502, "SOURCE_FETCH_FAILED"); }
+    if (![301, 302, 303, 307, 308].includes(response.status)) return { response, url };
+    const location = response.headers.get("location");
+    if (response.body) await response.body.cancel().catch(() => undefined);
+    if (!location || redirects === 3) throw new HttpFailure(502, "SOURCE_REDIRECT_REJECTED");
+    try { url = checkedSourceUrl(new URL(location, url).href); }
+    catch { throw new HttpFailure(502, "SOURCE_REDIRECT_REJECTED"); }
+  }
+  throw new HttpFailure(502, "SOURCE_REDIRECT_REJECTED");
+}
+
+export async function createUpload(env: Env, owner: string, request: Request): Promise<PrivateSource> {
+  let name: string;
+  try { name = decodeURIComponent(request.headers.get("X-File-Name") ?? "").normalize("NFC"); }
+  catch { throw new HttpFailure(400, "INVALID_UPLOAD_NAME"); }
+  if (!name || name.length > 180 || /[\x00-\x1f\x7f/\\]/u.test(name)) throw new HttpFailure(400, "INVALID_UPLOAD_NAME");
+  const extension = name.split(".").pop()!.toLowerCase();
+  const mimeType = uploadTypes[extension];
+  if (!mimeType) throw new HttpFailure(415, "UPLOAD_TYPE_NOT_SUPPORTED");
+  if ((await listUploads(env, owner)).length >= 100) throw new HttpFailure(409, "UPLOAD_LIBRARY_FULL");
+  const bytes = await bytesFrom(request.body, request.headers.get("content-length"), request.headers.get("content-encoding"));
+  checkFormat(bytes, extension);
+  return storeUpload(env, owner, name, mimeType, bytes);
+}
+
+export async function createUrlUpload(env: Env, owner: string, value: string): Promise<PrivateSource> {
+  const initialUrl = checkedSourceUrl(value);
+  if ((await listUploads(env, owner)).length >= 100) throw new HttpFailure(409, "UPLOAD_LIBRARY_FULL");
+  const { response, url } = await fetchSource(initialUrl);
+  if (response.status !== 200) {
+    if (response.body) await response.body.cancel().catch(() => undefined);
+    throw new HttpFailure(502, "SOURCE_FETCH_FAILED");
+  }
+  const mediaType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  const pathExtension = url.pathname.split(".").at(-1)?.toLowerCase() ?? "";
+  const mimeExtension = mediaType === "text/html" || mediaType === "application/xhtml+xml" ? "html"
+    : Object.entries(uploadTypes).find(([, type]) => type === mediaType)?.[0];
+  const extension = mimeExtension ?? (mediaType === "application/octet-stream" && uploadTypes[pathExtension] ? pathExtension : undefined);
+  if (!extension || (!uploadTypes[extension] && extension !== "html")) {
+    if (response.body) await response.body.cancel().catch(() => undefined);
+    throw new HttpFailure(415, "SOURCE_TYPE_NOT_SUPPORTED");
+  }
+  let bytes: Uint8Array;
+  try { bytes = await bytesFrom(response.body, response.headers.get("content-length")); }
+  catch (error) {
+    if (error instanceof HttpFailure && error.code !== "EMPTY_UPLOAD") throw error;
+    throw new HttpFailure(502, "SOURCE_FETCH_FAILED");
+  }
+  checkFormat(bytes, extension);
+  const mimeType = extension === "html" ? "text/html" : uploadTypes[extension];
+  url.search = "";
+  url.hash = "";
+  return storeUpload(env, owner, sourceFilename(url, extension), mimeType, bytes, url.href);
 }
 
 export async function listUploads(env: Env, owner: string): Promise<PrivateSource[]> {
@@ -241,11 +322,13 @@ function presentationText(bytes: Uint8Array): string {
 }
 
 async function extract(env: Env, source: PrivateSourceDetail, bytes: Uint8Array): Promise<string> {
-  if (source.mimeType.startsWith("text/")) return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  if (source.mimeType.startsWith("text/") && source.mimeType !== "text/html") return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   if (source.name.toLowerCase().endsWith(".pptx")) return presentationText(bytes);
-  if (source.mimeType === "image/tiff") throw new Error("TIFF original retained. Automatic TIFF interpretation is unavailable; upload a reviewed UTF-8 transcription to use its content.");
+  if (source.mimeType === "image/tiff") throw new Error("TIFF original retained. Automatic TIFF interpretation is unavailable; upload a reviewed UTF-8 transcription to use that content.");
   if (!env.AI) throw new Error("Cloudflare document conversion is unavailable. Original retained; choose Process again when the service is available.");
-  const result = await env.AI.toMarkdown({ name: source.name, blob: new Blob([bytes as Uint8Array<ArrayBuffer>], { type: source.mimeType }) });
+  const options = source.sourceUrl && source.mimeType === "text/html"
+    ? { conversionOptions: { html: { hostname: source.sourceUrl } } } : undefined;
+  const result = await env.AI.toMarkdown({ name: source.name, blob: new Blob([bytes as Uint8Array<ArrayBuffer>], { type: source.mimeType }) }, options);
   if (result.format === "error" || typeof result.data !== "string") throw new Error("Document conversion failed. Inspect the original and choose Process again, or upload a reviewed text version.");
   return result.data;
 }

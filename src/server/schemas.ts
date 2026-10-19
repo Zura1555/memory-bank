@@ -69,6 +69,7 @@ export const passageSearchSchema = z.strictObject({
   caseId: id.optional(),
   mimeType: z.string().trim().min(1).max(128).optional(),
 });
+export const uploadUrlSchema = z.strictObject({ url: z.string().trim().min(1).max(4096) });
 export const selectionSchema = z.strictObject({
   caseId: id,
   artifactId: id,

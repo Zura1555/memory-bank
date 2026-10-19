@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Button } from "@base-ui/react/button";
 import { Tabs } from "@base-ui/react/tabs";
 import { WorkflowDrawer } from "./workflow-drawer";
@@ -14,6 +14,7 @@ interface UploadLibrary {
   setFocusedId: (id: string | null) => void;
   refresh: () => Promise<void>;
   upload: (files: File[]) => Promise<void>;
+  uploadUrl: (url: string) => Promise<void>;
   process: (id: string) => Promise<void>;
   detail: (id: string, signal?: AbortSignal) => Promise<PrivateSourceDetail>;
   download: (source: PrivateSource, open?: boolean) => Promise<void>;
@@ -33,11 +34,14 @@ async function uploadResponse(response: Response): Promise<unknown> {
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const reasons: Record<string, string> = {
-      UPLOAD_TOO_LARGE: "The file exceeds 25 MiB.", UPLOAD_LIBRARY_FULL: "This browser has 100 retained files. Delete an unneeded file or wait for its seven-day expiry.",
+      UPLOAD_TOO_LARGE: "A file or webpage exceeds the 25 MiB source limit.", UPLOAD_LIBRARY_FULL: "This browser has 100 retained sources. Delete an unneeded source or wait for its seven-day expiry.",
       UPLOAD_TYPE_NOT_SUPPORTED: "Choose DOCX, PDF, PPTX, XLSX, an image, UTF-8 Markdown, plain text, or CSV.",
       UPLOAD_FORMAT_MISMATCH: "The file content does not match its extension.", UPLOAD_UTF8_REQUIRED: "Text and CSV files must use UTF-8 without binary content.",
       UPLOAD_RATE_LIMITED: "The upload request limit was reached. Wait a minute before trying again.",
-      UPLOAD_PROCESSING: "This file is already processing. Its status will refresh automatically.",
+      INVALID_SOURCE_URL: "Use a public HTTPS URL on the standard port; local addresses and credentials are not allowed.",
+      SOURCE_FETCH_FAILED: "The webpage could not be fetched. Check the URL and try again.",
+      SOURCE_REDIRECT_REJECTED: "The webpage redirected to an unsupported address or too many redirects.",
+      SOURCE_TYPE_NOT_SUPPORTED: "Choose a webpage or a URL serving one of the supported document formats.",
       UPLOAD_NOT_FOUND: "This private upload is missing, expired, or belongs to another browser.",
       UPLOAD_CHANGED: "This source changed in another request. Refresh and try again.",
       CASE_NOT_FOUND: "That case is no longer available. Refresh the source library.",
@@ -57,6 +61,17 @@ export function PrivateUploadsProvider({ children }: { children: ReactNode }) {
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const busy = useRef(false);
   const generation = useRef(0);
+  function accessKey(): string {
+    let key = readToken();
+    if (!key) {
+      key = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+      window.localStorage.setItem(STORAGE_KEY, key);
+      if (readToken() !== key) throw new Error("Browser storage did not retain private access. No source was added.");
+      tokenRef.current = key;
+      setToken(key);
+    }
+    return key;
+  }
   const refresh = useCallback(async () => {
     const key = tokenRef.current;
     if (!key) return;
@@ -116,15 +131,7 @@ export function PrivateUploadsProvider({ children }: { children: ReactNode }) {
     busy.current = true;
     setError(null);
     try {
-      if (files.length > 20) throw new Error("Choose at most 20 files per upload.");
-      let key = readToken();
-      if (!key) {
-        key = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
-        window.localStorage.setItem(STORAGE_KEY, key);
-        if (readToken() !== key) throw new Error("Browser storage did not retain private access. No file was uploaded.");
-        tokenRef.current = key;
-        setToken(key);
-      }
+      const key = accessKey();
       for (const [index, file] of files.entries()) {
         if (!file.size || file.size > UPLOAD_LIMIT) throw new Error(`${file.name}: choose a non-empty file up to 25 MiB.`);
         if (!uploadTypes[file.name.split(".").pop()!.toLowerCase()]) throw new Error(`${file.name}: this file type is not supported.`);
@@ -137,6 +144,24 @@ export function PrivateUploadsProvider({ children }: { children: ReactNode }) {
         await process(source.id);
       }
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Upload failed. Already confirmed files remain in Sources."); }
+    finally { busy.current = false; setUploading(null); }
+  }
+  async function uploadUrl(url: string): Promise<void> {
+    if (busy.current || !url.trim()) return;
+    busy.current = true;
+    setError(null);
+    try {
+      const key = accessKey();
+      setUploading("Fetching and saving webpage…");
+      const source = await uploadResponse(await fetch("/api/uploads/url", {
+        method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify({ url: url.trim() }),
+      }));
+      if (!isPrivateSource(source) || !source.sourceUrl) throw new Error("The URL source receipt could not be verified. Reload Sources before trying again.");
+      generation.current++;
+      setSources((items) => [source, ...items]);
+      setFocusedId(source.id);
+      await process(source.id);
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "The URL source could not be saved."); }
     finally { busy.current = false; setUploading(null); }
   }
   async function detail(id: string, signal?: AbortSignal): Promise<PrivateSourceDetail> {
@@ -178,7 +203,7 @@ export function PrivateUploadsProvider({ children }: { children: ReactNode }) {
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (failure) { preview?.close(); setError(failure instanceof Error ? failure.message : "The exact original could not be downloaded."); }
   }
-  return <UploadContext.Provider value={{ sources, token, error, uploading, focusedId, setFocusedId, refresh, upload, process, detail, download, update, remove }}>{children}</UploadContext.Provider>;
+  return <UploadContext.Provider value={{ sources, token, error, uploading, focusedId, setFocusedId, refresh, upload, uploadUrl, process, detail, download, update, remove }}>{children}</UploadContext.Provider>;
 }
 
 export function usePrivateUploads(): UploadLibrary {
@@ -190,8 +215,10 @@ export function usePrivateUploads(): UploadLibrary {
 export function UploadPicker() {
   const library = usePrivateUploads();
   const input = useRef<HTMLInputElement>(null);
+  const urlInputId = useId();
+  const [url, setUrl] = useState("");
   const [dragging, setDragging] = useState(false);
-  return <section className="upload-picker" data-dragging={dragging || undefined} aria-label="Upload private files"
+  return <section className="upload-picker" data-dragging={dragging || undefined} aria-label="Add private sources"
     onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
     onDrop={(event) => { event.preventDefault(); setDragging(false); void library.upload(Array.from(event.dataTransfer.files)); }}>
     <svg className="upload-drop-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5" /></svg>
@@ -199,7 +226,13 @@ export function UploadPicker() {
       <Button className="secondary-button" type="button" disabled={Boolean(library.uploading)} onClick={() => input.current?.click()}>Upload files</Button>
       <input ref={input} className="visually-hidden" type="file" aria-label="Choose private files" accept={uploadAccept} multiple disabled={Boolean(library.uploading)} onChange={(event) => { void library.upload(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ""; }} /></div>
     <p className="field-hint">DOCX, PDF, PPTX, XLSX, images, UTF-8 Markdown, text and CSV · 25 MiB/file · 20 files at a time.</p>
-    <p className="field-hint">Private access is saved only in this browser. Cloudflare stores and processes files; application access expires after seven days, with background content cleanup. Files never enter the public corpus. Conversion/embedding may use Workers AI. <a href="https://developers.cloudflare.com/workers-ai/platform/data-usage/">Platform data policies</a> govern upstream copies, not this expiry. Do not upload sensitive data.</p>
+    <div className="source-url-form" role="group" aria-labelledby={`${urlInputId}-label`}>
+      <label id={`${urlInputId}-label`} htmlFor={urlInputId}>Add a webpage or document URL</label>
+      <div><input id={urlInputId} type="url" value={url} onChange={(event) => setUrl(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); void library.uploadUrl(url); } }} placeholder="https://example.com/page" required disabled={Boolean(library.uploading)} />
+        <Button className="secondary-button" type="button" onClick={() => void library.uploadUrl(url)} disabled={Boolean(library.uploading) || !url.trim()}>Save URL</Button></div>
+      <p className="field-hint">Public HTTPS only. The page copy and extracted text stay private and expire after seven days.</p>
+    </div>
+    <p className="field-hint">Private access is saved only in this browser. Cloudflare stores and processes sources; they never enter the public corpus. Conversion/embedding may use Workers AI. <a href="https://developers.cloudflare.com/workers-ai/platform/data-usage/">Platform data policies</a> govern upstream copies, not this expiry. Do not upload sensitive data.</p>
     {library.uploading && <p role="status">{library.uploading}</p>}
     {library.error && <p className="notice notice-error" role="alert">{library.error}</p>}
   </section>;

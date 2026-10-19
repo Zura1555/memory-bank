@@ -178,6 +178,13 @@
 .source-upload-receipts > div > span:nth-child(2) { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .source-upload-receipts small { display: block; color: var(--muted); margin-top: .25rem; }
 .source-form-field { display: grid; gap: .5rem; margin: 1rem 0; font-size: .8rem; }
+.source-url-form { display: grid; gap: .55rem; margin: 1.25rem 0; text-align: left; }
+.source-url-form > label { font-size: .78rem; font-weight: 650; }
+.source-url-form > div { display: flex; align-items: center; gap: .5rem; }
+.source-url-form input { flex: 1 1 auto; min-width: 0; padding: .65rem; border: 1px solid var(--control-border); border-radius: .4rem; background: var(--surface); color: var(--body-ink); font: inherit; font-size: .75rem; }
+.source-url-form .field-hint { margin: 0; }
+.source-source-url { margin: 1rem 0; overflow-wrap: anywhere; font-size: .75rem; line-height: 1.6; }
+.source-source-url a { color: var(--accent); }
 .source-form-field select { width: 100%; min-width: 0; padding: .65rem; font: inherit; color: var(--body-ink); background: var(--surface); border: 1px solid var(--control-border); border-radius: .4rem; }
 .source-modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .65rem; margin-top: 1.5rem; }
 .sources-search-disclosure { grid-column: 1 / -1; color: var(--muted); font-size: .8rem; margin-top: .5rem; }

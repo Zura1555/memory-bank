@@ -6,11 +6,11 @@ import { capabilityHash } from "./auth.ts";
 import { exactOriginal, exactPassage, EvidenceUnavailable, knowledgeCards, loadCorpus } from "./corpus.ts";
 import { HttpFailure } from "./errors.ts";
 import { getOwnedJob } from "./jobs.ts";
-import { requestSchema, startBriefSchema, passageSearchSchema } from "./schemas.ts";
+import { requestSchema, startBriefSchema, passageSearchSchema, uploadUrlSchema } from "./schemas.ts";
 import { exportStarterPack, starterPackMarkdown } from "./packs.ts";
 import { searchPassages } from "./search.ts";
 import { modelConfig } from "./model.ts";
-import { attachmentRequest, createUpload, deleteUpload, limitUploads, listUploads, searchUploads, updateUpload, uploadDetail, uploadOriginal, uploadOwner } from "./uploads.ts";
+import { attachmentRequest, createUpload, createUrlUpload, deleteUpload, limitUploads, listUploads, searchUploads, updateUpload, uploadDetail, uploadOriginal, uploadOwner } from "./uploads.ts";
 import type { SourceIndexStatus } from "../shared/uploads.ts";
 import {
   operatorBudgetSchema,
@@ -178,6 +178,13 @@ app.post("/api/uploads", async (c) => {
   const owner = await uploadOwner(c.req.header("Authorization") ?? null);
   await limitUploads(c.env, c.req.header("CF-Connecting-IP"));
   return c.json(await createUpload(c.env, owner, c.req.raw), 201);
+});
+app.post("/api/uploads/url", async (c) => {
+  const owner = await uploadOwner(c.req.header("Authorization") ?? null);
+  await limitUploads(c.env, c.req.header("CF-Connecting-IP"));
+  const body = uploadUrlSchema.safeParse(await readJsonBody(c.req.raw));
+  if (!body.success) throw new HttpFailure(400, "INVALID_REQUEST");
+  return c.json(await createUrlUpload(c.env, owner, body.data.url), 201);
 });
 app.post("/api/uploads/search", async (c) => {
   const owner = await uploadOwner(c.req.header("Authorization") ?? null);
