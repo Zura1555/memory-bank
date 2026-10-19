@@ -577,7 +577,72 @@ function CuratedCard({ record, inspect }: { record: KnowledgeCard; inspect: Insp
   </article>;
 }
 
-function CuratedKnowledge({ caseId, recordId, inspect }: { caseId?: string; recordId?: string; inspect: InspectPassage }) {
+function KnowledgeEntry({ record }: { record: KnowledgeCard }) {
+  const [open, setOpen] = useState(false);
+  const [selectedSource, setSelectedSource] = useState<SourceRef | null>(null);
+  const decision = record.kind === "decision";
+  const title = decision ? record.choice : record.observation;
+  const summary = decision ? record.context : record.recommendedFutureAction;
+  const sources = Array.from(new Map(record.evidence.map((ref) => [
+    `${ref.versionId}\u0000${ref.passageId}`, ref,
+  ])).values());
+  const selectedSourceKey = selectedSource && `${selectedSource.versionId}\u0000${selectedSource.passageId}`;
+  const sourceKey = (source: SourceRef) => `${source.versionId}\u0000${source.passageId}`;
+  const reviewedDate = new Date(`${record.reviewedAt}T00:00:00`).toLocaleDateString(undefined, {
+    year: "numeric", month: "short", day: "numeric",
+  });
+  return <article className="knowledge-entry">
+    <div className="knowledge-entry-meta">
+      <span className={`knowledge-kind knowledge-kind-${record.kind}`}>{decision ? "Decision" : "Lesson"}</span>
+      <time dateTime={record.reviewedAt}>Reviewed {reviewedDate}</time>
+      <span className="knowledge-entry-basis">{record.basis === "source_fact" ? "From the source" : "Reviewed takeaway"}</span>
+    </div>
+    <h3>{title}</h3>
+    <p className="knowledge-entry-summary">{summary}</p>
+    {record.supersededById && <div className="knowledge-update">
+      <div><strong>This entry has been updated.</strong><span>Keep it for history; use the newer entry for current guidance.</span></div>
+      <a href={`?knowledge=${encodeURIComponent(record.supersededById)}`}>See updated entry</a>
+    </div>}
+    {record.supersedesId && <p className="knowledge-revision">This entry replaces an earlier decision.</p>}
+    <WorkflowDrawer open={open} onOpenChange={setOpen}
+      trigger={<Button type="button" className="secondary-button knowledge-entry-trigger">Read the full entry</Button>}
+      title={decision ? "Decision details" : "Lesson details"}
+      description={`Reviewed ${reviewedDate}. Past experience is a starting point, not a decision for a new request.`}>
+      <div className="knowledge-detail">
+        <section><h3>{decision ? "What happened" : "What we learned"}</h3><p>{decision ? record.context : record.observation}</p></section>
+        <section><h3>{decision ? "The decision" : "What to do next"}</h3><p>{decision ? record.choice : record.recommendedFutureAction}</p></section>
+        {decision && record.recordedRationale && <section><h3>Why</h3><p>{record.recordedRationale}</p></section>}
+        {decision && record.recordedRejectedAlternatives && record.recordedRejectedAlternatives.length > 0 && <section>
+          <h3>Other options considered</h3><ul>{record.recordedRejectedAlternatives.map((item) => <li key={item}>{item}</li>)}</ul>
+        </section>}
+        {!decision && <section><h3>What remains unknown</h3><p>{record.outcomeLimitations}</p></section>}
+        <section><h3>Where this applies</h3><p>{record.applicability}</p>
+          <p className="knowledge-caution">Check the source and the needs of the current request before applying this experience.</p>
+        </section>
+        {record.supersededById && <p className="knowledge-update"><span>This entry has a newer version.</span>
+          <a href={`?knowledge=${encodeURIComponent(record.supersededById)}`}>See updated entry</a></p>}
+        {record.supersedesId && <p className="knowledge-revision">This entry replaces an earlier decision. <a href={`?knowledge=${encodeURIComponent(record.supersedesId)}`}>Read the earlier entry</a></p>}
+        <section><h3>Source notes</h3><div className="knowledge-sources">{sources.map((source, index) =>
+          <button className="secondary-button" key={sourceKey(source)} type="button"
+            aria-label={`Read source note ${index + 1}`} aria-pressed={selectedSourceKey === sourceKey(source)}
+            onClick={() => setSelectedSource(source)}>
+            <span>Source note {index + 1}</span><span aria-hidden="true">Read excerpt →</span>
+          </button>)}</div>
+          {selectedSource && <div className="knowledge-source-excerpt">
+            <h4>Source excerpt</h4>
+            <EvidencePassage key={sourceKey(selectedSource)} sourceRef={selectedSource} plainLanguage />
+          </div>}
+        </section>
+        <a href={`?knowledge=${encodeURIComponent(record.recordId)}`}>Open this entry on its own</a>
+      </div>
+    </WorkflowDrawer>
+  </article>;
+}
+
+type CuratedKnowledgeProps = { caseId: string; inspect: InspectPassage; recordId?: never }
+  | { caseId?: undefined; inspect?: never; recordId?: string };
+
+function CuratedKnowledge({ caseId, recordId, inspect }: CuratedKnowledgeProps) {
   const [records, setRecords] = useState<KnowledgeCard[] | null>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
@@ -599,24 +664,51 @@ function CuratedKnowledge({ caseId, recordId, inspect }: { caseId?: string; reco
     })();
     return () => controller.abort();
   }, [caseId, recordId]);
-  if (error) return <p className="notice notice-error" role="alert">Reviewed knowledge or its exact source evidence is unavailable.</p>;
-  if (records === null) return <div className="knowledge-loading" role="status"><span className="knowledge-loading-indicator" aria-hidden="true" /><span>Loading reviewed knowledge…</span></div>;
-  if (records.length === 0) return caseId ? null : <p>No reviewed knowledge records are available.</p>;
-  return <section className="content-section" aria-label="Reviewed decisions and lessons">
-    <h2>Reviewed decisions and lessons</h2>
-    <div className="claim-list">{records.map((record) => <CuratedCard key={record.recordId} record={record} inspect={inspect} />)}</div>
+  if (error) return <p className="notice notice-error" role="alert">We couldn’t load these entries. Please try again.</p>;
+  if (records === null) return <div className="knowledge-loading" role="status"><span className="knowledge-loading-indicator" aria-hidden="true" /><span>Gathering past decisions and lessons…</span></div>;
+  if (caseId) {
+    if (records.length === 0) return null;
+    return <section className="content-section" aria-label="Reviewed decisions and lessons">
+      <h3>Past decisions and lessons</h3>
+      <div className="claim-list">{records.map((record) => <CuratedCard key={record.recordId} record={record} inspect={inspect} />)}</div>
+    </section>;
+  }
+  if (records.length === 0) return <p className="knowledge-empty">No entries to explore yet.</p>;
+  const corrections = records.filter((record) => record.supersededById || record.supersedesId);
+  const groups = [
+    { value: "all", label: "All entries", entries: records },
+    { value: "decisions", label: "Decisions", entries: records.filter((record) => record.kind === "decision") },
+    { value: "lessons", label: "Lessons", entries: records.filter((record) => record.kind === "lesson") },
+    { value: "corrections", label: "Corrections", entries: corrections },
+  ];
+  return <section className="knowledge-library" aria-label="Reviewed decisions and lessons">
+    <div className="knowledge-library-heading"><div><h2>Past decisions and lessons</h2>
+      <p>What happened, what changed, and what to keep in mind next time.</p></div>
+      <span>{records.length} {records.length === 1 ? "entry" : "entries"}</span>
+    </div>
+    <Tabs.Root defaultValue="all" className="knowledge-tabs-root">
+      <Tabs.List className="workflow-tabs knowledge-tabs" aria-label="Filter past experience">
+        {groups.map((group) => <Tabs.Tab value={group.value} key={group.value}>
+          {group.label}<span className="knowledge-tab-count">{group.entries.length}</span>
+        </Tabs.Tab>)}
+      </Tabs.List>
+      {groups.map((group) => <Tabs.Panel value={group.value} key={group.value} className="knowledge-tab-panel">
+        {group.entries.length === 0 ? <p className="knowledge-empty">Nothing in this group yet.</p> :
+          <div className="knowledge-entry-list">{group.entries.map((record) =>
+            <KnowledgeEntry key={record.recordId} record={record} />)}</div>}
+      </Tabs.Panel>)}
+    </Tabs.Root>
   </section>;
 }
 
 function KnowledgePage({ recordId }: { recordId?: string }) {
-  const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
-  return <EvidenceWorkspace sourceRef={passageRef} onInspect={setPassageRef}><section className="workflow" aria-labelledby="knowledge-title">
-    <div className="intro"><p className="eyebrow">Curated Context</p><h1 id="knowledge-title">Reviewed knowledge</h1>
+  return <section className="workflow knowledge-page" aria-labelledby="knowledge-title">
+    <div className="intro"><p className="eyebrow">Past experience</p><h1 id="knowledge-title">Knowledge from past work</h1>
       <span className="title-accent-bar" aria-hidden="true" />
-      <p>Human-reviewed decisions and lessons from fictional past work.</p></div>
-    {recordId && <a href="/?knowledge" className="back-link">← All reviewed records</a>}
-    <div className="screen"><CuratedKnowledge recordId={recordId} inspect={setPassageRef} /></div>
-  </section></EvidenceWorkspace>;
+      <p>Reviewed decisions and lessons to help teams learn from previous work.</p></div>
+    {recordId && <a href="/?knowledge" className="back-link">← Back to all knowledge</a>}
+    <div className="screen"><CuratedKnowledge recordId={recordId} /></div>
+  </section>;
 }
 
 function isSourceCatalogEntry(value: unknown): value is SourceCatalogEntry {
@@ -1068,7 +1160,7 @@ function readBrowserJobs() {
   catch { return { entries: [] as LocalJob[], error: "Local History/Saved persistence failed. Browser storage may be unavailable or full; use browser settings to clear retained data. The main workflow still works in this tab." }; }
 }
 
-function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef; preview?: boolean }) {
+function EvidencePassage({ sourceRef, preview = false, plainLanguage = false }: { sourceRef: SourceRef; preview?: boolean; plainLanguage?: boolean }) {
   const [passage, setPassage] = useState<PassageView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1111,16 +1203,16 @@ function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef;
       {error && <p role="alert" className="notice notice-error">{error}</p>}
       {passage && (
         <div className={`passage-content${preview ? " passage-preview" : ""}`}>
-          <div className="badge-row"><Badge tone="fictional">Fictional record</Badge><Badge>{label(passage.sourceKind)}</Badge></div>
+          <div className="badge-row">{plainLanguage ? <Badge tone="fictional">Past example</Badge> : <><Badge tone="fictional">Fictional record</Badge><Badge>{label(passage.sourceKind)}</Badge></>}</div>
           <h3>{passage.title}</h3>
-          <p className="muted">{passage.statedDate ? `Stated date: ${passage.statedDate}` : "No stated date"}</p>
+          {passage.statedDate ? <p className="muted">{plainLanguage ? passage.statedDate : `Stated date: ${passage.statedDate}`}</p> : !plainLanguage && <p className="muted">No stated date</p>}
           <blockquote>{passage.excerpt}</blockquote>
           {Object.keys(passage.location).length > 0 && (
             <dl className="location-list">
               {Object.entries(passage.location).map(([key, value]) => <div key={key}><dt>{key.replace(/([a-z])([A-Z])/g, "$1 $2")}</dt><dd>{Array.isArray(value) ? value.join(", ") : value === null ? "Not stated" : String(value)}</dd></div>)}
             </dl>
           )}
-          <div className="source-links"><a href={`/api/evidence/originals/${encodeURIComponent(passage.versionId)}`}>Download exact fictional original</a></div>
+          <div className="source-links"><a href={`/api/evidence/originals/${encodeURIComponent(passage.versionId)}`}>{plainLanguage ? "Download original" : "Download exact fictional original"}</a></div>
         </div>
       )}
     </>
