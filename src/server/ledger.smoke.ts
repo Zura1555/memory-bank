@@ -6,12 +6,15 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
+import { assessmentDraftSchema } from "./schemas.ts";
+import { ReconciliationRequired, claimJobRepair, loadStageAttempt, runPaidStage } from "./calls.ts";
 import { transaction } from "./db.ts";
-import { ReconciliationRequired, runPaidStage } from "./calls.ts";
 import type { Env } from "./env.ts";
 import { operatorStatus, reconcileReservation } from "./operator.ts";
 import { startBrief } from "./admission.ts";
 import type { Selection } from "../shared/protocol.ts";
+import { expireJobContent } from "./retention.ts";
+import { schemaRepairPlan, type RepairPlan } from "./repair.ts";
 
 // Never reads .dev.vars, accepts a target database, or uses an existing Compose project.
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -29,6 +32,28 @@ const [jobId, reservationId, settledJobId, settledReservationId, settledAttemptI
   Array.from({ length: 7 }, () => randomUUID());
 let attemptId: string;
 let outputAttemptId: string;
+const repairJobId = randomUUID();
+const repairReservationId = randomUUID();
+let originalRepairAttemptId: string;
+let cachedRepairAttemptId: string;
+let durableRepairPlan: RepairPlan;
+let repairProviderRequests = 0;
+const repairedLedgerDraft = assessmentDraftSchema.parse({
+  requestConstraints: { product_version: [], environment: [], scale: [], identity_access: [], recovery_operations: [] },
+  cases: Array.from({ length: 8 }, (_, index) => ({ caseId: `synthetic-${index}`, outcome: "unknown" as const, artifactWork: [] })),
+  leads: [], contrasts: [], clarifyingClaimIds: ["private-repaired-draft"], missingEvidenceRequests: [], claims: [],
+});
+const repairPrompt = {
+  instructions: "Synthetic ledger-only draft",
+  untrustedData: {},
+  responseSchema: assessmentDraftSchema,
+};
+function repairEnv(connectionString: string): Env {
+  return { APP_ENV: "development", LOCAL_DATABASE_URL: connectionString, OPENROUTER_API_KEY: "synthetic-only" } as Env;
+}
+const repairParams = {
+  jobId: repairJobId, attemptId: repairReservationId, phase: "assessment" as const, workflowId: `${repairJobId}-assessment-1`,
+};
 const readyJobId = randomUUID();
 const readyCapabilityHash = Buffer.alloc(32, 1);
 const readySelections: Selection[] = [{ caseId: "case-1", artifactId: "procedure", versionId: "procedure-v1", passageIds: ["passage-b", "passage-a"] }];
@@ -59,6 +84,7 @@ async function ledgerSnapshot(pool: Pool): Promise<Record<string, unknown>> {
     model_attempts: "SELECT to_jsonb(t) AS row FROM model_attempts t ORDER BY to_jsonb(t)::text",
     job_outbox: "SELECT to_jsonb(t) AS row FROM job_outbox t ORDER BY to_jsonb(t)::text",
     operator_reconciliations: "SELECT to_jsonb(t) AS row FROM operator_reconciliations t ORDER BY to_jsonb(t)::text",
+    job_repairs: "SELECT to_jsonb(t) AS row FROM job_repairs t ORDER BY to_jsonb(t)::text",
   };
   const snapshot: Record<string, unknown> = {};
   for (const [table, query] of Object.entries(queries)) snapshot[table] = (await pool.query(query)).rows;
@@ -84,6 +110,11 @@ async function verify(connectionString: string, expected: unknown): Promise<void
       jobId: readyJobId, briefState: "ready",
     }, "A persisted JSONB selection must resume the ready brief regardless of object or passage order");
     assert.equal(providerRequests, 2, "Replay must not add to the two synthetic provider requests");
+    const repairEnvironment = repairEnv(connectionString);
+    assert.equal(await runPaidStage(repairEnvironment, repairParams, 1, "assessment_draft", repairPrompt), originalRepairAttemptId);
+    assert.equal(await runPaidStage(repairEnvironment, repairParams, 3, "assessment_draft", repairPrompt), cachedRepairAttemptId);
+    assert.equal(await claimJobRepair(repairEnvironment, repairParams, originalRepairAttemptId, null, durableRepairPlan), "claimed");
+    assert.equal(repairProviderRequests, 2, "Restart and duplicate claim cannot repeat either repair dispatch");
     assert.deepEqual(await ledgerSnapshot(pool), snapshot, "Rejected replay must not mutate accounting");
   } finally {
     await pool.end();
@@ -235,6 +266,51 @@ try {
     assert.deepEqual((await pool.query("SELECT held_micro_usd, reconciled_spend_micro_usd, admission_enabled FROM campaign_budget")).rows[0],
       { held_micro_usd: "1200000", reconciled_spend_micro_usd: "12345", admission_enabled: false });
     console.log("Real paid-stage failures retained safe causes and reported usage without exposing output or releasing holds; two synthetic responses, no provider network access.");
+    await pool.query(
+      `INSERT INTO jobs (id, request_text, corpus_version, corpus_sha256, stage, assessment_state, expires_at)
+       VALUES ($1, 'Private synthetic repair', 'ledger-smoke', repeat('b',64), 'drafting', 'running', now()+interval '1 day')`, [repairJobId],
+    );
+    await pool.query(
+      `INSERT INTO phase_reservations (id,job_id,phase,attempt_no,amount_micro_usd,state)
+       VALUES ($1,$2,'assessment',1,600000,'held')`, [repairReservationId, repairJobId],
+    );
+    await pool.query("UPDATE campaign_budget SET held_micro_usd=held_micro_usd+600000 WHERE singleton");
+    await pool.query("UPDATE workflow_control SET active_attempt_id=$1 WHERE singleton", [repairReservationId]);
+    const failureFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      repairProviderRequests++;
+      assert.ok(repairProviderRequests <= 2, "REPAIR_REPLAY_FORBIDDEN");
+      return Response.json({
+        id: `gen-synthetic-repair-${repairProviderRequests}`, model: "openai/gpt-6-luna", provider: "OpenAI",
+        choices: [{ finish_reason: "stop", message: { content: JSON.stringify(repairProviderRequests === 1
+          ? { privateInvalidDraft: "not the required schema" } : repairedLedgerDraft) } }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, cost: 0 },
+      });
+    };
+    try {
+      const repairEnvironment = repairEnv(connectionString);
+      originalRepairAttemptId = await runPaidStage(repairEnvironment, repairParams, 1, "assessment_draft", repairPrompt);
+      const invalid = await loadStageAttempt(repairEnvironment, originalRepairAttemptId);
+      assert.equal(invalid.state, "invalid");
+      durableRepairPlan = schemaRepairPlan(invalid.issues);
+      assert.deepEqual(await Promise.all([
+        claimJobRepair(repairEnvironment, repairParams, originalRepairAttemptId, null, durableRepairPlan),
+        claimJobRepair(repairEnvironment, repairParams, originalRepairAttemptId, null, durableRepairPlan),
+      ]), ["claimed", "claimed"]);
+      assert.equal((await pool.query("SELECT held_micro_usd FROM campaign_budget")).rows[0].held_micro_usd, "2400000",
+        "Concurrent claims must grow the original hold exactly once");
+      assert.equal((await pool.query("SELECT count(*)::int AS count FROM job_repairs WHERE job_id=$1", [repairJobId])).rows[0].count, 1);
+      await assert.rejects(runPaidStage({ ...repairEnvironment, MODEL_BASE_URL: "http://localhost:1/different" }, repairParams,
+        3, "assessment_draft", repairPrompt), { code: "REPAIR_DISPATCH_NOT_ALLOWED" });
+      assert.equal(repairProviderRequests, 1, "Profile drift cannot dispatch a repair");
+      cachedRepairAttemptId = await runPaidStage(repairEnvironment, repairParams, 3, "assessment_draft", repairPrompt);
+      const repaired = await loadStageAttempt(repairEnvironment, cachedRepairAttemptId);
+      assert.equal(repaired.state, "complete");
+      assert.deepEqual(repaired.rawOutput, repairedLedgerDraft);
+      assert.ok(!JSON.stringify(await operatorStatus(repairEnvironment)).includes("private-repaired-draft"), "Status must not disclose drafts");
+    } finally {
+      globalThis.fetch = failureFetch;
+    }
     expected = await ledgerSnapshot(pool);
   } finally {
     await pool.end();
@@ -244,7 +320,7 @@ try {
   compose(["up", "-d", "--wait", "postgres"]);
   const restartedAddress = compose(["port", "postgres", "5432"]).toString().trim();
   await verify(`postgresql://memory_bank:local_only@${restartedAddress}/memory_bank`, expected);
-  console.log("Restart preserved all seven ledger tables, disabled admission, active hold, audit, and replay guards.");
+  console.log("Restart preserved all eight ledger tables, disabled admission, original and repair holds, and cached dispatches.");
 
   // Container replacement is stronger than restart: only the named volume can retain this state.
   compose(["up", "-d", "--wait", "--force-recreate", "postgres"]);
@@ -263,6 +339,70 @@ try {
   restoredConnection.pathname = "/memory_bank_restore";
   await verify(restoredConnection.href, expected);
   console.log("Private backup outside /tmp restored every row, including failure diagnostics; replay added zero provider requests.");
+
+  const expiryPool = new Pool({ connectionString: restoredConnection.href });
+  const expiryEnv = repairEnv(restoredConnection.href);
+  try {
+    await expiryPool.query("UPDATE jobs SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1", [repairJobId]);
+    await expireJobContent(expiryEnv);
+    const expiredAttempts = (await expiryPool.query(
+      "SELECT state,usage,result_json,raw_output,validation_issues FROM model_attempts WHERE job_id=$1 ORDER BY call_index", [repairJobId],
+    )).rows;
+    assert.deepEqual(expiredAttempts.map((row) => [row.state, row.result_json, row.raw_output, row.validation_issues]), [
+      ["invalid", null, null, null], ["complete", null, null, null],
+    ]);
+    assert.ok(expiredAttempts.every((row) => row.usage.reportedCostUsd === 0), "Expiry must retain usage");
+    assert.equal((await expiryPool.query("SELECT plan_json FROM job_repairs WHERE job_id=$1", [repairJobId])).rows[0].plan_json, null);
+    const lateJobId = randomUUID();
+    const lateReservationId = randomUUID();
+    await expiryPool.query(
+      `INSERT INTO jobs(id,request_text,corpus_version,corpus_sha256,stage,assessment_state,expires_at)
+       VALUES($1,'Synthetic late repair','ledger-smoke',repeat('c',64),'drafting','running',now()+interval '1 day')`, [lateJobId],
+    );
+    await expiryPool.query(
+      `INSERT INTO phase_reservations(id,job_id,phase,attempt_no,amount_micro_usd,state)
+       VALUES($1,$2,'assessment',1,600000,'held')`, [lateReservationId, lateJobId],
+    );
+    await expiryPool.query("UPDATE campaign_budget SET held_micro_usd=held_micro_usd+600000 WHERE singleton");
+    await expiryPool.query("UPDATE workflow_control SET active_attempt_id=$1 WHERE singleton", [lateReservationId]);
+    const lateParams = { jobId: lateJobId, attemptId: lateReservationId, phase: "assessment" as const, workflowId: `${lateJobId}-assessment-1` };
+    const failureFetch = globalThis.fetch;
+    let lateCalls = 0;
+    globalThis.fetch = async () => {
+      lateCalls++;
+      assert.ok(lateCalls <= 2, "LATE_REPAIR_REPLAY_FORBIDDEN");
+      if (lateCalls === 2) await expiryPool.query("UPDATE jobs SET created_at=clock_timestamp()-interval '7 days', expires_at=clock_timestamp()-interval '1 second' WHERE id=$1", [lateJobId]);
+      return Response.json({
+        id: `gen-synthetic-late-${lateCalls}`, model: "openai/gpt-6-luna", provider: "OpenAI",
+        choices: [{ finish_reason: "stop", message: { content: JSON.stringify(lateCalls === 1 ? { invalid: true } : repairedLedgerDraft) } }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, ...(lateCalls === 1 ? { cost: 0 } : {}) },
+      });
+    };
+    try {
+      const invalidId = await runPaidStage(expiryEnv, lateParams, 1, "assessment_draft", repairPrompt);
+      const plan = schemaRepairPlan((await loadStageAttempt(expiryEnv, invalidId)).issues);
+      assert.equal(await claimJobRepair(expiryEnv, lateParams, invalidId, null, plan), "claimed");
+      await assert.rejects(runPaidStage(expiryEnv, lateParams, 3, "assessment_draft", repairPrompt),
+        (error: unknown) => error instanceof ReconciliationRequired);
+      await expireJobContent(expiryEnv);
+      const rows = (await expiryPool.query(
+        "SELECT state,usage,result_json,raw_output,validation_issues FROM model_attempts WHERE job_id=$1 ORDER BY call_index", [lateJobId],
+      )).rows;
+      assert.deepEqual(rows.map((row) => [row.state, row.result_json, row.raw_output, row.validation_issues]), [
+        ["invalid", null, null, null], ["uncertain", null, null, null],
+      ]);
+      assert.equal(rows[1].usage.reportedCostUsd, null);
+      assert.equal((await expiryPool.query("SELECT plan_json FROM job_repairs WHERE job_id=$1", [lateJobId])).rows[0].plan_json, null);
+      assert.equal((await expiryPool.query("SELECT active_attempt_id FROM workflow_control")).rows[0].active_attempt_id, lateReservationId);
+      assert.equal((await expiryPool.query("SELECT held_micro_usd FROM campaign_budget")).rows[0].held_micro_usd, "3600000");
+      assert.equal(lateCalls, 2);
+    } finally {
+      globalThis.fetch = failureFetch;
+    }
+    console.log("Expiry scrubbed draft/plan content; late unknown-cost repair stayed uncertain with its hold and control intact.");
+  } finally {
+    await expiryPool.end();
+  }
 } catch (error) {
   console.error(compose(["logs", "--no-color", "postgres"]).toString());
   throw error;

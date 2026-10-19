@@ -21,13 +21,26 @@ export async function expireJobContent(env: Env): Promise<void> {
       `WITH batch AS (
          SELECT a.id FROM model_attempts a
          JOIN jobs j ON j.id = a.job_id
-         WHERE j.expires_at <= clock_timestamp() AND a.result_json IS NOT NULL
+         WHERE j.expires_at <= clock_timestamp()
+           AND (a.result_json IS NOT NULL OR a.raw_output IS NOT NULL OR a.validation_issues IS NOT NULL)
          ORDER BY j.expires_at, a.created_at
          LIMIT 500
          FOR UPDATE OF a SKIP LOCKED
        )
-       UPDATE model_attempts a SET result_json = NULL
+       UPDATE model_attempts a SET result_json = NULL, raw_output = NULL, validation_issues = NULL
        FROM batch WHERE a.id = batch.id`,
+    );
+    await client.query(
+      `WITH batch AS (
+         SELECT r.job_id FROM job_repairs r
+         JOIN jobs j ON j.id = r.job_id
+         WHERE j.expires_at <= clock_timestamp() AND r.plan_json IS NOT NULL
+         ORDER BY j.expires_at, r.created_at
+         LIMIT 100
+         FOR UPDATE OF r SKIP LOCKED
+       )
+       UPDATE job_repairs r SET plan_json = NULL
+       FROM batch WHERE r.job_id = batch.job_id`,
     );
   });
 }

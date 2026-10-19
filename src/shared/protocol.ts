@@ -1,3 +1,4 @@
+import type { OperationCheckKind, OperationKind } from "./operations.ts";
 export type JobKind = "assessment" | "brief";
 export type PhaseState = "not_started" | "queued" | "running" | "ready" | "failed" | "reconciliation_required";
 export type JobStage = "queued" | "assembling" | "drafting" | "reference_check" | "support_review" | "ready" | "failed" | "reconciliation_required";
@@ -57,10 +58,69 @@ export interface ClaimReview {
 }
 
 export type ArtifactRole = "starting_point" | "context_only" | "not_relevant" | "unresolved";
+export interface DecisionCondition {
+  text: string;
+  sourceRefs: SourceRef[];
+  requestQuotes: string[];
+}
+export interface OperationCheck {
+  kind: OperationCheckKind;
+  text: string;
+  sourceRefs: SourceRef[];
+  requestQuotes: string[];
+}
+export interface OperationObligation {
+  claimId: string;
+  requestQuote: string;
+  requirement: string;
+  requiresAdaptation: boolean;
+  checkKind: OperationCheckKind | null;
+  adaptationClaimIds: string[];
+  checkClaimIds: string[];
+}
+export interface ArtifactDecision {
+  disposition: BriefDisposition | null;
+  operation: OperationKind | null;
+  historicalEvidence: SourceRef[];
+  requestQuotes: string[];
+  adaptations: DecisionCondition[];
+  checks: OperationCheck[];
+  obligations: OperationObligation[];
+}
+export interface DecisionReason {
+  target: "history" | "request_constraint" | "adaptation" | "check" | "disposition";
+  explanation: string;
+  sourceRefs: SourceRef[];
+  requestQuotes: string[];
+  claimId?: string;
+  requirement?: string;
+}
+export type EvidenceJudgment = {
+  verdict: "supported";
+  reason: null;
+} | {
+  verdict: "unsupported" | "uncertain";
+  reason: {
+    explanation: string;
+    sourceRefs: SourceRef[];
+    requestQuotes: string[];
+  };
+};
+export type ClaimFinding = { claimId: string } & EvidenceJudgment;
+export interface MissingEvidenceRequest {
+  caseId: string;
+  artifactId: string;
+  claimId: string;
+}
+export type MissingEvidenceReview = EvidenceJudgment & { claimIds: string[] };
 export interface ArtifactReview {
   caseId: string;
   artifactId: string;
+  decision: ArtifactDecision;
+  verdict: SupportVerdict;
+  reasons: DecisionReason[];
   role: ArtifactRole;
+  claimFindings: ClaimFinding[];
 }
 
 export interface ArtifactAssessment {
@@ -92,6 +152,8 @@ export interface Lead {
 
 export interface ComparisonRow {
   caseId: string;
+  artifactId: string;
+  implicationEffect: "checked_decision" | "context_only" | "missing_evidence";
   dimension: "product_version" | "environment" | "scale" | "identity_access" | "recovery_operations";
   requirementClaimId: string | null;
   evidenceClaimId: string;
@@ -111,6 +173,8 @@ export interface NextAction {
 export interface AssessmentResult {
   conclusion: AssessmentConclusion;
   clarifyingClaimIds: string[];
+  missingEvidenceRequests: MissingEvidenceRequest[];
+  missingEvidenceReview: MissingEvidenceReview;
   comparisons: ComparisonRow[];
   requestConstraints: RequestConstraints;
   artifactReviews: ArtifactReview[];

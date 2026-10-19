@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://memory-bank.invalid/contracts/knowledge-record.schema.json",
-  "title": "Human-reviewed decision or lesson",
+  "title": "Reviewed knowledge record or independently source-verified fact",
   "type": "object",
   "allOf": [
     { "$ref": "#/$defs/common" },
@@ -9,23 +9,52 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["kind", "context", "choice"],
+          "required": ["kind", "context", "choice", "reviewStatus", "reviewer", "reviewedAt"],
           "properties": {
             "kind": { "const": "decision" },
             "context": { "$ref": "#/$defs/text" },
             "choice": { "$ref": "#/$defs/text" },
             "recordedRationale": { "$ref": "#/$defs/text" },
-            "recordedRejectedAlternatives": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/text" } }
+            "recordedRejectedAlternatives": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/text" } },
+            "reviewStatus": { "const": "reviewed" },
+            "reviewer": { "$ref": "#/$defs/text" },
+            "reviewedAt": { "type": "string", "format": "date" },
+            "sourceVerifier": false,
+            "sourceVerifiedAt": false,
+            "sourceVerificationMethod": false
           }
         },
         {
           "type": "object",
-          "required": ["kind", "observation", "recommendedFutureAction", "outcomeLimitations"],
+          "required": ["kind", "observation", "recommendedFutureAction", "outcomeLimitations", "reviewStatus", "reviewer", "reviewedAt"],
           "properties": {
             "kind": { "const": "lesson" },
             "observation": { "$ref": "#/$defs/text" },
             "recommendedFutureAction": { "$ref": "#/$defs/text" },
-            "outcomeLimitations": { "$ref": "#/$defs/text" }
+            "outcomeLimitations": { "$ref": "#/$defs/text" },
+            "reviewStatus": { "const": "reviewed" },
+            "reviewer": { "$ref": "#/$defs/text" },
+            "reviewedAt": { "type": "string", "format": "date" },
+            "sourceVerifier": false,
+            "sourceVerifiedAt": false,
+            "sourceVerificationMethod": false
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "assertion", "reviewStatus", "sourceVerifier", "sourceVerifiedAt", "sourceVerificationMethod"],
+          "properties": {
+            "kind": { "const": "source_fact" },
+            "recordId": { "type": "string", "maxLength": 49, "pattern": "^[a-z0-9][a-z0-9-]{0,48}$" },
+            "basis": { "const": "source_fact" },
+            "assertion": { "$ref": "#/$defs/text" },
+            "reviewStatus": { "const": "source_verified" },
+            "sourceVerifier": { "$ref": "#/$defs/text" },
+            "sourceVerifiedAt": { "type": "string", "format": "date" },
+            "sourceVerificationMethod": { "const": "independent_read_only_agent_review" },
+            "supersedesId": false,
+            "reviewer": false,
+            "reviewedAt": false
           }
         }
       ]
@@ -48,16 +77,19 @@
     },
     "common": {
       "type": "object",
-      "required": ["recordId", "caseId", "basis", "applicability", "evidence", "reviewStatus", "reviewer", "reviewedAt"],
+      "required": ["recordId", "caseId", "basis", "applicability", "evidence"],
       "properties": {
         "recordId": { "$ref": "#/$defs/id" },
         "caseId": { "$ref": "#/$defs/id" },
         "basis": { "enum": ["source_fact", "curator_interpretation"] },
         "applicability": { "$ref": "#/$defs/text" },
         "evidence": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/sourceRef" } },
-        "reviewStatus": { "const": "reviewed" },
+        "reviewStatus": { "enum": ["reviewed", "source_verified"] },
         "reviewer": { "$ref": "#/$defs/text" },
         "reviewedAt": { "type": "string", "format": "date" },
+        "sourceVerifier": { "$ref": "#/$defs/text" },
+        "sourceVerifiedAt": { "type": "string", "format": "date" },
+        "sourceVerificationMethod": { "const": "independent_read_only_agent_review" },
         "supersedesId": { "$ref": "#/$defs/id" }
       }
     }

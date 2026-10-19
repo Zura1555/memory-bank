@@ -1,4 +1,4 @@
-import type { BriefDisposition, BriefItem, BriefResult, Claim, KnowledgeCard, PassageView, Selection, SourceRef } from "../shared/protocol.ts";
+import type { AssessmentResult, BriefDisposition, BriefItem, BriefResult, Claim, KnowledgeCard, PassageView, Selection, SourceRef } from "../shared/protocol.ts";
 import { capabilityHash } from "./auth.ts";
 import { EvidenceUnavailable, knowledgeCards, loadCorpus, sourceVersion, type CorpusSnapshot } from "./corpus.ts";
 import { database } from "./db.ts";
@@ -7,6 +7,7 @@ import { HttpFailure } from "./errors.ts";
 import { revalidateAssessment, revalidateBrief, withAssessmentConstraintFloor } from "./gates.ts";
 import { ownedJob, type JobRecord } from "./jobs.ts";
 import { validateSelections } from "./selections.ts";
+import { isSourceHistoryQualification } from "./source-history.ts";
 
 const identity = (ref: { caseId: string; artifactId: string; versionId: string }) => `${ref.caseId}/${ref.artifactId}/${ref.versionId}`;
 const sectionTitles = { reuse: "Reusable material — checked starting point, not production approval", adapt: "Required adaptations — complete before use", verify: "Unresolved verification — BLOCKED, not approved unchanged reuse" } as const;
@@ -43,12 +44,20 @@ export interface StarterPack {
   inventory: PackArtifact[];
   brief: BriefResult;
   blockingQuestions: Claim[];
+  assessmentHistory: Claim[];
   records: KnowledgeCard[];
   evidence: PassageView[];
 }
 // Keep only selected-source claims with their entire checked dependency chain.
-function selectedClaims(claims: Claim[], selected: Set<string>): Claim[] {
+function selectedClaims(claims: Claim[], selected: Set<string>, corpus: CorpusSnapshot): Claim[] {
   const accepted = new Set(claims.filter((claim) => claim.sourceRefs.every((ref) => selected.has(identity(ref)))).map((claim) => claim.claimId));
+  // Required historical qualifications may cite another original in the same
+  // case. Preserve those exact dependency facts, never additional starting work.
+  const byId = new Map(claims.map((claim) => [claim.claimId, claim]));
+  for (const id of accepted) for (const dependency of byId.get(id)!.dependsOnClaimIds) {
+    const claim = byId.get(dependency);
+    if (claim && isSourceHistoryQualification(corpus, claim)) accepted.add(dependency);
+  }
   let changed = true;
   while (changed) {
     changed = false;
@@ -61,6 +70,17 @@ function selectedClaims(claims: Claim[], selected: Set<string>): Claim[] {
   return claims.filter((claim) => accepted.has(claim.claimId));
 }
 
+function assessmentHistoryClaims(assessment: AssessmentResult, selections: Selection[], briefClaims: Claim[], corpus: CorpusSnapshot): Claim[] {
+  const selectedCases = new Set(selections.map((selection) => selection.caseId));
+  const linksByCase = new Map(assessment.cases.filter((item) => selectedCases.has(item.caseId))
+    .map((item) => [item.caseId, new Set(item.claimIds)]));
+  const included = new Set(briefClaims.map((claim) => claim.claimId));
+  return assessment.claims.filter((claim) => {
+    const caseId = claim.sourceRefs[0]?.caseId;
+    return caseId !== undefined && linksByCase.get(caseId)?.has(claim.claimId) && !included.has(claim.claimId)
+      && isSourceHistoryQualification(corpus, claim);
+  });
+}
 export function buildStarterPack(job: JobRecord, corpus: CorpusSnapshot, origin: string): StarterPack {
   if (job.expires_at.getTime() <= Date.now()) throw new HttpFailure(410, "JOB_EXPIRED");
   if (job.stage !== "ready" || job.assessment_state !== "ready" || job.brief_state !== "ready" || !job.assessment_result || !job.brief_result || !job.brief_selections) {
@@ -77,8 +97,8 @@ export function buildStarterPack(job: JobRecord, corpus: CorpusSnapshot, origin:
   const floored = job.brief_result.constraintReviews
     ? { ...job.brief_result, constraintReviews: withAssessmentConstraintFloor(job.brief_result.constraintReviews, assessment, job.request_text) }
     : job.brief_result;
-  const rechecked = revalidateBrief(floored, job.request_text, corpus);
-  const claims = selectedClaims(rechecked.claims, selected);
+  const rechecked = revalidateBrief(floored, job.request_text, corpus, assessment);
+  const claims = selectedClaims(rechecked.claims, selected, corpus);
   const claimIds = new Set(claims.map((claim) => claim.claimId));
   const keep = (items: BriefItem[]) => items.filter((item) => selected.has(identity(item)) && claimIds.has(item.dispositionClaimId) && item.claimIds.every((id) => claimIds.has(id)));
   const reuse = keep(rechecked.reuse), adapt = keep(rechecked.adapt), verify = keep(rechecked.verify);
@@ -88,13 +108,16 @@ export function buildStarterPack(job: JobRecord, corpus: CorpusSnapshot, origin:
     constraintReviews: rechecked.constraintReviews.filter((review) => items.some((item) => identity(item) === identity(review))),
     withheldClaimCount: rechecked.withheldClaimCount + rechecked.claims.length - claims.length,
   };
-  const assessmentClaims = selectedClaims(assessment.claims, selected);
+  // Keep explicitly case-linked historical qualifications separate from item claims.
+  const assessmentHistory = assessmentHistoryClaims(assessment, selections, claims, corpus);
+  const assessmentClaims = selectedClaims(assessment.claims, selected, corpus);
   const assessmentIds = new Set(assessmentClaims.map((claim) => claim.claimId));
   const inventory: PackArtifact[] = selections.map((selection) => {
     const { version, artifact } = sourceVersion(corpus, selection.versionId);
     const item = items.find((candidate) => identity(candidate) === identity(selection));
     const work = assessment.cases.find((candidate) => candidate.caseId === selection.caseId)?.artifactWork.find((candidate) => candidate.artifactId === selection.artifactId);
-    const blockingClaimIds = [...new Set([...(work?.blockerClaimIds ?? []), ...(work?.verificationClaimIds ?? []), ...assessment.clarifyingClaimIds])]
+    const blockingClaimIds = [...new Set([...(work?.blockerClaimIds ?? []), ...(work?.verificationClaimIds ?? []), ...assessment.clarifyingClaimIds,
+      ...assessment.missingEvidenceRequests.filter((item) => item.caseId === selection.caseId && item.artifactId === selection.artifactId).map((item) => item.claimId)])]
       .filter((id) => assessmentIds.has(id) && assessmentClaims.find((claim) => claim.claimId === id)?.sourceRefs.some((ref) => identity(ref) === identity(selection)));
     return {
       ...selection, title: artifact.title, sha256: version.sha256, mimeType: version.mimeType, statedDate: version.statedDate,
@@ -116,7 +139,7 @@ export function buildStarterPack(job: JobRecord, corpus: CorpusSnapshot, origin:
   const blockingQuestions = assessmentClaims.filter((claim) => blockingIds.has(claim.claimId));
   const records = knowledgeCards(corpus).filter((record) => record.evidence.length > 0 && record.evidence.every((ref) => selected.has(identity(ref))));
   const refs = new Map<string, SourceRef>();
-  for (const ref of [...claims.flatMap((claim) => claim.sourceRefs), ...blockingQuestions.flatMap((claim) => claim.sourceRefs), ...records.flatMap((record) => record.evidence)]) refs.set(ref.passageId, ref);
+  for (const ref of [...claims.flatMap((claim) => claim.sourceRefs), ...blockingQuestions.flatMap((claim) => claim.sourceRefs), ...assessmentHistory.flatMap((claim) => claim.sourceRefs), ...records.flatMap((record) => record.evidence)]) refs.set(ref.passageId, ref);
   // Selected passages stay available offline even if their recommendation was withheld.
   for (const selection of selections) for (const passageId of selection.passageIds) refs.set(passageId, { ...selection, passageId });
   const evidence = [...refs.values()].map((ref) => {
@@ -128,7 +151,7 @@ export function buildStarterPack(job: JobRecord, corpus: CorpusSnapshot, origin:
     schemaVersion: 1 as const, fictional: true as const, jobId: job.id,
     createdAt: job.created_at.toISOString(), expiresAt: job.expires_at.toISOString(), request: job.request_text,
     corpus: { version: job.corpus_version, sha256: job.corpus_sha256 },
-    boundaries, inventory, brief, blockingQuestions, records, evidence,
+    boundaries, inventory, brief, blockingQuestions, assessmentHistory, records, evidence,
   };
 }
 
@@ -160,6 +183,7 @@ export function starterPackMarkdown(pack: StarterPack): string {
   lines.push("", `Withheld brief claims: ${pack.brief.withheldClaimCount}. Withheld content is not exported.`);
   renderClaims("Checked brief claims / adaptation and verification checklist", pack.brief.claims);
   renderClaims("Blocking questions and checks — assessment evidence, not resolved by export", pack.blockingQuestions);
+  if (pack.assessmentHistory.length) renderClaims("Checked assessment historical context — case-level only, not selected-procedure history", pack.assessmentHistory);
   lines.push("", "## Reviewed decisions and lessons — context, not automatic applicability");
   for (const record of pack.records) {
     lines.push("", `### ${text(record.recordId)} — ${record.kind}`, `Basis: ${record.basis} · Case: ${text(record.caseId)}`,

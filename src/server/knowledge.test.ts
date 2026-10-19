@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { EvidenceUnavailable, knowledgeCards, loadManifest, modelCorpus, type CorpusManifest, type CorpusSnapshot } from "./corpus.ts";
+import type { KnowledgeCard, KnowledgeRecord } from "../shared/protocol.ts";
 import type { Env } from "./env.ts";
 
 function manifestEnv(manifest: unknown): Env {
@@ -14,10 +15,30 @@ async function publishedManifest(): Promise<CorpusManifest> {
   return (await loadManifest(manifestEnv(value))).manifest;
 }
 
+test("source history records load separately from human knowledge cards", async () => {
+  const manifest = await publishedManifest();
+  const sourceRecords = manifest.cases.flatMap((item) => item.records).filter((record) => record.kind === "source_fact");
+  assert.deepEqual(sourceRecords.map((record) => record.recordId).sort(), [
+    "elm-batch-count-discrepancy",
+    "elm-sandbox-limitations",
+    "ibis-recovery-correction-history",
+  ]);
+  const snapshot: CorpusSnapshot = {
+    manifest,
+    manifestSha256: "a".repeat(64),
+    availableVersions: new Set(manifest.cases.flatMap((item) => item.artifacts.flatMap((artifact) => artifact.versions.map((version) => version.versionId)))),
+    caseAvailability: new Map<string, "available" | "partial" | "unavailable">(manifest.cases.map((item): [string, "available" | "partial" | "unavailable"] => [item.caseId, "available"])),
+    passages: new Map(),
+    versions: new Map(),
+  };
+  const cards: Array<{ kind: string }> = knowledgeCards(snapshot);
+  assert.equal(cards.some((record) => record.kind === "source_fact"), false);
+});
+
 test("superseded advice stays historical even when its correction's original becomes unavailable", async () => {
   const manifest = await publishedManifest();
   const grove = manifest.cases.find((item) => item.caseId === "grove-scoped-access")!;
-  const correction = grove.records.find((item) => item.supersedesId)!;
+  const correction = grove.records.find((item): item is KnowledgeRecord => item.kind !== "source_fact" && item.supersedesId !== undefined)!;
   const checklist = grove.artifacts.find((item) => item.artifactId === "access-checklist")!.versions[0];
   correction.evidence = [{ caseId: grove.caseId, artifactId: "access-checklist", versionId: checklist.versionId, passageId: checklist.passages[0].passageId }];
   const availableVersions = new Set(manifest.cases.flatMap((item) => item.artifacts.flatMap((artifact) => artifact.versions.map((version) => version.versionId))));
@@ -31,7 +52,7 @@ test("superseded advice stays historical even when its correction's original bec
   assert.equal(cards.some((item) => item.recordId === correction.recordId), false);
   assert.equal(cards.find((item) => item.recordId === correction.supersedesId)?.supersededById, correction.recordId);
   const context = modelCorpus(snapshot).find((item) => item.caseId === grove.caseId)!;
-  assert.equal(context.records.find((item) => item.recordId === correction.supersedesId)?.supersededById, correction.recordId);
+  assert.equal(context.records.find((item): item is KnowledgeCard => item.kind !== "source_fact" && item.recordId === correction.supersedesId)?.supersededById, correction.recordId);
 });
 
 test("runtime rejects corrupt knowledge identities, review metadata, and supersession graphs", async () => {
@@ -41,11 +62,11 @@ test("runtime rejects corrupt knowledge identities, review metadata, and superse
     (manifest) => { manifest.cases[4].records[0].evidence[0].artifactId = "request"; },
     (manifest) => { manifest.cases[4].records[0].evidence[0].versionId = "request-2025-01-14"; },
     (manifest) => { manifest.cases[4].records[0].evidence[0].passageId = "missing"; },
-    (manifest) => { manifest.cases[4].records[1].supersedesId = "missing"; },
-    (manifest) => { manifest.cases[4].records[0].supersedesId = manifest.cases[4].records[1].recordId; },
-    (manifest) => { manifest.cases[4].records[2].supersedesId = manifest.cases[4].records[0].recordId; },
+    (manifest) => { Reflect.set(manifest.cases[4].records[1], "supersedesId", "missing"); },
+    (manifest) => { Reflect.set(manifest.cases[4].records[0], "supersedesId", manifest.cases[4].records[1].recordId); },
+    (manifest) => { Reflect.set(manifest.cases[4].records[2], "supersedesId", manifest.cases[4].records[0].recordId); },
     (manifest) => { const records = manifest.cases[4].records; records.push({ ...records[1], recordId: "another-correction" }); },
-    (manifest) => { manifest.cases[4].records[0].reviewedAt = "2026-02-30"; },
+    (manifest) => { Reflect.set(manifest.cases[4].records[0], "reviewedAt", "2026-02-30"); },
     (manifest) => { Reflect.set(manifest.cases[4].records[0], "reviewStatus", "draft"); },
     (manifest) => { manifest.cases[4].artifacts[1].versions[0].extractionStatus = "incomplete"; },
   ];

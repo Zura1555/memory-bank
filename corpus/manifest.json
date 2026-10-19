@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "corpusVersion": "fictional-onboarding-v2",
+  "corpusVersion": "fictional-onboarding-v3",
   "cases": [
     {
       "caseId": "cedar-batch-import",
@@ -15,7 +15,7 @@
           "versions": [
             {
               "versionId": "request-2025-02-03",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/cedar-batch-import/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/cedar-batch-import/request.md",
               "mimeType": "text/markdown",
               "sha256": "583d72848dd4ddae1fd6439f478d68c5f67099d76e5fc07d0715fe0e3e7303c9",
               "statedDate": "2025-02-03",
@@ -94,7 +94,7 @@
           "versions": [
             {
               "versionId": "notes-2025-02-13",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/cedar-batch-import/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/cedar-batch-import/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "da17d7715f7a28de67bbd88090466724b54fd207a11ad179a36e58d925f1925e",
               "statedDate": "2025-02-13",
@@ -183,7 +183,7 @@
           "versions": [
             {
               "versionId": "map-2025-02-11",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/cedar-batch-import/mapping.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/cedar-batch-import/mapping.md",
               "mimeType": "text/markdown",
               "sha256": "7dd4e8ae29cdd878b579364f03207430cfd0e904b7e75eeb01e4f9bfaf09644a",
               "statedDate": "2025-02-11",
@@ -320,7 +320,7 @@
           "versions": [
             {
               "versionId": "request-2025-03-04",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/ash-volume-import/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/ash-volume-import/request.md",
               "mimeType": "text/markdown",
               "sha256": "aa248c70087b3d697bee8d91166dce518e0924d7d84d4b9e19859a85f560a5a1",
               "statedDate": "2025-03-04",
@@ -399,7 +399,7 @@
           "versions": [
             {
               "versionId": "notes-2025-03-18",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/ash-volume-import/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/ash-volume-import/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "5d73a1f91c5f92ffa62fecc4a429d973926c78247cf3dbe00e74fb65ab1a1845",
               "statedDate": "2025-03-18",
@@ -488,7 +488,7 @@
           "versions": [
             {
               "versionId": "draft-2025-03-14",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/ash-volume-import/reconciliation-draft.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/ash-volume-import/reconciliation-draft.md",
               "mimeType": "text/markdown",
               "sha256": "787e00cbed5332befdbb03a0fe32cd45d7530248e145f96565595a71178e7ac5",
               "statedDate": "2025-03-14",
@@ -606,7 +606,42 @@
       "caseId": "elm-bulk-integration",
       "title": "Elm Rentals batch connector",
       "fictional": true,
-      "records": [],
+      "records": [
+        {
+          "kind": "source_fact",
+          "recordId": "elm-batch-count-discrepancy",
+          "caseId": "elm-bulk-integration",
+          "basis": "source_fact",
+          "assertion": "The Elm StayLedger v4 / PaySpring Connect v3 sandbox delivery log reports that the 600-item batch was rejected with no adjustments applied, then split into two 300-item batches; it records four intentionally malformed amounts and says the target returned item-level rejects. The later entry says the second 300-item batch ended with two rejects and the client confirmed 598 of 600 accepted across tests. These statements are unreconciled: retain four malformed amounts, two second-batch rejects, and the 598/600 total as distinct reports. Do not infer that the two rejects explain the malformed amounts or that a reconciled accepted total was verified.",
+          "applicability": "Historical Elm sandbox import run only; the source reports are not reconciled.",
+          "evidence": [
+            { "caseId": "elm-bulk-integration", "artifactId": "delivery-log", "versionId": "notes-2025-04-17", "passageId": "p-f0307a32de54738459c000dce90f00a3" },
+            { "caseId": "elm-bulk-integration", "artifactId": "delivery-log", "versionId": "notes-2025-04-17", "passageId": "p-f8671693077604825e9d0089517cb7e1" }
+          ],
+          "reviewStatus": "source_verified",
+          "sourceVerifier": "CampaignProtocol (agent)",
+          "sourceVerifiedAt": "2026-10-18",
+          "sourceVerificationMethod": "independent_read_only_agent_review"
+        },
+        {
+          "kind": "source_fact",
+          "recordId": "elm-sandbox-limitations",
+          "caseId": "elm-bulk-integration",
+          "basis": "source_fact",
+          "assertion": "Elm evidence is limited to StayLedger v4 / PaySpring Connect v3 sandbox, tested fields, and batches of at most 500 per job. No production test was run, and no production billing result is available. Production authorization and sustained rate-limit behavior are unknown; production delivery acceptance remains pending. No generic retry policy was validated.",
+          "applicability": "Historical Elm sandbox evidence only; it does not establish production readiness or new-tenant compatibility.",
+          "evidence": [
+            { "caseId": "elm-bulk-integration", "artifactId": "delivery-log", "versionId": "notes-2025-04-17", "passageId": "p-21debbf5cf36d783aed25c67591aa425" },
+            { "caseId": "elm-bulk-integration", "artifactId": "delivery-log", "versionId": "notes-2025-04-17", "passageId": "p-f8671693077604825e9d0089517cb7e1" },
+            { "caseId": "elm-bulk-integration", "artifactId": "delivery-log", "versionId": "notes-2025-04-17", "passageId": "p-d686a3f998ca265836120c01fdb30eb2" },
+            { "caseId": "elm-bulk-integration", "artifactId": "batch-adapter-notes", "versionId": "adapter-2025-04-11", "passageId": "p-03a4c5b29fe0071b33bc51422c10c0f2" }
+          ],
+          "reviewStatus": "source_verified",
+          "sourceVerifier": "CampaignProtocol (agent)",
+          "sourceVerifiedAt": "2026-10-18",
+          "sourceVerificationMethod": "independent_read_only_agent_review"
+        }
+      ],
       "artifacts": [
         {
           "artifactId": "request",
@@ -615,7 +650,7 @@
           "versions": [
             {
               "versionId": "request-2025-04-02",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/elm-bulk-integration/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/elm-bulk-integration/request.md",
               "mimeType": "text/markdown",
               "sha256": "6a59eaaea35a276689ce5baaaeddd77d9192dcc5ef97773ae3f6313d29074e2e",
               "statedDate": "2025-04-02",
@@ -684,7 +719,7 @@
           "versions": [
             {
               "versionId": "notes-2025-04-17",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/elm-bulk-integration/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/elm-bulk-integration/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "99fb97424fea9111f745527eff5ccff485adf49e197026a860d6278907553483",
               "statedDate": "2025-04-17",
@@ -773,7 +808,7 @@
           "versions": [
             {
               "versionId": "adapter-2025-04-11",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/elm-bulk-integration/batch-adapter-notes.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/elm-bulk-integration/batch-adapter-notes.md",
               "mimeType": "text/markdown",
               "sha256": "c19a73c1d5f5625be5d7a728e5c6e2bb0f7512e68517f3a9ce6176d619facee2",
               "statedDate": "2025-04-11",
@@ -890,7 +925,7 @@
           "versions": [
             {
               "versionId": "request-2024-11-06",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/finch-legacy-api/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/finch-legacy-api/request.md",
               "mimeType": "text/markdown",
               "sha256": "abe32bb65d4da53491bb22bb777d787e88181c1982b21afc4583690ecef40164",
               "statedDate": "2024-11-06",
@@ -959,7 +994,7 @@
           "versions": [
             {
               "versionId": "notes-2025-05-06",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/finch-legacy-api/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/finch-legacy-api/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "1546fd6c37f9ed86a914d0be185af9ce99934b77ee0f2ba5a0a994cc144bef80",
               "statedDate": "2025-05-06",
@@ -1048,7 +1083,7 @@
           "versions": [
             {
               "versionId": "capabilities-2025-05-02",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/finch-legacy-api/capability-sheet.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/finch-legacy-api/capability-sheet.md",
               "mimeType": "text/markdown",
               "sha256": "b036b02895c33a44d483d39da285d54226a04f6031a0d666cedf5d4dcc73d737",
               "statedDate": "2025-05-02",
@@ -1243,7 +1278,7 @@
           "versions": [
             {
               "versionId": "request-2025-01-14",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/grove-scoped-access/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/grove-scoped-access/request.md",
               "mimeType": "text/markdown",
               "sha256": "d4fe94b9fddd89d451673adf8b7303f3115afa9d3db222833b1cbe68ac7348f1",
               "statedDate": "2025-01-14",
@@ -1312,7 +1347,7 @@
           "versions": [
             {
               "versionId": "notes-2025-01-22",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/grove-scoped-access/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/grove-scoped-access/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "b1c784ecf2e3dad6185f4c372b6e1e3ecaf11fc886a9efb62a24741ac7a769e8",
               "statedDate": "2025-01-22",
@@ -1391,7 +1426,7 @@
           "versions": [
             {
               "versionId": "checklist-2025-01-21",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/grove-scoped-access/access-checklist.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/grove-scoped-access/access-checklist.md",
               "mimeType": "text/markdown",
               "sha256": "fe5d250a888d8cb5228924ef64122daa43355b81d7da0cc09d8917ea489464a5",
               "statedDate": "2025-01-21",
@@ -1518,7 +1553,7 @@
           "versions": [
             {
               "versionId": "request-2025-06-09",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/harbor-offline-access/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/harbor-offline-access/request.md",
               "mimeType": "text/markdown",
               "sha256": "1fc5c1baa49b026e15ec1c343cc89ce861e4bf4733de7876b4e64fb4f3f20c43",
               "statedDate": "2025-06-09",
@@ -1587,7 +1622,7 @@
           "versions": [
             {
               "versionId": "notes-2025-06-16",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/harbor-offline-access/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/harbor-offline-access/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "c600274d89bf8ad1edc7dfab24d272a3af1fb3f4b846022f1c225870b7f2cc00",
               "statedDate": "2025-06-16",
@@ -1666,7 +1701,7 @@
           "versions": [
             {
               "versionId": "inventory-2025-06-16",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/harbor-offline-access/scope-inventory.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/harbor-offline-access/scope-inventory.md",
               "mimeType": "text/markdown",
               "sha256": "03084916ce921724d700755343c887f26dc6a3a4550eb36caec8c0ee947c2864",
               "statedDate": "2025-06-16",
@@ -1784,7 +1819,27 @@
       "caseId": "ibis-verified-handover",
       "title": "Ibis Foods tested handover",
       "fictional": true,
-      "records": [],
+      "records": [
+        {
+          "kind": "source_fact",
+          "recordId": "ibis-recovery-correction-history",
+          "caseId": "ibis-verified-handover",
+          "basis": "source_fact",
+          "assertion": "The Ibis 2025-05-19 first recovery attempt failed because the test archive lacked the prior day's checkpoint. After a corrected test archive was supplied on 2025-05-21, Maya restored the prior checkpoint and replayed one test batch; the target showed that batch once and source/target counts matched. The runbook says not to replay if the checkpoint is missing or the applied state is unclear; the exercise was in test only. Production alert routing, readiness, and recovery outcomes are not established.",
+          "applicability": "Ibis test-environment recovery exercise and supplied test batch only; no production recovery outcome or readiness is established.",
+          "evidence": [
+            { "caseId": "ibis-verified-handover", "artifactId": "delivery-log", "versionId": "notes-2025-05-23", "passageId": "p-dfd36ef4bb4b2aff13569f7e84b7b0d5" },
+            { "caseId": "ibis-verified-handover", "artifactId": "delivery-log", "versionId": "notes-2025-05-23", "passageId": "p-be10ef47b2b36387937fc281e1874201" },
+            { "caseId": "ibis-verified-handover", "artifactId": "delivery-log", "versionId": "notes-2025-05-23", "passageId": "p-18356d39c827604af801be2658c16ea3" },
+            { "caseId": "ibis-verified-handover", "artifactId": "operator-runbook", "versionId": "runbook-2025-05-21", "passageId": "p-f1ee09d99d16cc6f2f3fd50ad47b58be" },
+            { "caseId": "ibis-verified-handover", "artifactId": "operator-runbook", "versionId": "runbook-2025-05-21", "passageId": "p-6e6e4258f362813425bc3cdf99f6b378" }
+          ],
+          "reviewStatus": "source_verified",
+          "sourceVerifier": "CampaignProtocol (agent)",
+          "sourceVerifiedAt": "2026-10-18",
+          "sourceVerificationMethod": "independent_read_only_agent_review"
+        }
+      ],
       "artifacts": [
         {
           "artifactId": "request",
@@ -1793,7 +1848,7 @@
           "versions": [
             {
               "versionId": "request-2025-05-05",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/ibis-verified-handover/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/ibis-verified-handover/request.md",
               "mimeType": "text/markdown",
               "sha256": "4a0df2a6fdf85d169e589ef5eb7467b4ec45be5f748f361ddf0cc70a48f914de",
               "statedDate": "2025-05-05",
@@ -1862,7 +1917,7 @@
           "versions": [
             {
               "versionId": "notes-2025-05-23",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/ibis-verified-handover/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/ibis-verified-handover/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "a2a3c7f9b68929938055ab8330b8a00212aa02d50cbe0d15fc6a3d1f2477bf81",
               "statedDate": "2025-05-23",
@@ -1941,7 +1996,7 @@
           "versions": [
             {
               "versionId": "runbook-2025-05-21",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/ibis-verified-handover/operator-runbook.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/ibis-verified-handover/operator-runbook.md",
               "mimeType": "text/markdown",
               "sha256": "44e00967166b5c8b387e3459308eb8e8916ddaac4996799ed36609848829fdbc",
               "statedDate": "2025-05-21",
@@ -2058,7 +2113,7 @@
           "versions": [
             {
               "versionId": "request-2025-06-02",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/kestrel-pending-handover/request.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/kestrel-pending-handover/request.md",
               "mimeType": "text/markdown",
               "sha256": "28736a2eef83f7e09d019194006d73e82302cb8446baeded86cb78c59a4664cd",
               "statedDate": "2025-06-02",
@@ -2127,7 +2182,7 @@
           "versions": [
             {
               "versionId": "notes-2025-06-11",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/kestrel-pending-handover/delivery-log.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/kestrel-pending-handover/delivery-log.md",
               "mimeType": "text/markdown",
               "sha256": "37724384701fa699bf6209c6ecdad3f8a8e8192edef3b40d165cc7f4f99183b8",
               "statedDate": "2025-06-11",
@@ -2206,7 +2261,7 @@
           "versions": [
             {
               "versionId": "draft-2025-06-05",
-              "sourcePath": "corpora/fictional-onboarding-v2/originals/kestrel-pending-handover/operations-draft.md",
+              "sourcePath": "corpora/fictional-onboarding-v3/originals/kestrel-pending-handover/operations-draft.md",
               "mimeType": "text/markdown",
               "sha256": "772722ba39f9da52b3f9f789a45df65b82a1b1a84319441952a14bbf99cbef16",
               "statedDate": "2025-06-05",

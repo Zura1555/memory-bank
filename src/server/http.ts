@@ -226,7 +226,7 @@ app.get("/api/knowledge", async (c) => {
 app.get("/api/knowledge/:recordId", async (c) => {
   const recordId = checkedRouteId(c.req.param("recordId"), "KNOWLEDGE_NOT_FOUND");
   const corpus = await loadCorpus(c.env);
-  const published = corpus.manifest.cases.flatMap((item) => item.records).find((record) => record.recordId === recordId);
+  const published = corpus.manifest.cases.flatMap((item) => item.records).find((record) => record.kind !== "source_fact" && record.recordId === recordId);
   if (!published) throw new HttpFailure(404, "KNOWLEDGE_NOT_FOUND");
   const card = knowledgeCards(corpus, published.caseId).find((record) => record.recordId === recordId);
   if (!card) throw new EvidenceUnavailable("Knowledge evidence is unavailable.");
