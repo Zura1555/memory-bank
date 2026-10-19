@@ -260,7 +260,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .comparison-table td { background: var(--surface); min-width: 8rem; }
 .comparison-table p { margin-block: .4rem 0; }
 
-/* Assessment Layout & Clarification */
+/* Checked assessment and request conversation */
 .lineage-section {
   padding: var(--space-5);
   border: 1px solid var(--card-border);
@@ -269,20 +269,32 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 .lineage-section summary { cursor: pointer; color: var(--accent); font-weight: 700; }
 .assessment-layout { display: grid; gap: var(--space-6); align-items: start; }
-.current-assessment, .clarification-section { min-width: 0; overflow-wrap: anywhere; }
-.clarification-section {
-  padding: var(--space-5);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-lg);
+.current-assessment { min-width: 0; overflow-wrap: anywhere; }
+.request-messages {
+  display: grid;
+  gap: var(--space-3);
+  list-style: none;
+  padding: 0;
+  margin: var(--space-4) 0;
+}
+.request-message {
+  justify-self: end;
+  width: min(100%, 52rem);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
   background: var(--quiet);
-  box-shadow: var(--shadow-subtle);
+  min-width: 0;
 }
-.clarification-section h3 { font-size: var(--text-title-md); line-height: 1.35; margin-bottom: .6rem; }
-.clarification-form { margin-top: var(--space-4); }
-@media (min-width: 1280px) {
-  .assessment-layout:has(> .clarification-section) { grid-template-columns: minmax(0, 1fr) minmax(17rem, .58fr); }
-  .clarification-section { position: sticky; top: 1rem; max-height: calc(100dvh - 2rem); overflow-y: auto; }
+.request-message .eyebrow { display: block; margin-bottom: var(--space-2); }
+.thread-response {
+  padding-block: var(--space-4);
+  border-top: 1px solid var(--line);
 }
+.thread-response > .eyebrow { color: var(--accent); }
+.follow-up-form { margin-top: var(--space-4); }
+.follow-up-form textarea { width: 100%; resize: vertical; }
+.request-thread .thread-recheck-note { margin-block: var(--space-3); color: var(--muted); }
 
 /* History & Saved Local Library */
 .local-library-header {
@@ -525,11 +537,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .submitted-request h2 { font-size: var(--text-lead); margin-bottom: .3rem; color: var(--accent); }
 .submitted-request h3 { margin: .65rem 0 var(--space-1); font-size: var(--text-detail); letter-spacing: 0; }
 .submitted-request p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; font-size: var(--text-body); }
-.submitted-clarification-box {
-  margin-top: .65rem;
-  padding-top: .65rem;
-  border-top: 1px solid var(--line);
-}
 .job-expiry-line {
   margin: .6rem 0 0;
   font-size: .76rem;
@@ -1352,7 +1359,6 @@ input[type="checkbox"] {
   .evidence-workspace[data-inspecting] .assessment-layout,
   .evidence-workspace[data-inspecting] .step-one-grid,
   .evidence-workspace[data-inspecting] .anduin-overview-grid { grid-template-columns: minmax(0, 1fr); }
-  .evidence-workspace[data-inspecting] .clarification-section { position: static; max-height: none; }
   .evidence-workspace[data-inspecting] .card-grid { grid-template-columns: minmax(0, 1fr); }
   .evidence-workspace[data-inspecting] .source-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

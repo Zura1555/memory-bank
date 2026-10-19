@@ -45,6 +45,7 @@ import { dispositionChanges } from "../src/ui/lineage";
 import { readLocalJobs, writeLocalJobs, reopenedJobMode, type LocalJob } from "../src/ui/local-jobs";
 import { checkedArtifactRefs } from "../src/ui/checked-sources";
 import { isPassage } from "../src/ui/passage";
+import { refinedRequest } from "../src/ui/request-thread";
 import { PrivateUploadsProvider, RequestAttachments, usePrivateUploads } from "./uploads";
 import { SourceLibrary } from "./source-library";
 import type { SourceIndexStatus } from "../src/shared/uploads";
@@ -518,7 +519,7 @@ function AssessmentLineage({ previous, current, inspect }: { previous: PreviousA
   const previousClaims = new Map(previous.assessment.claims.map((claim) => [claim.claimId, claim]));
   const currentClaims = new Map((current?.claims ?? []).map((claim) => [claim.claimId, claim]));
   return <section className="content-section lineage-section" aria-label="Assessment lineage">
-    <h3>Clarification recheck</h3>
+    <h3>What changed after your follow-up</h3>
     <p>Previous selections were cleared. Only the immediately previous checked assessment is retained in this tab, until its original expiry.</p>
     {current ? <><p>Previous conclusion: {label(visibleConclusion(previous.assessment, previousClaims))}. Current conclusion: {label(visibleConclusion(current, currentClaims))}.</p>
       <h4>Supported disposition changes</h4>
@@ -1264,7 +1265,7 @@ function App({ active }: { active: boolean }) {
   const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const [questionAnswers, setQuestionAnswers] = useState("");
-  const [submittedClarification, setSubmittedClarification] = useState<{ context: string; answers: string } | null>(null);
+  const [requestMessages, setRequestMessages] = useState<string[]>([]);
   const [submittingBrief, setSubmittingBrief] = useState(false);
   const [localData, setLocalData] = useState(readBrowserJobs);
   const [library, setLibrary] = useState<"History" | "Saved">("History");
@@ -1413,6 +1414,7 @@ function App({ active }: { active: boolean }) {
         }
         setJob(body);
         setRequest(body.request);
+        setAttachmentIds([]);
         setServiceError(null);
         if (pollMode === "restore") setStep(mode === "brief" ? 4 : 2);
         const currentState = (pollMode === "restore" ? mode : pollMode) === "assessment" ? body.assessmentState : body.briefState;
@@ -1473,14 +1475,20 @@ function App({ active }: { active: boolean }) {
   const selectionsValid = selectedCount > 0 && selections.length === selectedCount && selections.every((selection) => selection.passageIds.length > 0);
 
   async function createAssessment(requestText: string, clarification = false) {
-    const attached = clarification ? [] : attachmentIds;
-    const trimmed = requestText.trim() || (attached.length ? "Use the attached files as the new client's request." : "");
+    const attached = attachmentIds;
+    let trimmed: string;
+    try {
+      trimmed = refinedRequest(requestText.trim() || (attached.length ? "Use the attached files as the new client's request." : ""));
+    } catch (error) {
+      setServiceError((error as Error).message);
+      return;
+    }
     if (!trimmed || submittingRequest || !modelInfo) return;
     if (clarification && job?.assessment && job.assessmentState === "ready" && Date.parse(job.expiresAt) > Date.now()) {
       setPreviousJob({ request: job.request, expiresAt: job.expiresAt, assessment: job.assessment });
     } else if (!clarification) {
       setPreviousJob(null);
-      setSubmittedClarification(null);
+      setRequestMessages([trimmed]);
     }
     sessionGeneration.current += 1;
     pollController.current?.abort();
@@ -1495,10 +1503,6 @@ function App({ active }: { active: boolean }) {
     setRequest(trimmed);
     setQuestionAnswers("");
     setServiceError(null);
-    if (new TextEncoder().encode(trimmed).byteLength > 16 * 1024) {
-      setServiceError("The request and answers must stay within 16 KiB. No new assessment was admitted; previous selections and brief were cleared.");
-      return;
-    }
     const submissionId = ++requestSubmissionId.current;
     requestController.current?.abort();
     const controller = new AbortController();
@@ -1532,7 +1536,6 @@ function App({ active }: { active: boolean }) {
       setQuestionAnswers("");
       setSubmittingBrief(false);
       setSession(result);
-      setAttachmentIds([]);
       changeLocalJobs((entries) => [
         { ...result, label: trimmed.slice(0, 100), saved: entries.find((entry) => entry.jobId === result.jobId)?.saved ?? false },
         ...entries.filter((entry) => entry.jobId !== result.jobId),
@@ -1559,9 +1562,16 @@ function App({ active }: { active: boolean }) {
   async function submitClarifications(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const answers = questionAnswers.trim();
-    if (!answers || submittingRequest) return;
-    setSubmittedClarification({ context: request.trim(), answers });
-    await createAssessment(`${request.trim()}\n\nClarifications supplied by the delivery lead:\n${answers}`, true);
+    if (!answers || rechecking || !modelInfo) return;
+    let updated: string;
+    try {
+      updated = refinedRequest(request, answers);
+    } catch (error) {
+      setServiceError((error as Error).message);
+      return;
+    }
+    setRequestMessages((messages) => [...(messages.length ? messages : [request]), answers]);
+    await createAssessment(updated, true);
   }
 
   function startNewRequest() {
@@ -1574,6 +1584,8 @@ function App({ active }: { active: boolean }) {
     briefController.current = null;
     pollController.current = null;
     setStep(1);
+    setRequest("");
+    setAttachmentIds([]);
     setSession(null);
     setJob(null);
     setPreviousJob(null);
@@ -1581,7 +1593,7 @@ function App({ active }: { active: boolean }) {
     setPollMode(null);
     setWorkDrafts({});
     setQuestionAnswers("");
-    setSubmittedClarification(null);
+    setRequestMessages([]);
     setSubmittingRequest(false);
     setSubmittingBrief(false);
     setServiceError(null);
@@ -1665,8 +1677,6 @@ function App({ active }: { active: boolean }) {
   const briefState = job?.briefState ?? "not_started";
   const assessmentAvailable = assessmentState === "ready" && !!assessment;
   const rechecking = submittingRequest || pollMode === "assessment" || pollMode === "restore";
-  const questions = assessmentAvailable ? assessment : previousJob?.assessment;
-  const questionClaims = assessmentAvailable ? assessmentClaims : new Map((questions?.claims ?? []).map((claim) => [claim.claimId, claim]));
   const selectableWorkChoices = useMemo(() => workChoices.filter(({ availability, item, sourceRefs }) =>
     item.disposition !== null && item.availability !== "unavailable" && (availability === "available" || availability === "partial")
     && claimsFor(item.claimIds, assessmentClaims).length > 0 && sourceRefs.length > 0), [workChoices, assessmentClaims]);
@@ -1735,11 +1745,11 @@ function App({ active }: { active: boolean }) {
         </nav>
 
         {serviceError && <p role="alert" className="notice notice-error">{serviceError}</p>}
-        {step > 1 && (request.trim() || submittedClarification) && <section className="submitted-request" aria-label="Submitted request">
+        {step > 1 && request.trim() && <section className="submitted-request request-thread" aria-labelledby="conversation-title">
           <div className="submitted-request-top">
             <div>
-              <h2>Client request</h2>
-              <p>{submittedClarification?.context ?? request.trim()}</p>
+              <h2 id="conversation-title">Your conversation</h2>
+              <p className="field-hint">Follow-ups refine this request. Only the latest checked findings can be selected.</p>
             </div>
             {session && job && (assessmentAvailable || (job.briefState === "ready" && job.brief)) && (
               <button className="secondary-button" type="button" aria-pressed={localData.entries.some((entry) => entry.jobId === session.jobId && entry.saved)} onClick={toggleSaved}>
@@ -1747,7 +1757,27 @@ function App({ active }: { active: boolean }) {
               </button>
             )}
           </div>
-          {submittedClarification && <div className="submitted-clarification-box"><h3>Submitted clarification</h3><p>{submittedClarification.answers}</p></div>}
+          <ol className="request-messages" aria-label="Request messages">
+            {(requestMessages.length ? requestMessages : [request]).map((message, index) => <li className="request-message" key={index}>
+              <span className="eyebrow">{index === 0 ? "You · initial request" : `You · follow-up ${index}`}</span>
+              <p>{message}</p>
+            </li>)}
+          </ol>
+          {requestMessages.length > 1 && <p className="thread-recheck-note" role="status">Earlier findings are superseded. Previous selections and brief were cleared.</p>}
+          {step === 2 && <div className="thread-response" aria-labelledby="follow-up-title">
+            <p className="eyebrow">Memory Bank · evidence-backed review</p>
+            <h3 id="follow-up-title">{rechecking ? "Checking your request against past work" : assessmentAvailable ? "Checked findings are ready below" : "No current checked findings"}</h3>
+            {assessmentAvailable && <ClaimGroup title="Before you reuse this work" ids={assessment.clarifyingClaimIds} claims={assessmentClaims} inspect={setPassageRef} />}
+            <form className="request-form follow-up-form" onSubmit={submitClarifications}>
+              <label htmlFor="follow-up-message">Follow-up or updated requirements</label>
+              <textarea id="follow-up-message" value={questionAnswers} onChange={(event) => setQuestionAnswers(event.currentTarget.value)} rows={3} maxLength={4000} required disabled={rechecking} aria-describedby="follow-up-hint" placeholder="Answer a question, add a constraint, or correct the scope…" />
+              <p id="follow-up-hint" className="field-hint">Sends the full request and attached text through a fresh evidence check. Earlier results, selections, and brief are superseded. No work is executed.</p>
+              <div className="action-row">
+                <Button className="primary-button" type="submit" disabled={rechecking || !questionAnswers.trim() || !modelInfo}>{rechecking ? "Checking evidence…" : "Send follow-up"}</Button>
+              </div>
+            </form>
+          </div>}
+          {step > 2 && <Button className="secondary-button" type="button" onClick={() => setStep(2)}>Continue conversation</Button>}
           {job && <p className="field-hint job-expiry-line">Expires <time dateTime={job.expiresAt}>{new Date(job.expiresAt).toLocaleString()}</time> (7-day job window · downloaded packs stay on your device).</p>}
         </section>}
         {step > 1 && job && <JobTimings job={job} />}
@@ -1755,12 +1785,12 @@ function App({ active }: { active: boolean }) {
         {step === 1 && active && (
           <div className="step-one-grid">
             <section className="screen request-composer" aria-labelledby="request-title">
-              <div className="composer-heading"><h2 id="request-title">Describe request</h2><TemplatePicker onChoose={setRequest} /></div>
+              <div className="composer-heading"><h2 id="request-title">Start a conversation</h2><TemplatePicker onChoose={setRequest} /></div>
               <form onSubmit={submitRequest} className="request-form">
                 <Field.Root name="request">
                   <Field.Label htmlFor="client-request">Client request <span className="required-star" aria-hidden="true">*</span></Field.Label>
-                  <Field.Description id="request-hint" className="field-hint">Target environment, scale, access requirements, and acceptance criteria. Do not include sensitive personal data.</Field.Description>
-                  <Field.Control render={<textarea id="client-request" aria-describedby="request-hint request-privacy-summary" rows={8} maxLength={6000} required={!attachmentIds.length} placeholder="Enter client onboarding scope and constraints…" />} value={request} onValueChange={setRequest} />
+                  <Field.Description id="request-hint" className="field-hint">Tell us what arrived from the client and what you need to deliver. Add files for context; refine the request with follow-ups after checking. Do not include sensitive personal data.</Field.Description>
+                  <Field.Control render={<textarea id="client-request" aria-describedby="request-hint request-privacy-summary" rows={8} maxLength={6000} required={!attachmentIds.length} placeholder="What past work could help with this client request?" />} value={request} onValueChange={setRequest} />
                   <span className="request-character-count">{request.length.toLocaleString()} / 6,000</span>
                 </Field.Root>
                 <RequestAttachments selected={attachmentIds} onChange={setAttachmentIds} />
@@ -1784,7 +1814,7 @@ function App({ active }: { active: boolean }) {
                 </Popover.Root>
                 {modelInfoError && <p className="notice notice-error" role="alert">Model processing configuration is unavailable. Reload before submitting.</p>}
                 <div className="form-submit-row">
-                  <Button className="primary-button" type="submit" disabled={submittingRequest || (!request.trim() && !attachmentIds.length) || attachmentIds.some((id) => !uploads.sources.some((source) => source.id === id && source.hasText)) || !modelInfo}>{submittingRequest ? "Sending request…" : "Check past examples"}</Button>
+                  <Button className="primary-button" type="submit" disabled={submittingRequest || (!request.trim() && !attachmentIds.length) || attachmentIds.some((id) => !uploads.sources.some((source) => source.id === id && source.hasText)) || !modelInfo}>{submittingRequest ? "Sending request…" : "Send request"}</Button>
                 </div>
               </form>
             </section>
@@ -1921,18 +1951,6 @@ function App({ active }: { active: boolean }) {
               </Tabs.Root>
             )}
             </section>
-            {(assessmentAvailable || submittedClarification) && <aside className="clarification-section" aria-labelledby="clarification-title">
-              <p className="eyebrow">Decision-critical constraints</p>
-              <h3 id="clarification-title">{questions?.clarifyingClaimIds.length ? "Questions that may change which work applies" : "Add or clarify client constraints"}</h3>
-              {!assessmentAvailable && questions && <p className="field-hint">Previous checked questions — not a newly checked answer.</p>}
-              <ClaimGroup title="Checked questions and why they matter" ids={questions?.clarifyingClaimIds ?? []} claims={questionClaims} inspect={setPassageRef} />
-              <form className="request-form clarification-form" onSubmit={submitClarifications}>
-                <label htmlFor="clarification-answers">Client answers <span className="required-star" aria-hidden="true">*</span></label>
-                <textarea id="clarification-answers" value={questionAnswers} onChange={(event) => setQuestionAnswers(event.currentTarget.value)} rows={4} maxLength={4000} disabled={rechecking} aria-describedby="clarification-hint" placeholder="Supply client answers or updated constraints..." />
-                <p id="clarification-hint" className="field-hint">Submitting starts a fresh evidence check and clears current selections.</p>
-                <button className="secondary-button" type="submit" disabled={rechecking || !questionAnswers.trim()}>{rechecking ? "Rechecking…" : "Recheck with these answers"}</button>
-              </form>
-            </aside>}
             </div>
             {previousJob && <AssessmentLineage previous={previousJob} current={assessmentAvailable ? assessment : undefined} inspect={setPassageRef} />}
           </section>
