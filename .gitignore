@@ -13,3 +13,5 @@ postgres-data/
 ingestion/audit.json
 .wrangler/
 .cloudflare/
+.agents/
+skills-lock.json
