@@ -1266,7 +1266,7 @@ function App({ active }: { active: boolean }) {
   const [passageRef, setPassageRef] = useState<SourceRef | null>(null);
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const [questionAnswers, setQuestionAnswers] = useState("");
-  const [requestMessages, setRequestMessages] = useState<string[]>([]);
+  const [requestMessages, setRequestMessages] = useState<{ id: string; text: string }[]>([]);
   const [submittingBrief, setSubmittingBrief] = useState(false);
   const [localData, setLocalData] = useState(readBrowserJobs);
   const [library, setLibrary] = useState<"History" | "Saved">("History");
@@ -1492,7 +1492,7 @@ function App({ active }: { active: boolean }) {
       setPreviousJob({ request: job.request, expiresAt: job.expiresAt, assessment: job.assessment });
     } else if (!clarification) {
       setPreviousJob(null);
-      setRequestMessages([trimmed]);
+      setRequestMessages([{ id: "initial", text: trimmed }]);
     }
     sessionGeneration.current += 1;
     pollController.current?.abort();
@@ -1574,7 +1574,8 @@ function App({ active }: { active: boolean }) {
       setServiceError((error as Error).message);
       return;
     }
-    setRequestMessages((messages) => [...(messages.length ? messages : [request]), answers]);
+    const message = { id: crypto.randomUUID(), text: answers };
+    setRequestMessages((messages) => [...(messages.length ? messages : [{ id: "initial", text: request }]), message]);
     await createAssessment(updated, true);
   }
 
@@ -1762,9 +1763,9 @@ function App({ active }: { active: boolean }) {
             )}
           </div>
           <ol className="request-messages" aria-label="Request messages">
-            {(requestMessages.length ? requestMessages : [request]).map((message, index) => <li className="request-message" key={index}>
+            {(requestMessages.length ? requestMessages : [{ id: "initial", text: request }]).map((message, index) => <li className="request-message" key={message.id}>
               <span className="eyebrow">{index === 0 ? "You · initial request" : `You · follow-up ${index}`}</span>
-              <p>{message}</p>
+              <p>{message.text}</p>
             </li>)}
           </ol>
           {requestMessages.length > 1 && <p className="thread-recheck-note" role="status">Earlier findings are superseded. Previous selections and brief were cleared.</p>}
