@@ -164,11 +164,11 @@ export function PrivateUploadsProvider({ children }: { children: ReactNode }) {
     } catch (failure) { setError(failure instanceof Error ? failure.message : "The URL source could not be saved."); }
     finally { busy.current = false; setUploading(null); }
   }
-  async function detail(id: string, signal?: AbortSignal): Promise<PrivateSourceDetail> {
+  const detail = useCallback(async (id: string, signal?: AbortSignal): Promise<PrivateSourceDetail> => {
     const source = await uploadResponse(await fetch(`/api/uploads/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${tokenRef.current}` }, signal }));
     if (!isPrivateSource(source) || source.id !== id || !("text" in source) || !(source.text === null || typeof source.text === "string")) throw new Error("Private source content could not be verified.");
     return source as PrivateSourceDetail;
-  }
+  }, []);
   async function update(id: string, changes: { caseId?: string | null; notes?: string; previousNotes?: string }): Promise<void> {
     const key = tokenRef.current;
     const source = await uploadResponse(await fetch(`/api/uploads/${encodeURIComponent(id)}`, { method: "PATCH", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify(changes) }));
@@ -240,6 +240,7 @@ export function UploadPicker() {
 
 function AttachmentReview({ source, onBack }: { source: PrivateSource; onBack: () => void }) {
   const library = usePrivateUploads();
+  const { detail: loadDetail, token } = library;
   const [detail, setDetail] = useState<PrivateSourceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -247,13 +248,13 @@ function AttachmentReview({ source, onBack }: { source: PrivateSource; onBack: (
   useEffect(() => {
     const controller = new AbortController();
     setDetail(null); setError(null);
-    void library.detail(source.id, controller.signal).then((value) => {
+    void loadDetail(source.id, controller.signal).then((value) => {
       if (!controller.signal.aborted) setDetail(value);
     }).catch((failure: unknown) => {
       if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "Content could not be retrieved.");
     });
     return () => controller.abort();
-  }, [source.id, source.updatedAt, library.token]);
+  }, [source.id, source.updatedAt, loadDetail, token]);
   return <section className="attachment-review">
     <Button type="button" className="text-button" onClick={onBack}>Back to files</Button>
     <h3 ref={heading} tabIndex={-1}>{source.name}</h3>

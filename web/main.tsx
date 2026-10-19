@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { Dialog } from "@base-ui/react/dialog";
 import { Select } from "@base-ui/react/select";
@@ -591,7 +591,7 @@ function CuratedKnowledge({ caseId, recordId, inspect }: { caseId?: string; reco
         const body: unknown = await response.json();
         const items: unknown = recordId ? [body] : isRecord(body) ? body.records : null;
         if (!Array.isArray(items) || !items.every(isKnowledgeCard)) throw new Error("Invalid knowledge response");
-        setRecords(items);
+        if (!controller.signal.aborted) setRecords(items);
       } catch {
         if (!controller.signal.aborted) setError(true);
       }
@@ -1071,9 +1071,9 @@ function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef;
   const [passage, setPassage] = useState<PassageView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { caseId, artifactId, versionId, passageId } = sourceRef;
 
   useEffect(() => {
-    const passageId = sourceRef.passageId;
     const controller = new AbortController();
     let active = true;
     setPassage(null);
@@ -1086,7 +1086,7 @@ function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef;
       })
       .then((body) => {
         if (!active) return;
-        if (!isPassage(body, sourceRef)) {
+        if (!isPassage(body, { caseId, artifactId, versionId, passageId })) {
           setError("This passage could not be verified as the requested fictional source.");
           return;
         }
@@ -1102,7 +1102,7 @@ function EvidencePassage({ sourceRef, preview = false }: { sourceRef: SourceRef;
       active = false;
       controller.abort();
     };
-  }, [sourceRef.caseId, sourceRef.artifactId, sourceRef.versionId, sourceRef.passageId]);
+  }, [caseId, artifactId, versionId, passageId]);
 
   return (
     <>
@@ -1134,6 +1134,7 @@ function EvidenceWorkspace({ sourceRef, onInspect, children }: {
   const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
   const pane = useRef<HTMLElement>(null);
   const open = sourceRef !== null;
+  const closeInspection = useEffectEvent(() => onInspect(null));
   useEffect(() => {
     const media = window.matchMedia("(min-width: 1280px)");
     const update = () => setDesktop(media.matches);
@@ -1148,7 +1149,7 @@ function EvidenceWorkspace({ sourceRef, onInspect, children }: {
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
-        onInspect(null);
+        closeInspection();
       }
     };
     document.addEventListener("keydown", escape);
@@ -1159,7 +1160,7 @@ function EvidenceWorkspace({ sourceRef, onInspect, children }: {
         opener.focus({ preventScroll: true });
       }
     };
-  }, [sourceRef, desktop, onInspect]);
+  }, [sourceRef, open, desktop]);
   const content = sourceRef && <>
     <p className="field-hint">Inspecting a source does not select work or establish its applicability to this request.</p>
     <p className="record-id">Case {sourceRef.caseId} · Artifact {sourceRef.artifactId} · Retained version {sourceRef.versionId} · Passage {sourceRef.passageId}</p>
@@ -1345,7 +1346,10 @@ function App({ active }: { active: boolean }) {
       document.removeEventListener("visibilitychange", expire);
     };
   }, [session]);
-  useEffect(() => { if (!active) { setPassageRef(null); setHistoryOpen(false); } }, [active]);
+  if (!active && (passageRef !== null || historyOpen)) {
+    setPassageRef(null);
+    setHistoryOpen(false);
+  }
 
   useEffect(() => {
     if (!previousJob) return;
@@ -2007,7 +2011,7 @@ function App({ active }: { active: boolean }) {
                     {kind === "verify" && items.length > 0 && <p className="notice notice-warning">BLOCKED: unresolved checks. Not approved for unchanged reuse or production.</p>}
                     {kind === "adapt" && items.length > 0 && <p className="field-hint">Required adaptations must be completed before use.</p>}
                     {kind === "reuse" && items.length > 0 && <p className="field-hint">Checked reusable starting points only; not production approval.</p>}
-                    {items.length === 0 ? <p className="empty-state">No supported {label(kind).toLowerCase()} items are available.</p> : <div className="card-grid">{items.map((item, index) => <BriefCard key={`${item.caseId}-${item.artifactId}-${index}`} item={item} claims={briefClaims} inspect={setPassageRef} />)}</div>}
+                    {items.length === 0 ? <p className="empty-state">No supported {label(kind).toLowerCase()} items are available.</p> : <div className="card-grid">{items.map((item) => <BriefCard key={`${item.caseId}/${item.artifactId}/${item.versionId}`} item={item} claims={briefClaims} inspect={setPassageRef} />)}</div>}
                   </section>;
                 })}
                 <details className="section-disclosure content-section">
