@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Evidence to reusable work · Memory Bank</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #f4f7fb;
+        --surface: #ffffff;
+        --ink: #162950;
+        --muted: #526277;
+        --accent: #0158ae;
+        --line: #e2e8f0;
+        font-family: Manrope, system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 32px 20px; background: var(--paper); color: var(--ink); }
+      main { max-width: 1120px; margin: 0 auto; }
+      .eyebrow { margin: 0 0 8px; color: var(--muted); font: 500 12px/1.4 "Geist Mono", ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
+      h1 { margin: 0; font: 400 36px/1.1 "Instrument Serif", Georgia, serif; }
+      .intro { margin: 10px 0 24px; color: var(--muted); line-height: 1.55; }
+      .scroll-hint { display: none; color: var(--muted); font-size: 13px; }
+      .diagram { overflow-x: auto; }
+      svg { display: block; width: 100%; min-width: 980px; height: auto; }
+      .lane { fill: #f8fafc; stroke: var(--line); }
+      .lane-label { fill: var(--muted); font: 600 12px Manrope, system-ui, sans-serif; letter-spacing: .08em; }
+      .stage-label { fill: var(--muted); font: 500 10px "Geist Mono", ui-monospace, monospace; letter-spacing: .08em; }
+      .stage-title { fill: var(--ink); font: 600 14px Manrope, system-ui, sans-serif; }
+      .node { fill: var(--surface); stroke: #cbd5e1; stroke-width: 1.5; }
+      .node-title { fill: var(--ink); font: 600 13px Manrope, system-ui, sans-serif; }
+      .node-copy { fill: var(--muted); font: 400 11px Manrope, system-ui, sans-serif; }
+      .focal { fill: #edf5ff; stroke: var(--accent); stroke-width: 2; }
+      .focal-title { fill: var(--accent); }
+      .flow { fill: none; stroke: #738095; stroke-width: 2; marker-end: url(#arrow); }
+      .footer { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+      @media (max-width: 700px) {
+        body { padding: 24px 16px; }
+        h1 { font-size: 30px; }
+        .scroll-hint { display: block; }
+      }
+      @media print {
+        body { padding: 0; }
+        .diagram { overflow: visible; }
+        svg { min-width: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Memory Bank · how it works</p>
+      <h1>Evidence to reusable work</h1>
+      <p class="intro">A delivery lead stays in control while Memory Bank checks past examples and keeps their sources inspectable.</p>
+      <p class="scroll-hint">Scroll horizontally to view all four steps.</p>
+      <div class="diagram">
+        <svg viewBox="0 0 1100 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="workflow-title workflow-desc">
+          <title id="workflow-title">Memory Bank reuse workflow</title>
+          <desc id="workflow-desc">A delivery lead describes a request, Memory Bank checks fictional examples, the lead selects exact evidence, and the app provides an independently checked brief for the lead to review and export.</desc>
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0 0 L8 4 L0 8 Z" fill="#738095" />
+            </marker>
+          </defs>
+          <rect class="lane" x="20" y="112" width="1060" height="112" rx="6" />
+          <rect class="lane" x="20" y="276" width="1060" height="112" rx="6" />
+          <text class="lane-label" x="40" y="174">DELIVERY LEAD</text>
+          <text class="lane-label" x="40" y="338">MEMORY BANK</text>
+          <text class="stage-label" x="280" y="40" text-anchor="middle">STEP 01</text>
+          <text class="stage-title" x="280" y="64" text-anchor="middle">Request</text>
+          <text class="stage-label" x="500" y="40" text-anchor="middle">STEP 02</text>
+          <text class="stage-title" x="500" y="64" text-anchor="middle">Checked examples</text>
+          <text class="stage-label" x="720" y="40" text-anchor="middle">STEP 03</text>
+          <text class="stage-title" x="720" y="64" text-anchor="middle">Selected work</text>
+          <text class="stage-label" x="940" y="40" text-anchor="middle">STEP 04</text>
+          <text class="stage-title" x="940" y="64" text-anchor="middle">Checked brief</text>
+          <path class="flow" d="M374 168 H492 Q500 168 500 176 V292" />
+          <path class="flow" d="M594 332 H712 Q720 332 720 324 V208" />
+          <path class="flow" d="M814 168 H932 Q940 168 940 176 V292" />
+          <path class="flow" d="M940 292 V208" />
+          <text class="node-title" x="202" y="158">Describe the request</text>
+          <text class="node-copy" x="202" y="181">Goal and constraints</text>
+          <rect class="node" x="406" y="296" width="188" height="72" rx="6" />
+          <text class="node-title" x="422" y="322">Check past examples</text>
+          <text class="node-copy" x="422" y="345">Cited, source-linked claims</text>
+          <rect class="node" x="626" y="132" width="188" height="72" rx="6" />
+          <text class="node-title" x="642" y="158">Select evidence</text>
+          <text class="node-copy" x="642" y="181">Artifact, version, passage</text>
+          <rect class="node" x="846" y="296" width="188" height="72" rx="6" />
+          <text class="node-title" x="862" y="322">Draft and check</text>
+          <text class="node-copy" x="862" y="345">Independent claim review</text>
+          <rect class="node focal" x="846" y="132" width="188" height="72" rx="6" />
+          <text class="node-title focal-title" x="862" y="158">Review and export</text>
+          <text class="node-copy" x="862" y="181">Reuse · Adapt · Verify</text>
+          <text class="node-copy" x="550" y="430" text-anchor="middle">The app checks evidence; the delivery lead makes the decision.</text>
+        </svg>
+      </div>
+      <p class="footer">Examples in this demo are fictional. A checked brief is a decision aid, not production approval.</p>
+    </main>
+  </body>
+</html>
