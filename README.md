@@ -1,6 +1,44 @@
 # Memory Bank
 
-An English, evidence-backed reuse guide built from explicitly fictional client-onboarding work. The delivery lead reviews every checked comparison and remains the decision-maker. The dedicated `Zura1555/memory-bank` repository remains private; this repository excludes the planning workspace and `.scratch` files. Production infrastructure is deployed. Owner-authorized paid admission is permitted under the existing budget and reconciliation safeguards; model qualification and public repository release remain separate gates.
+**Turn past project evidence into better reuse decisions.**
+
+Memory Bank helps delivery leads compare a new client request with reviewed examples from fictional projects. Inspect the evidence, choose the work that applies, and create a checked reuse brief. Similarity is not proof; a person reviews every recommendation.
+
+![Memory Bank: request workflow, source library, selected work, and checked brief](docs/images/shell-light-1440.webp)
+
+## How it works
+
+1. **Describe the request** and the constraints that matter.
+2. **Review checked examples** with linked claims and exact source passages.
+3. **Select the relevant work** by artifact, version, and passage.
+4. **Review and export a brief** with evidence-backed next steps.
+
+## The three outcomes
+
+- **Reuse** — evidence supports using the work as-is.
+- **Adapt** — use it as a starting point, with the listed changes and checks.
+- **Verify** — resolve a decision-critical question before using it.
+
+## How it differs from common RAG
+
+A common top-k RAG chat retrieves a few relevant text chunks, then drafts an answer. Memory Bank’s Ask workflow is built around a reviewed reuse decision:
+
+| | Common top-k RAG | Memory Bank Ask |
+| --- | --- | --- |
+| **Context** | A small set of retrieved chunks | The pinned case inventory and its available source passages |
+| **Checks** | Grounding checks depend on the implementation | The server validates exact source references; a separate reviewer checks claim support |
+| **Decision** | The model returns an answer | The lead selects exact artifacts, versions, and passages before the brief is drafted and reviewed |
+
+Memory Bank also offers semantic search in **Sources** for browsing passages. That search does not select evidence for Ask.
+
+Unknowns stay unknown. Every example in this demo is fictional; checked recommendations are not production approval.
+
+**[Open the HTML workflow diagram](docs/hackathon-workflow.html)** · [Local setup and technical notes](#developer-and-operator-notes)
+
+<details id="developer-and-operator-notes">
+<summary>Developer and operator notes</summary>
+
+The sections below retain detailed local setup, qualification, and operations guidance.
 
 ## Local setup
 
@@ -376,3 +414,5 @@ The [qualification report](docs/qualification-2026-10-15.md#remaining-gate-inves
 PR #23 integration verification (2026-10-17) combined PR head `7ab64ca` with main `495a8d5`, then incorporated main's Sources follow-up at `08d2472`, without replacing either workflow wholesale. Typecheck, 37 TypeScript tests, one Python test and the Cloudflare build passed again after that follow-up. Chromium exercised the built client with synthetic API receipts and a retained checked result: shell navigation retained findings, exact artifact/passage selection reached a checked brief, History save/reload/reopen used only a status read, and missing timing remained unavailable. At 320px in dark mode, keyboard entry, labelled disclosures, drawer Escape/focus return and no horizontal overflow passed. The final Sources build also rendered all four provenance labels, explicit retained-version identity, and requested source identity during failed retrieval without a dialog download link, using synthetic presentation fixtures. This is UI replay, not a new Worker/database/model qualification. The integrated candidate needs a new frozen qualification fixed point; fresh, latency, memory and release gates remain open.
 
 Infrastructure deployment is authorized and performed as described above. The owner additionally authorized paid admission on 2026-10-17 under [Paid admission authorization](#paid-admission-authorization); this documentation does not change the live setting or repository visibility. Keep the repository private until the source/secrets review is complete; make it public only under the approved submission plan.
+
+</details>
