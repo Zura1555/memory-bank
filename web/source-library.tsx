@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Button } from "@base-ui/react/button";
 import { Dialog } from "@base-ui/react/dialog";
 import type { PassageView, SourceCatalogEntry, SourceRef } from "../src/shared/protocol";
@@ -10,6 +10,7 @@ import "./sources.css";
 type Resource = { key: string; title: string; caseId: string; group: string; type: string; date: string; status: string; privateSource?: PrivateSource; corpusSource?: SourceCatalogEntry };
 const tabs = ["Overview", "Content", "Related", "Notes", "Activity"] as const;
 type Tab = typeof tabs[number];
+type MapViewport = { caseId: string; left: number; top: number };
 const dateLabel = (date: string) => date ? new Date(date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Not stated";
 function fileLabel(type: string) {
   if (type.includes("pdf")) return "PDF";
@@ -49,6 +50,8 @@ export function SourceLibrary({ sources, indexStatus, inspect, loading, error }:
   const [selected, setSelected] = useState<string | null>(null);
   const [checked, setChecked] = useState<string[]>([]);
   const [tab, setTab] = useState<Tab>("Overview");
+  const [relatedView, setRelatedView] = useState<"list" | "map">("list");
+  const mapViewport = useRef<MapViewport | null>(null);
   const [showUpload, setShowUpload] = useState(false);
   const [pointerMotion, setPointerMotion] = useState(false);
   const [bulkAction, setBulkAction] = useState<{ kind: "delete" | "move"; open: boolean }>({ kind: "move", open: false });
@@ -139,14 +142,14 @@ export function SourceLibrary({ sources, indexStatus, inspect, loading, error }:
       {filtered.length === 0 && !loading && <div className="sources-empty"><Icon name="search" /><h2>{activeFilters ? "No sources found" : "Your library starts here"}</h2><p>{activeFilters ? "Try a different search or clear your filters." : "Add a private file or webpage to inspect its content alongside the public fictional library."}</p><button className="secondary-button" onClick={activeFilters ? reset : () => setShowUpload(true)}>{activeFilters ? "Reset filters" : "Add source"}</button></div>}
       <footer className="sources-library-footer"><Icon name="lock" /><p>Private files and webpages stay separate from the public corpus. Access is through this browser and expires after seven days.</p></footer>
     </div>
-    {current && <aside className="source-detail-panel" ref={detailElement} tabIndex={-1} aria-label="Source details" onKeyDown={(event) => { if (event.key === "Escape" && !(event.target instanceof HTMLTextAreaElement)) { event.stopPropagation(); close(); } }}><SourceDetail key={current.key} resource={current} sources={sources} caseOptions={caseOptions} tab={tab} setTab={setTab} inspect={inspect} close={close} select={select} pointerMotion={pointerMotion} /></aside>}
+    {current && <aside className="source-detail-panel" ref={detailElement} tabIndex={-1} aria-label="Source details" onKeyDown={(event) => { if (event.key === "Escape" && !(event.target instanceof HTMLTextAreaElement)) { event.stopPropagation(); close(); } }}><SourceDetail key={current.key} resource={current} sources={sources} caseOptions={caseOptions} tab={tab} setTab={setTab} relatedView={relatedView} setRelatedView={setRelatedView} mapViewport={mapViewport} inspect={inspect} close={close} select={select} pointerMotion={pointerMotion} /></aside>}
     <Dialog.Root open={showUpload} onOpenChange={setShowUpload}><Dialog.Portal className="source-dialog-portal" data-pointer-motion={pointerMotion || undefined}><Dialog.Backdrop className="evidence-backdrop" /><Dialog.Popup className="source-upload-dialog"><div className="source-modal-heading"><Dialog.Title>Add source</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close upload"><Icon name="close" /></Dialog.Close></div><Dialog.Description className="field-hint">Add a file or public URL to your private, seven-day browser library.</Dialog.Description><UploadPicker /><div className="source-upload-receipts">{library.sources.slice(0, 5).map((source) => <div key={source.id}><FileIcon type={source.mimeType} /><span>{source.name}<small>{(source.size / 1024).toFixed(1)} KiB</small></span><Status value={uploadStateLabels[source.state]} /></div>)}</div></Dialog.Popup></Dialog.Portal></Dialog.Root>
     <Dialog.Root open={bulkAction.open} onOpenChange={(open) => { if (!open && !busy) setBulkAction((current) => ({ ...current, open: false })); }}><Dialog.Portal className="source-dialog-portal" data-pointer-motion={pointerMotion || undefined}><Dialog.Backdrop className="evidence-backdrop" /><Dialog.Popup className="source-upload-dialog"><Dialog.Title>{bulkAction.kind === "delete" ? "Delete selected sources?" : "Move selected sources to a case"}</Dialog.Title><Dialog.Description>{bulkAction.kind === "delete" ? "Originals, extracted text, and notes will be removed. Existing downloaded copies and submitted requests are not deleted." : "This organizes private uploads only. It does not publish them or turn them into checked historical evidence."}</Dialog.Description>{bulkAction.kind === "move" && <label className="source-form-field">Case<select value={targetCase} onChange={(event) => setTargetCase(event.target.value)}><option value="">Unassigned</option>{caseOptions.map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></label>}{actionError && <p className="notice notice-error" role="alert">{actionError}</p>}<div className="source-modal-actions"><button className="secondary-button" disabled={busy} onClick={() => setBulkAction((current) => ({ ...current, open: false }))}>Cancel</button><button className={bulkAction.kind === "delete" ? "secondary-button source-danger" : "primary-button"} disabled={busy || !allPrivate} onClick={() => void runBulk()}>{busy ? "Working…" : bulkAction.kind === "delete" ? "Delete sources" : "Move sources"}</button></div></Dialog.Popup></Dialog.Portal></Dialog.Root>
     <details className="sources-search-disclosure"><summary>Search private source content by meaning</summary><PrivateSourceSearch onSelect={(id) => select(`private:${id}`, "Content")} /></details>
   </section>;
 }
 
-function SourceDetail({ resource, sources, caseOptions, tab, setTab, inspect, close, select, pointerMotion }: { resource: Resource; sources: SourceCatalogEntry[]; caseOptions: [string, string][]; tab: Tab; setTab: (tab: Tab) => void; inspect: (ref: SourceRef) => void; close: () => void; select: (key: string, tab?: Tab) => void; pointerMotion: boolean }) {
+function SourceDetail({ resource, sources, caseOptions, tab, setTab, relatedView, setRelatedView, mapViewport, inspect, close, select, pointerMotion }: { resource: Resource; sources: SourceCatalogEntry[]; caseOptions: [string, string][]; tab: Tab; setTab: (tab: Tab) => void; relatedView: "list" | "map"; setRelatedView: (view: "list" | "map") => void; mapViewport: RefObject<MapViewport | null>; inspect: (ref: SourceRef) => void; close: () => void; select: (key: string, tab?: Tab) => void; pointerMotion: boolean }) {
   const library = usePrivateUploads();
   const { detail: loadDetail, token } = library;
   const [detail, setDetail] = useState<PrivateSourceDetail | null>(null);
@@ -211,7 +214,11 @@ function SourceDetail({ resource, sources, caseOptions, tab, setTab, inspect, cl
         <div className="source-action-row">{privateSource ? <><button className="secondary-button" onClick={() => setTab("Notes")}><Icon name="note" />{privateSource.notes ? "Edit notes" : "Add note"}</button><button className="secondary-button" disabled={processing} onClick={() => { setTargetCase(resource.caseId); setAction({ kind: "move", open: true }); }}><Icon name="move" />Move to case</button><button className="secondary-button source-danger" onClick={() => setAction({ kind: "delete", open: true })}><Icon name="delete" />Delete source</button>{["Pending", "Failed", "Needs review"].includes(resource.status) && <button className="secondary-button" onClick={() => void library.process(privateSource.id)}>Process again</button>}</> : <button className="secondary-button" onClick={openContent} disabled={corpusSource!.availability !== "available"}>Read exact passages</button>}</div>
       </>}
       {tab === "Content" && (privateSource ? detail ? detail.text ? <><p className="source-reading-note">{detail.textKind.replaceAll("_", " ")} · Unreviewed client context, not checked evidence.</p><label className="source-document-search"><Icon name="search" /><span className="visually-hidden">Search in this document</span><input type="search" placeholder="Search in this document…" value={documentQuery} onChange={(event) => setDocumentQuery(event.target.value)} /></label><article className="source-private-content">{documentQuery && !detail.text.toLocaleLowerCase().includes(documentQuery.toLocaleLowerCase()) ? <p role="status">No matching text in this document.</p> : <pre><Highlight text={detail.text} query={documentQuery} /></pre>}</article><a className="primary-button source-use-ask" href="/" onClick={() => window.dispatchEvent(new CustomEvent("memory-bank:attach-source", { detail: privateSource.id }))}>Use reviewed text in Ask</a></> : <p>Extracted content is not ready. The exact original remains available; inspect its status in Overview.</p> : !error && <p role="status">Loading private content…</p> : <CorpusReader source={corpusSource!} inspect={inspect} />)}
-      {tab === "Related" && <><p className="source-reading-note">Other retained sources in this case—not a semantic relevance or evidence-approval claim.</p>{related.length ? <ul className="source-related-list">{related.map((source) => <li key={source.versionId}><button onClick={() => select(`corpus:${source.versionId}`)}><FileIcon type={source.mimeType} /><span><strong>{source.title}</strong><small>{source.versionId}</small></span><Icon name="right" /></button></li>)}</ul> : <p>No related sources have been established{privateSource && !privateSource.caseId ? ". Assign a case to organize this private file alongside its public case documents." : "."}</p>}</>}
+      {tab === "Related" && <>
+        <div className="source-related-heading"><h3>Case connections</h3><div className="source-related-view" role="group" aria-label="Related sources view">{(["list", "map"] as const).map((view) => <button key={view} type="button" aria-pressed={relatedView === view} onClick={() => setRelatedView(view)}>{view === "list" ? "List" : "Map"}</button>)}</div></div>
+        <p className="source-reading-note">Sources grouped by case—not a semantic relevance or evidence-approval claim.</p>
+        {relatedView === "map" && resource.caseId ? <SourceMap resource={resource} related={related} select={select} mapViewport={mapViewport} /> : related.length ? <ul className="source-related-list">{related.map((source) => <li key={source.versionId}><button onClick={() => select(`corpus:${source.versionId}`)}><FileIcon type={source.mimeType} /><span><strong>{source.title}</strong><small>{source.versionId}</small></span><Icon name="right" /></button></li>)}</ul> : <p>No related sources have been established{privateSource && !privateSource.caseId ? ". Assign a case to organize this private file alongside its public case documents." : "."}</p>}
+      </>}
       {tab === "Notes" && (privateSource ? <form className="source-notes-form" onSubmit={(event) => { event.preventDefault(); void save({ notes }); }}><label htmlFor={`${tabId}-notes`}>Private source notes</label><p className="field-hint">Notes share this source’s access and expiry. They are not evidence and are not sent to Ask.</p><textarea id={`${tabId}-notes`} maxLength={4000} value={notes} onChange={(event) => { setNotes(event.target.value); setSaved(false); }} placeholder="Add context, questions, or things to review…" />{notesConflict && <p className="notice notice-warning" role="alert">These notes changed in another tab. Your draft has been kept. Copy it before loading the newer saved notes. <button className="text-button" type="button" onClick={() => { setNotes(savedNotes); setNotesBase(savedNotes); }}>Load latest notes</button></p>}<div><small>{notes.length} / 4,000</small><button className="primary-button" type="submit" disabled={busy || processing || notesConflict || notes === privateSource.notes}>{busy ? "Saving…" : "Save notes"}</button></div>{processing && <p className="field-hint">Notes can be saved once processing finishes.</p>}{saved && <p role="status">Notes saved.</p>}</form> : <p>Public corpus documents are read-only. Notes and case assignment are available for your private sources.</p>)}
       {tab === "Activity" && (privateSource ? <ol className="source-activity-list">{activityRows.map(({ event, key }) => <li key={key}><strong>{uploadStateLabels[event.state]}</strong><time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time><p>{event.message}</p></li>)}</ol> : <><h3>Retained source version</h3><p>{corpusSource!.versionId}</p><p className="field-hint">Source-stated date: {dateLabel(resource.date)}. No upload, author, or processing history is inferred for this curated document.</p><Status value={resource.status} /></>)}
     </div>
@@ -220,6 +227,38 @@ function SourceDetail({ resource, sources, caseOptions, tab, setTab, inspect, cl
       else if (privateSource) { setBusy(true); setError(null); void library.remove(privateSource.id).then(close).catch((failure: unknown) => setError(failure instanceof Error ? failure.message : "The source could not be deleted.")).finally(() => setBusy(false)); }
     }}>{busy ? "Working…" : action.kind === "delete" ? "Delete source" : "Move source"}</button></div></Dialog.Popup></Dialog.Portal></Dialog.Root>
   </>;
+}
+
+function SourceMap({ resource, related, select, mapViewport }: { resource: Resource; related: SourceCatalogEntry[]; select: (key: string, tab?: Tab) => void; mapViewport: RefObject<MapViewport | null> }) {
+  const captionId = useId();
+  const nodes = [...related, ...(resource.corpusSource ? [resource.corpusSource] : [])].sort((a, b) => a.versionId.localeCompare(b.versionId));
+  const rings = Math.max(1, Math.ceil(nodes.length / 6));
+  const size = 360 + (rings - 1) * 280;
+  const height = size + (resource.privateSource && nodes.length ? 120 : 0);
+  const center = size / 2;
+  const positions = nodes.map((source, index) => {
+    const ring = Math.floor(index / 6);
+    const count = Math.min(6, nodes.length - ring * 6);
+    const angle = -Math.PI / 2 + (index % 6) * 2 * Math.PI / count;
+    const radius = 120 + ring * 140;
+    return { key: `corpus:${source.versionId}`, title: source.title, detail: source.versionId, x: center + Math.cos(angle) * radius, y: center + Math.sin(angle) * radius };
+  });
+  if (resource.privateSource) positions.push({ key: resource.key, title: resource.title, detail: "Private upload", x: center, y: nodes.length ? size + 60 : 60 });
+  return <figure className="source-map">
+    <div className="source-map-scroll" role="region" aria-label="Case connection map" aria-describedby={captionId} tabIndex={0}
+      ref={(element) => { const saved = mapViewport.current; if (element && saved?.caseId === resource.caseId) { element.scrollLeft = saved.left; element.scrollTop = saved.top; } }}
+      onScroll={(event) => { mapViewport.current = { caseId: resource.caseId, left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }; }}>
+      <div className="source-map-canvas" style={{ width: size, height }}>
+        <svg width={size} height={height} aria-hidden="true">
+          {Array.from({ length: rings }, (_, ring) => <circle className="source-map-orbit" key={ring} cx={center} cy={center} r={120 + ring * 140} />)}
+          {positions.map((node) => <line key={node.key} className={`source-map-link${node.key.startsWith("private:") ? " is-private" : ""}`} x1={center} y1={center} x2={node.x} y2={node.y} />)}
+        </svg>
+        <div className="source-map-case" style={{ left: center, top: center }} title={resource.group}><span>Case</span><strong>{resource.group}</strong></div>
+        {positions.map((node) => <button key={node.key} type="button" className="source-map-node" style={{ left: node.x, top: node.y }} aria-pressed={node.key === resource.key} aria-label={`${node.title} · ${node.detail}${node.key === resource.key ? " · Current source" : ""}`} title={`${node.title}\n${node.detail}`} onClick={() => select(node.key, "Related")}><span className="source-map-dot" aria-hidden="true" /><strong>{node.title}</strong><small>{node.key === resource.key ? "Current source" : "View source"}{node.key.startsWith("private:") && " · Private"}</small></button>)}
+      </div>
+    </div>
+    <figcaption id={captionId}>Lines mean “belongs to case” only. Select a document to explore it.{resource.privateSource && " The dashed line is a private case assignment, not published evidence."}</figcaption>
+  </figure>;
 }
 
 function Highlight({ text, query }: { text: string; query: string }) {
