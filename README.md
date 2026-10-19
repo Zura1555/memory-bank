@@ -4,6 +4,13 @@
 
 Memory Bank helps delivery leads compare a new client request with reviewed examples from fictional projects. Inspect the evidence, choose the work that applies, and create a checked reuse brief. Similarity is not proof; a person reviews every recommendation.
 
+## Tech stack
+![React](https://img.shields.io/badge/React-61DAFB?style=flat&logo=react&logoColor=111) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white) ![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat&logo=vite&logoColor=white) ![Cloudflare](https://img.shields.io/badge/Cloudflare-F38020?style=flat&logo=cloudflare&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white) ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white)
+
+- **Web:** React + TypeScript with Vite; Hono API on Cloudflare Workers.
+- **Data:** PostgreSQL (Neon in production), R2 for source files, and Cloudflare Queues/Workflows for durable jobs.
+- **AI and corpus:** Configurable LLM endpoints (OpenRouter by default); separate semantic search with Workers AI + Vectorize; Python tools for offline corpus ingestion.
+
 ![Memory Bank: request workflow, source library, selected work, and checked brief](docs/images/shell-light-1440.webp)
 
 ## How it works
