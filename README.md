@@ -19,6 +19,18 @@ Memory Bank helps delivery leads compare a new client request with reviewed exam
 - **Adapt** — use it as a starting point, with the listed changes and checks.
 - **Verify** — resolve a decision-critical question before using it.
 
+## How it differs from common RAG
+
+A common top-k RAG chat retrieves a few relevant text chunks, then drafts an answer. Memory Bank’s Ask workflow is built around a reviewed reuse decision:
+
+| | Common top-k RAG | Memory Bank Ask |
+| --- | --- | --- |
+| **Context** | A small set of retrieved chunks | The pinned case inventory and its available source passages |
+| **Checks** | Grounding checks depend on the implementation | The server validates exact source references; a separate reviewer checks claim support |
+| **Decision** | The model returns an answer | The lead selects exact artifacts, versions, and passages before the brief is drafted and reviewed |
+
+Memory Bank also offers semantic search in **Sources** for browsing passages. That search does not select evidence for Ask.
+
 Unknowns stay unknown. Every example in this demo is fictional; checked recommendations are not production approval.
 
 **[Open the HTML workflow diagram](docs/hackathon-workflow.html)** · [Local setup and technical notes](#developer-and-operator-notes)
